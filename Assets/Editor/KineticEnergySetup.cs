@@ -29,6 +29,10 @@ namespace KineticEnergy.EditorSetup
             InputActionReference fireRef = FindActionReference("Player", "Fire");
             InputActionReference lookRef = FindActionReference("Player", "Look");
             InputActionReference pauseRef = FindActionReference("Player", "Pause");
+            InputActionReference selectGhostRef = FindActionReference("Player", "SelectGhostPreview");
+            InputActionReference selectTrailRef = FindActionReference("Player", "SelectTrailPreview");
+            InputActionReference selectCrosshairRef = FindActionReference("Player", "SelectCrosshairPreview");
+            InputActionReference selectNoneRef = FindActionReference("Player", "SelectNonePreview");
 
             GameObject player = GameObject.Find("Player");
             if (player == null) throw new Exception("KineticEnergySetup: could not find 'Player' GameObject in scene.");
@@ -36,7 +40,7 @@ namespace KineticEnergy.EditorSetup
             GameObject mainCamGo = GameObject.Find("Main Camera");
             if (mainCamGo == null) throw new Exception("KineticEnergySetup: could not find 'Main Camera' GameObject in scene.");
 
-            KineticCubeController controller = BuildPlayerCube(player, moveRef, launchRef, fireRef);
+            KineticCubeController controller = BuildPlayerCube(player, moveRef, launchRef, fireRef, selectGhostRef, selectTrailRef, selectCrosshairRef, selectNoneRef);
             ThirdPersonOrbitCamera orbitCam = BuildCameraRig(mainCamGo, lookRef);
 
             if (!AssetDatabase.IsValidFolder(PrefabFolder))
@@ -55,7 +59,12 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(controller);
             EditorUtility.SetDirty(orbitCam);
 
-            BuildPauseSystem(pauseRef);
+            Text previewModeLabel = BuildPauseSystem(pauseRef);
+
+            // PauseSystem is its own prefab, saved inside BuildPauseSystem - same cross-hierarchy
+            // rule applies, so this wiring happens on the scene instances, after both are saved.
+            controller.landingPreview.modeLabel = previewModeLabel;
+            EditorUtility.SetDirty(controller.landingPreview);
 
             Scene scene = EditorSceneManager.GetActiveScene();
             EditorSceneManager.MarkSceneDirty(scene);
@@ -66,7 +75,8 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: setup complete OK");
         }
 
-        static KineticCubeController BuildPlayerCube(GameObject player, InputActionReference moveRef, InputActionReference launchRef, InputActionReference fireRef)
+        static KineticCubeController BuildPlayerCube(GameObject player, InputActionReference moveRef, InputActionReference launchRef, InputActionReference fireRef,
+            InputActionReference selectGhostRef, InputActionReference selectTrailRef, InputActionReference selectCrosshairRef, InputActionReference selectNoneRef)
         {
             SphereCollider oldCollider = player.GetComponent<SphereCollider>();
             if (oldCollider != null) UnityEngine.Object.DestroyImmediate(oldCollider);
@@ -103,10 +113,21 @@ namespace KineticEnergy.EditorSetup
             controller.aimRotationSpeed = 90f;
             controller.minAimPitch = -80f;
             controller.maxAimPitch = 80f;
+            controller.groundNormalDot = 0.5f;
+            controller.groundLevel = 0f;
+            controller.maxPredictionSteps = 3000;
+            controller.previewLineHeight = 0.65f;
+            controller.restVelocityThreshold = 0.05f;
+            controller.groundCheckDistance = 0.6f;
             controller.moveAction = moveRef;
             controller.launchAction = launchRef;
             controller.fireAction = fireRef;
+            controller.selectGhostAction = selectGhostRef;
+            controller.selectTrailAction = selectTrailRef;
+            controller.selectCrosshairAction = selectCrosshairRef;
+            controller.selectNoneAction = selectNoneRef;
             controller.aimArrow = BuildAimArrow(player.transform);
+            controller.landingPreview = BuildLandingPreview(player.transform);
 
             return controller;
         }
@@ -118,7 +139,7 @@ namespace KineticEnergy.EditorSetup
 
             GameObject arrowRoot = new GameObject("AimArrow");
             arrowRoot.transform.SetParent(parent, false);
-            arrowRoot.transform.localPosition = new Vector3(0f, 0.65f, 0f);
+            arrowRoot.transform.localPosition = Vector3.zero; // spawns from the cube's center, pokes out through whichever face faces the aim direction
 
             GameObject shaftGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
             shaftGo.name = "Shaft";
@@ -148,6 +169,97 @@ namespace KineticEnergy.EditorSetup
             return indicator;
         }
 
+        static LandingPreviewController BuildLandingPreview(Transform parent)
+        {
+            Transform existing = parent.Find("LandingPreview");
+            if (existing != null) UnityEngine.Object.DestroyImmediate(existing.gameObject);
+
+            GameObject root = new GameObject("LandingPreview");
+            root.transform.SetParent(parent, false);
+
+            Color previewColor = new Color(0.4f, 0.9f, 1f, 0.4f);
+            Material ghostMat = new Material(FindBestShader());
+            ghostMat.color = previewColor;
+            MakeTransparent(ghostMat, previewColor.a);
+
+            Material solidMat = new Material(FindBestShader());
+            solidMat.color = new Color(0.4f, 0.9f, 1f, 1f);
+
+            GameObject ghost = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            ghost.name = "GhostCube";
+            ghost.transform.SetParent(root.transform, false);
+            UnityEngine.Object.DestroyImmediate(ghost.GetComponent<Collider>());
+            ghost.GetComponent<Renderer>().sharedMaterial = ghostMat;
+
+            GameObject trail = new GameObject("Trail");
+            trail.transform.SetParent(root.transform, false);
+            Transform[] dots = new Transform[14];
+            for (int i = 0; i < dots.Length; i++)
+            {
+                GameObject dot = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                dot.name = "Dot" + i;
+                dot.transform.SetParent(trail.transform, false);
+                dot.transform.localScale = Vector3.one * 0.15f;
+                UnityEngine.Object.DestroyImmediate(dot.GetComponent<Collider>());
+                dot.GetComponent<Renderer>().sharedMaterial = solidMat;
+                dots[i] = dot.transform;
+            }
+
+            GameObject crosshair = new GameObject("Crosshair");
+            crosshair.transform.SetParent(root.transform, false);
+
+            GameObject barX = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            barX.name = "BarX";
+            barX.transform.SetParent(crosshair.transform, false);
+            UnityEngine.Object.DestroyImmediate(barX.GetComponent<Collider>());
+            barX.transform.localScale = new Vector3(1.2f, 0.08f, 0.15f);
+            barX.transform.localPosition = new Vector3(0f, 0.03f, 0f);
+            barX.GetComponent<Renderer>().sharedMaterial = solidMat;
+
+            GameObject barZ = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            barZ.name = "BarZ";
+            barZ.transform.SetParent(crosshair.transform, false);
+            UnityEngine.Object.DestroyImmediate(barZ.GetComponent<Collider>());
+            barZ.transform.localScale = new Vector3(0.15f, 0.08f, 1.2f);
+            barZ.transform.localPosition = new Vector3(0f, 0.03f, 0f);
+            barZ.GetComponent<Renderer>().sharedMaterial = solidMat;
+
+            ghost.SetActive(false);
+            trail.SetActive(false);
+            crosshair.SetActive(false);
+
+            LandingPreviewController preview = root.AddComponent<LandingPreviewController>();
+            preview.ghostGroup = ghost;
+            preview.ghostGroundOffset = 0.5f; // half the Player cube's height, so it sits ON the floor, not embedded in it
+            preview.trailGroup = trail;
+            preview.crosshairGroup = crosshair;
+            preview.trailDots = dots;
+
+            return preview;
+        }
+
+        // URP Lit/Unlit default to an Opaque surface - alpha is ignored unless the material is
+        // explicitly switched to Transparent via these properties/keywords/render queue (there's
+        // no single "make transparent" call). This is the one visual detail I can't confirm
+        // without Play-mode access - worth a look once this actually runs in the Editor.
+        static void MakeTransparent(Material mat, float alpha)
+        {
+            Color c = mat.color;
+            c.a = alpha;
+            mat.color = c;
+
+            mat.SetFloat("_Surface", 1f);
+            mat.SetFloat("_Blend", 0f);
+            mat.SetOverrideTag("RenderType", "Transparent");
+            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetInt("_ZWrite", 0);
+            mat.DisableKeyword("_ALPHATEST_ON");
+            mat.EnableKeyword("_ALPHABLEND_ON");
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        }
+
         static ThirdPersonOrbitCamera BuildCameraRig(GameObject camGo, InputActionReference lookRef)
         {
             ThirdPersonOrbitCamera orbitCam = camGo.GetComponent<ThirdPersonOrbitCamera>();
@@ -156,7 +268,7 @@ namespace KineticEnergy.EditorSetup
             return orbitCam;
         }
 
-        static void BuildPauseSystem(InputActionReference pauseRef)
+        static Text BuildPauseSystem(InputActionReference pauseRef)
         {
             GameObject root = GameObject.Find("PauseSystem");
             if (root == null) root = new GameObject("PauseSystem");
@@ -185,6 +297,24 @@ namespace KineticEnergy.EditorSetup
             // Rebuild the panels fresh each run rather than patching them in place.
             DestroyChildIfExists(canvasGo.transform, "PausePanel");
             DestroyChildIfExists(canvasGo.transform, "ControlsPanel");
+            DestroyChildIfExists(canvasGo.transform, "PreviewModeLabel");
+
+            // Created before the panels below so it's an earlier sibling and renders BEHIND
+            // them - otherwise this permanent corner label would poke through the pause backdrop.
+            GameObject labelGo = new GameObject("PreviewModeLabel", typeof(RectTransform));
+            labelGo.transform.SetParent(canvasGo.transform, false);
+            RectTransform labelRt = labelGo.GetComponent<RectTransform>();
+            labelRt.anchorMin = new Vector2(0f, 0f);
+            labelRt.anchorMax = new Vector2(0f, 0f);
+            labelRt.pivot = new Vector2(0f, 0f);
+            labelRt.anchoredPosition = new Vector2(24f, 24f);
+            labelRt.sizeDelta = new Vector2(900f, 50f);
+            Text previewModeLabel = labelGo.AddComponent<Text>();
+            previewModeLabel.font = font;
+            previewModeLabel.fontSize = 22;
+            previewModeLabel.alignment = TextAnchor.LowerLeft;
+            previewModeLabel.color = Color.white;
+            previewModeLabel.text = "";
 
             GameObject pausePanel = CreatePanel("PausePanel", canvasGo.transform, backdrop);
             CreateText("Title", pausePanel.transform, "PAUSED", font, 48, new Vector2(0f, 160f), new Vector2(600f, 80f));
@@ -226,6 +356,8 @@ namespace KineticEnergy.EditorSetup
                 AssetDatabase.CreateFolder("Assets", "Prefabs");
             }
             PrefabUtility.SaveAsPrefabAssetAndConnect(root, PrefabFolder + "/PauseSystem.prefab", InteractionMode.AutomatedAction);
+
+            return previewModeLabel;
         }
 
         static void WireButton(GameObject buttonGo, UnityEngine.Events.UnityAction call)

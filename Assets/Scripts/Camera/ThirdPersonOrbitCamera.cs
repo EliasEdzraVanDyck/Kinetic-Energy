@@ -67,7 +67,16 @@ namespace KineticEnergy.Camera
             Vector3 desiredPosition = focusPoint - rotation * Vector3.forward * distance;
 
             transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, positionSmoothTime);
-            transform.rotation = rotation;
+
+            // Look directly at the target from wherever the camera ACTUALLY is, rather than
+            // reusing the theoretical orbit rotation - position lags behind via SmoothDamp, so
+            // during fast stick movement the two used to disagree and the camera briefly didn't
+            // point exactly at the player.
+            Vector3 lookDir = focusPoint - transform.position;
+            if (lookDir.sqrMagnitude > 0.0001f)
+            {
+                transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+            }
         }
     }
 }
