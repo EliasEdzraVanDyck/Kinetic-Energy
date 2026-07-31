@@ -50,6 +50,7 @@ namespace KineticEnergy.Camera
         void LateUpdate()
         {
             if (target == null) return;
+            if (Time.timeScale <= 0f) return;
 
             Vector2 look = lookAction != null && lookAction.action != null
                 ? lookAction.action.ReadValue<Vector2>()
@@ -59,6 +60,8 @@ namespace KineticEnergy.Camera
             float pitchDelta = (invertY ? look.y : -look.y) * rotationSpeed * Time.deltaTime;
             pitch = Mathf.Clamp(pitch + pitchDelta, minPitch, maxPitch);
 
+            // Traditional 3rd-person platformer orbit: position swings around the target on
+            // both yaw and pitch, always framing it, rather than tilting/panning in place.
             Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
             Vector3 focusPoint = target.position + Vector3.up * height;
             Vector3 desiredPosition = focusPoint - rotation * Vector3.forward * distance;

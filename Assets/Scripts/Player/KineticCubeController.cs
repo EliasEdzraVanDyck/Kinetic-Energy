@@ -7,23 +7,29 @@ namespace KineticEnergy.Player
     public class KineticCubeController : MonoBehaviour
     {
         [Header("Launch Force")]
-        public float minLaunchForce = 4f;
-        public float maxLaunchForce = 20f;
+        public float minLaunchForce = 8f;
+        public float maxLaunchForce = 40f;
         public float maxChargeTime = 1.5f;
 
         [Header("Aiming")]
         [Range(0f, 1f)] public float aimDeadzone = 0.15f;
+        public float aimRotationSpeed = 90f;
+        public float minAimPitch = -80f;
+        public float maxAimPitch = 80f;
         public Transform cameraTransform;
         public AimArrowIndicator aimArrow;
 
         [Header("Input")]
         public InputActionReference moveAction;
         public InputActionReference launchAction;
+        public InputActionReference fireAction;
 
         Rigidbody rb;
         bool isAiming;
+        bool waitingForLtRelease;
         float chargeTime;
-        Vector3 aimDirection = Vector3.forward;
+        float aimYaw;
+        float aimPitch;
 
         bool launchQueued;
         Vector3 queuedDirection;
@@ -38,25 +44,39 @@ namespace KineticEnergy.Player
         {
             moveAction?.action?.Enable();
             launchAction?.action?.Enable();
+            fireAction?.action?.Enable();
         }
 
         void OnDisable()
         {
             moveAction?.action?.Disable();
             launchAction?.action?.Disable();
+            fireAction?.action?.Disable();
         }
 
         void Update()
         {
-            bool held = launchAction != null && launchAction.action != null && launchAction.action.IsPressed();
+            // Time.timeScale freezes deltaTime-scaled logic (like charge accumulation) for free,
+            // but not this raw edge-detected input - without this guard, aiming/firing could
+            // still start or complete while the pause menu is up.
+            if (Time.timeScale <= 0f) return;
 
-            if (held)
+            bool ltHeld = launchAction != null && launchAction.action != null && launchAction.action.IsPressed();
+
+            // One-shot-per-hold: once a launch fires, LT must be fully released before it can gate another.
+            if (waitingForLtRelease)
+            {
+                if (!ltHeld) waitingForLtRelease = false;
+                return;
+            }
+
+            if (ltHeld)
             {
                 if (!isAiming)
                 {
                     isAiming = true;
                     chargeTime = 0f;
-                    aimDirection = FlattenedForward(cameraTransform);
+                    SeedAimFromCamera();
                     aimArrow?.SetVisible(true);
                 }
 
@@ -68,17 +88,30 @@ namespace KineticEnergy.Player
 
                 if (stick.sqrMagnitude > aimDeadzone * aimDeadzone)
                 {
-                    aimDirection = CameraRelativeDirection(stick);
+                    aimYaw = Mathf.Repeat(aimYaw + stick.x * aimRotationSpeed * Time.deltaTime, 360f);
+                    aimPitch = Mathf.Clamp(aimPitch - stick.y * aimRotationSpeed * Time.deltaTime, minAimPitch, maxAimPitch);
                 }
 
-                aimArrow?.SetAim(aimDirection, ChargeFraction());
+                Vector3 dir = AimDirection();
+                aimArrow?.SetAim(dir, ChargeFraction());
+
+                bool rtPressed = fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
+                if (rtPressed)
+                {
+                    queuedDirection = dir;
+                    queuedForce = Mathf.Lerp(minLaunchForce, maxLaunchForce, ChargeFraction());
+                    launchQueued = true;
+
+                    isAiming = false;
+                    chargeTime = 0f;
+                    aimArrow?.SetVisible(false);
+                    waitingForLtRelease = true;
+                }
             }
             else if (isAiming)
             {
+                // LT released without firing - cancel, no launch.
                 isAiming = false;
-                queuedDirection = aimDirection;
-                queuedForce = Mathf.Lerp(minLaunchForce, maxLaunchForce, ChargeFraction());
-                launchQueued = true;
                 chargeTime = 0f;
                 aimArrow?.SetVisible(false);
             }
@@ -98,28 +131,24 @@ namespace KineticEnergy.Player
             return maxChargeTime > 0f ? Mathf.Clamp01(chargeTime / maxChargeTime) : 1f;
         }
 
-        Vector3 CameraRelativeDirection(Vector2 stick)
+        Vector3 AimDirection()
         {
-            Vector3 forward = FlattenedForward(cameraTransform);
-            Vector3 right = FlattenedRight(cameraTransform);
-            Vector3 dir = forward * stick.y + right * stick.x;
-            return dir.sqrMagnitude > 0.0001f ? dir.normalized : aimDirection;
+            return Quaternion.Euler(aimPitch, aimYaw, 0f) * Vector3.forward;
         }
 
-        static Vector3 FlattenedForward(Transform cam)
+        void SeedAimFromCamera()
         {
-            if (cam == null) return Vector3.forward;
-            Vector3 f = cam.forward;
-            f.y = 0f;
-            return f.sqrMagnitude > 0.0001f ? f.normalized : Vector3.forward;
-        }
+            if (cameraTransform == null)
+            {
+                aimYaw = 0f;
+                aimPitch = 0f;
+                return;
+            }
 
-        static Vector3 FlattenedRight(Transform cam)
-        {
-            if (cam == null) return Vector3.right;
-            Vector3 r = cam.right;
-            r.y = 0f;
-            return r.sqrMagnitude > 0.0001f ? r.normalized : Vector3.right;
+            Vector3 euler = cameraTransform.eulerAngles;
+            aimYaw = euler.y;
+            float rawPitch = euler.x > 180f ? euler.x - 360f : euler.x;
+            aimPitch = Mathf.Clamp(rawPitch, minAimPitch, maxAimPitch);
         }
     }
 }
