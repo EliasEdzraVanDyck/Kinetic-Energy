@@ -60,11 +60,6 @@ namespace KineticEnergy.Player
 
         public PredictionMode CurrentMode => currentMode;
 
-        void Start()
-        {
-            UpdateLabel();
-        }
-
         public void SetVisible(bool visible)
         {
             isVisible = visible;
@@ -77,7 +72,6 @@ namespace KineticEnergy.Player
 
             currentMode = mode;
             ApplyModeVisibility();
-            UpdateLabel();
         }
 
         // trajectory/trajectoryCount: the actual simulated arc (see KineticCubeController.
@@ -224,14 +218,6 @@ namespace KineticEnergy.Player
             ghostGroup?.SetActive(isVisible && currentMode == PredictionMode.Ghost && hasLanding);
             trailGroup?.SetActive(isVisible && currentMode == PredictionMode.Trail);
             crosshairGroup?.SetActive(isVisible && currentMode == PredictionMode.Crosshair && hasLanding);
-        }
-
-        void UpdateLabel()
-        {
-            if (modeLabel == null) return;
-            modeLabel.text = ghostAndCrosshairEnabled
-                ? $"West: Ghost   North: Trail   East: Crosshair   South: None   (current: {currentMode})"
-                : $"North: Trail   South: None   (current: {currentMode})";
         }
     }
 }

@@ -4,13 +4,34 @@ using UnityEngine.SceneManagement;
 
 namespace KineticEnergy.Player
 {
+    public enum ControlScheme
+    {
+        LaunchInstantly, // West: LT aims+charges over time together, RT press = instant launch (the original system)
+        HoldRelease,     // North: LT aims only, RT held charges over time, RT release = launch
+        AnalogPressure   // East: LT aims only, charge directly tracks RT's analog pressure, RT release = launch
+    }
+
     [RequireComponent(typeof(Rigidbody))]
     public class KineticCubeController : MonoBehaviour
     {
         [Header("Launch Force")]
-        public float minLaunchForce = 6f;
-        public float maxLaunchForce = 28f;
+        public float minLaunchForce = 8.6f;
+        public float maxLaunchForce = 40f;
         public float maxChargeTime = 1.5f;
+
+        // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
+        // punchier-feeling launch, but a faster exit speed alone would also fly further - linear
+        // drag isn't a fixed fraction of distance, it eats proportionally MORE of a slow shot's
+        // range than a fast one's, so a single constant damping value can't keep both ends of the
+        // charge range landing where they used to. Verified empirically (not guessed) with a
+        // temporary real-physics batch simulation at a representative 30-degree launch angle:
+        // matching the OLD min-force(6)/damping(0.25) baseline distance (~2.84) at the NEW,
+        // scaled-up min force (~8.6) needed damping ~1.9, while matching the OLD max-force(28)
+        // baseline (~46.0) at the new max force (40) needed only ~0.65. Interpolated by charge
+        // fraction at launch time (same curve minLaunchForce/maxLaunchForce already use) so both
+        // ends of the charge range land close to their old distances despite the higher exit speed.
+        public float minLaunchDamping = 1.9f;
+        public float maxLaunchDamping = 0.65f;
 
         [Header("Aiming")]
         [Range(0f, 1f)] public float aimDeadzone = 0.15f;
@@ -45,9 +66,14 @@ namespace KineticEnergy.Player
         public InputActionReference moveAction;
         public InputActionReference launchAction;
         public InputActionReference fireAction;
-        public InputActionReference selectGhostAction;
-        public InputActionReference selectTrailAction;
-        public InputActionReference selectCrosshairAction;
+        // Bound to the same West/North/East gamepad buttons as the old SelectGhostPreview/
+        // SelectTrailPreview/SelectCrosshairPreview actions (unrenamed in the .inputactions asset
+        // itself - purely a labeling mismatch, not a functional one) - repurposed here to select
+        // the control scheme instead of the visual preview mode, since Ghost/Crosshair preview
+        // modes are currently disabled anyway (see LandingPreviewController.ghostAndCrosshairEnabled).
+        public InputActionReference selectClassicSchemeAction;
+        public InputActionReference selectHoldReleaseSchemeAction;
+        public InputActionReference selectAnalogSchemeAction;
         public InputActionReference selectNoneAction;
 
         Rigidbody rb;
@@ -59,10 +85,13 @@ namespace KineticEnergy.Player
         float chargeTime;
         float aimYaw;
         float aimPitch;
+        ControlScheme controlScheme = ControlScheme.LaunchInstantly;
+        float lastRtAnalogValue;
 
         bool launchQueued;
         Vector3 queuedDirection;
         float queuedForce;
+        float queuedDamping;
         float launchGraceTimer;
 
         Vector3[] trajectoryBuffer;
@@ -84,6 +113,11 @@ namespace KineticEnergy.Player
             trajectoryBuffer = new Vector3[Mathf.Max(maxPredictionSteps, 1)];
         }
 
+        void Start()
+        {
+            UpdateSchemeLabel();
+        }
+
         void OnDestroy()
         {
             if (predictionClone != null) Destroy(predictionClone);
@@ -95,9 +129,9 @@ namespace KineticEnergy.Player
             moveAction?.action?.Enable();
             launchAction?.action?.Enable();
             fireAction?.action?.Enable();
-            selectGhostAction?.action?.Enable();
-            selectTrailAction?.action?.Enable();
-            selectCrosshairAction?.action?.Enable();
+            selectClassicSchemeAction?.action?.Enable();
+            selectHoldReleaseSchemeAction?.action?.Enable();
+            selectAnalogSchemeAction?.action?.Enable();
             selectNoneAction?.action?.Enable();
         }
 
@@ -106,9 +140,9 @@ namespace KineticEnergy.Player
             moveAction?.action?.Disable();
             launchAction?.action?.Disable();
             fireAction?.action?.Disable();
-            selectGhostAction?.action?.Disable();
-            selectTrailAction?.action?.Disable();
-            selectCrosshairAction?.action?.Disable();
+            selectClassicSchemeAction?.action?.Disable();
+            selectHoldReleaseSchemeAction?.action?.Disable();
+            selectAnalogSchemeAction?.action?.Disable();
             selectNoneAction?.action?.Disable();
         }
 
@@ -148,24 +182,54 @@ namespace KineticEnergy.Player
                 {
                     isAiming = true;
                     chargeTime = 0f;
+                    lastRtAnalogValue = 0f;
                     SeedAimFromCamera();
                     aimArrow?.SetVisible(true);
                     landingPreview?.SetVisible(true);
                 }
 
-                // LT alone just aims - direction is always adjustable while it's held, with no
-                // time pressure. RT is now the separate charge/launch trigger: hold it to build
-                // up power (same charge curve as before, just gated on RT instead of running
-                // automatically the whole time LT is held), release it to fire at whatever power
-                // had accumulated at that instant. Charge intentionally isn't reset while RT is
-                // up - it holds at its last value so the release frame (RT no longer "pressed",
-                // but WasReleasedThisFrame catches that exact transition) still sees the power
-                // level the player actually released at, not zero.
                 bool rtHeld = fireAction != null && fireAction.action != null && fireAction.action.IsPressed();
-                if (rtHeld)
+                bool rtPressed = fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
+                bool rtReleased = fireAction != null && fireAction.action != null && fireAction.action.WasReleasedThisFrame();
+                float rtAnalogValue = fireAction != null && fireAction.action != null ? fireAction.action.ReadValue<float>() : 0f;
+
+                bool launchNow;
+
+                switch (controlScheme)
                 {
-                    chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime);
+                    case ControlScheme.LaunchInstantly:
+                        // The original system: LT alone both aims and charges over time for as
+                        // long as it's held. RT is a single instant-fire press using whatever
+                        // charge has built up so far.
+                        chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime);
+                        launchNow = rtPressed;
+                        break;
+
+                    case ControlScheme.AnalogPressure:
+                        // LT only aims. Charge directly tracks how hard RT is CURRENTLY pressed
+                        // (no ramp-up time) rather than building up over time, so the arrow/power
+                        // preview responds live to trigger pressure. lastRtAnalogValue (this
+                        // frame's reading, captured at the end of this block for use next frame)
+                        // is used instead of this frame's own rtAnalogValue when computing the
+                        // launch, because on the exact frame WasReleasedThisFrame fires, IsPressed
+                        // has already gone false and the raw analog value can already be partway
+                        // through the trigger's physical return to rest - using the prior frame's
+                        // value (while it was still genuinely held) reflects the power level the
+                        // player actually intended to release at.
+                        chargeTime = Mathf.Clamp01(rtHeld ? rtAnalogValue : lastRtAnalogValue) * maxChargeTime;
+                        launchNow = rtReleased;
+                        break;
+
+                    default: // HoldRelease
+                        // LT only aims. RT is a separate hold-to-charge/release-to-launch
+                        // trigger: charge builds over time only while RT is held, and firing
+                        // happens on release, using whatever charge had accumulated by then.
+                        if (rtHeld) chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime);
+                        launchNow = rtReleased;
+                        break;
                 }
+
+                lastRtAnalogValue = rtAnalogValue;
 
                 Vector2 stick = moveAction != null && moveAction.action != null
                     ? moveAction.action.ReadValue<Vector2>()
@@ -182,13 +246,17 @@ namespace KineticEnergy.Player
                 aimArrow?.SetAim(dir, chargeFraction);
 
                 float previewForce = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
+                // Interpolated the same way as force - see the Launch Force header comment for
+                // why a single constant damping can't keep both ends of the charge range landing
+                // where they used to once exit speed went up.
+                float previewDamping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
 
                 // Computed unconditionally (not just when a visual is active) so it can always
                 // be cached below and compared against where the cube actually lands - see
                 // OnCollisionEnter's LandingCheck log.
                 Vector3 initialVelocity = rb.linearVelocity + dir * previewForce / rb.mass;
                 Vector3 lineStart = transform.position + Vector3.up * previewLineHeight;
-                Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, out int stepCount, out bool didLand);
+                Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, previewDamping, out int stepCount, out bool didLand);
                 lastPredictedLanding = landingPoint;
                 hasPredictedLanding = true;
 
@@ -197,11 +265,11 @@ namespace KineticEnergy.Player
                     landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand);
                 }
 
-                bool rtReleased = fireAction != null && fireAction.action != null && fireAction.action.WasReleasedThisFrame();
-                if (rtReleased)
+                if (launchNow)
                 {
                     queuedDirection = dir;
                     queuedForce = previewForce;
+                    queuedDamping = previewDamping;
                     launchQueued = true;
                     hasLaunched = true;
 
@@ -227,6 +295,7 @@ namespace KineticEnergy.Player
             if (launchQueued)
             {
                 launchQueued = false;
+                rb.linearDamping = queuedDamping;
                 rb.AddForce(queuedDirection * queuedForce, ForceMode.Impulse);
                 launchGraceTimer = launchGraceDuration;
             }
@@ -297,26 +366,39 @@ namespace KineticEnergy.Player
             return false;
         }
 
+        // West/North/East now pick the control scheme (see ControlScheme) rather than the
+        // visual preview mode - Ghost/Crosshair preview modes are disabled anyway (see
+        // LandingPreviewController.ghostAndCrosshairEnabled), so those buttons were free to
+        // repurpose. South still works the way it always did: toggle the trail preview on/off,
+        // just switching between Trail and None now instead of being a one-way hide, since
+        // nothing else is left to bring it back otherwise.
         void HandlePreviewModeSwitch()
         {
-            if (landingPreview == null) return;
+            if (selectClassicSchemeAction != null && selectClassicSchemeAction.action != null && selectClassicSchemeAction.action.WasPressedThisFrame())
+            {
+                controlScheme = ControlScheme.LaunchInstantly;
+                UpdateSchemeLabel();
+            }
+            else if (selectHoldReleaseSchemeAction != null && selectHoldReleaseSchemeAction.action != null && selectHoldReleaseSchemeAction.action.WasPressedThisFrame())
+            {
+                controlScheme = ControlScheme.HoldRelease;
+                UpdateSchemeLabel();
+            }
+            else if (selectAnalogSchemeAction != null && selectAnalogSchemeAction.action != null && selectAnalogSchemeAction.action.WasPressedThisFrame())
+            {
+                controlScheme = ControlScheme.AnalogPressure;
+                UpdateSchemeLabel();
+            }
+            else if (selectNoneAction != null && selectNoneAction.action != null && selectNoneAction.action.WasPressedThisFrame() && landingPreview != null)
+            {
+                landingPreview.SetMode(landingPreview.CurrentMode == PredictionMode.None ? PredictionMode.Trail : PredictionMode.None);
+            }
+        }
 
-            if (selectGhostAction != null && selectGhostAction.action != null && selectGhostAction.action.WasPressedThisFrame())
-            {
-                landingPreview.SetMode(PredictionMode.Ghost);
-            }
-            else if (selectTrailAction != null && selectTrailAction.action != null && selectTrailAction.action.WasPressedThisFrame())
-            {
-                landingPreview.SetMode(PredictionMode.Trail);
-            }
-            else if (selectCrosshairAction != null && selectCrosshairAction.action != null && selectCrosshairAction.action.WasPressedThisFrame())
-            {
-                landingPreview.SetMode(PredictionMode.Crosshair);
-            }
-            else if (selectNoneAction != null && selectNoneAction.action != null && selectNoneAction.action.WasPressedThisFrame())
-            {
-                landingPreview.SetMode(PredictionMode.None);
-            }
+        void UpdateSchemeLabel()
+        {
+            if (landingPreview == null || landingPreview.modeLabel == null) return;
+            landingPreview.modeLabel.text = $"West: Launch Instantly   North: Hold-Release   East: Analog   South: Show/Hide   (scheme: {controlScheme})";
         }
 
         // Runs the ACTUAL Unity physics engine on a hidden stand-in Rigidbody, fast-forwarded
@@ -327,9 +409,16 @@ namespace KineticEnergy.Player
         // exact internal drag/integration formula wasn't converging. Using the real engine for
         // both is accurate by construction: there's no formula to get subtly wrong, since it's
         // the same code path that will actually move the cube.
-        Vector3 PredictLandingPoint(Vector3 startPos, Vector3 initialVelocity, out int stepCount, out bool didLand)
+        Vector3 PredictLandingPoint(Vector3 startPos, Vector3 initialVelocity, float damping, out int stepCount, out bool didLand)
         {
             EnsurePredictionClone();
+
+            // Damping now varies by charge level (see the Launch Force header comment) - set
+            // fresh every call to match whatever shot is currently being aimed, rather than the
+            // one-time copy EnsurePredictionClone used to take at clone-creation time, which
+            // would otherwise leave every prediction using whatever damping happened to be
+            // current the first time this level's clone was built.
+            predictionRb.linearDamping = damping;
 
             // Started slightly above startPos, not exactly on it - teleporting straight onto
             // the platform's surface can register as a fresh contact the moment simulation

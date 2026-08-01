@@ -183,6 +183,7 @@ namespace KineticEnergy.EditorSetup
             generator.minHeightDifference = -1.5f;
             generator.maxHeightDifference = 2f;
             generator.platformColor = new Color(0.5f, 0.5f, 0.55f);
+            generator.platformMaterial = AssetDatabase.LoadAssetAtPath<Material>("Assets/CheckeredFloor.mat");
             generator.finishPadColor = new Color(0.2f, 1f, 0.5f, 0.45f);
             generator.finishText = "Finish";
             generator.finishTextHeight = 2.5f;
@@ -290,8 +291,10 @@ namespace KineticEnergy.EditorSetup
             // loads, so relying on the initializer alone silently keeps stale numbers on every
             // re-run of this script after the first. This intentionally means re-running Setup()
             // always resets these to the current code-defined defaults.
-            controller.minLaunchForce = 6f;
-            controller.maxLaunchForce = 28f;
+            controller.minLaunchForce = 8.6f;
+            controller.maxLaunchForce = 40f;
+            controller.minLaunchDamping = 1.9f;
+            controller.maxLaunchDamping = 0.65f;
             controller.maxChargeTime = 1.5f;
             controller.aimDeadzone = 0.15f;
             controller.aimRotationSpeed = 90f;
@@ -307,9 +310,9 @@ namespace KineticEnergy.EditorSetup
             controller.moveAction = moveRef;
             controller.launchAction = launchRef;
             controller.fireAction = fireRef;
-            controller.selectGhostAction = selectGhostRef;
-            controller.selectTrailAction = selectTrailRef;
-            controller.selectCrosshairAction = selectCrosshairRef;
+            controller.selectClassicSchemeAction = selectGhostRef;
+            controller.selectHoldReleaseSchemeAction = selectTrailRef;
+            controller.selectAnalogSchemeAction = selectCrosshairRef;
             controller.selectNoneAction = selectNoneRef;
             controller.aimArrow = BuildAimArrow(player.transform);
             controller.landingPreview = BuildLandingPreview(player.transform);

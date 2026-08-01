@@ -12,6 +12,10 @@ namespace KineticEnergy.Level
         public float maxHorizontalDistance = 13f;
         public float minHeightDifference = -1.5f;
         public float maxHeightDifference = 2f;
+        // Wired by KineticEnergySetup to Assets/CheckeredFloor.mat - the same material asset
+        // Sandbox Scene's own floor uses, shared (not cloned) so both surfaces genuinely match.
+        // platformColor is a fallback only used if this is ever left unassigned.
+        public Material platformMaterial;
         public Color platformColor = new Color(0.5f, 0.5f, 0.55f);
 
         [Header("Finish")]
@@ -137,7 +141,7 @@ namespace KineticEnergy.Level
             platform.transform.SetParent(transform, true);
             platform.transform.position = position;
             platform.transform.localScale = platformSize;
-            platform.GetComponent<Renderer>().sharedMaterial = BuildMaterial(platformColor, false);
+            platform.GetComponent<Renderer>().sharedMaterial = platformMaterial != null ? platformMaterial : BuildMaterial(platformColor, false);
 
             if (isFinish) BuildFinishPad(position);
         }

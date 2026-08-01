@@ -426,23 +426,9 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
-    - target: {fileID: 2527952674533155508, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
+    - target: {fileID: 602897069268867311, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
       propertyPath: m_FontData.m_MaxSize
       value: 48
-      objectReference: {fileID: 0}
-    - target: {fileID: 4721916804374321250, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
-      propertyPath: m_Text
-      value: 'Left Stick - Aim while charging
-
-        Right Stick - Camera
-
-        Left
-        Trigger (hold) - Charge Launch
-
-        Right Trigger - Fire
-
-        Start
-        / Options / Esc - Pause'
       objectReference: {fileID: 0}
     - target: {fileID: 4825106313107946991, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
       propertyPath: m_LocalPosition.x
@@ -484,11 +470,25 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 5072874460647837360, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
+      propertyPath: m_Text
+      value: 'Left Stick - Aim while charging
+
+        Right Stick - Camera
+
+        Left
+        Trigger (hold) - Charge Launch
+
+        Right Trigger - Fire
+
+        Start
+        / Options / Esc - Pause'
+      objectReference: {fileID: 0}
     - target: {fileID: 5764693580097056317, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
       propertyPath: m_Name
       value: PauseSystem
       objectReference: {fileID: 0}
-    - target: {fileID: 7170924730158231115, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
+    - target: {fileID: 6016853069751852507, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
       propertyPath: m_FontData.m_MaxSize
       value: 48
       objectReference: {fileID: 0}
@@ -499,7 +499,7 @@ PrefabInstance:
   m_SourcePrefab: {fileID: 100100000, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
 --- !u!114 &454737589641727720 stripped
 MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 2918461798884822529, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
+  m_CorrespondingSourceObject: {fileID: 70551772946970952, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
   m_PrefabInstance: {fileID: 454737589641727719}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 0}
@@ -516,6 +516,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 1334114192381763923, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
+      propertyPath: modeLabel
+      value: 
+      objectReference: {fileID: 454737589641727720}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: cameraTransform
       value: 
@@ -524,10 +528,6 @@ PrefabInstance:
       propertyPath: m_Name
       value: Player
       objectReference: {fileID: 0}
-    - target: {fileID: 4958141143437917632, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
-      propertyPath: modeLabel
-      value: 
-      objectReference: {fileID: 454737589641727720}
     - target: {fileID: 8270566695329813433, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
