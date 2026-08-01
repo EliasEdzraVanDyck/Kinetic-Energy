@@ -11,14 +11,42 @@ using UnityEngine.UI;
 using KineticEnergy.Player;
 using KineticEnergy.Camera;
 using KineticEnergy.UI;
+using KineticEnergy.Level;
 
 namespace KineticEnergy.EditorSetup
 {
     public static class KineticEnergySetup
     {
-        const string ScenePath = "Assets/Scenes/SampleScene.unity";
+        const string OldScenePath = "Assets/Scenes/SampleScene.unity";
+        const string ScenePath = "Assets/Scenes/Sandbox Scene.unity";
+        const string Level1ScenePath = "Assets/Scenes/Level1.unity";
+        const string VolumeProfilePath = "Assets/Settings/SampleSceneProfile.asset";
         const string ActionsPath = "Assets/InputSystem_Actions.inputactions";
         const string PrefabFolder = "Assets/Prefabs";
+
+        public static void SetupAll()
+        {
+            RenameSandboxSceneIfNeeded();
+            Setup();
+            SetupLevel1();
+            UpdateBuildSettings();
+
+            Debug.Log("KineticEnergySetup: SetupAll complete OK");
+        }
+
+        static void RenameSandboxSceneIfNeeded()
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(OldScenePath) == null) return;
+
+            string error = AssetDatabase.RenameAsset(OldScenePath, "Sandbox Scene");
+            if (!string.IsNullOrEmpty(error))
+            {
+                throw new Exception($"KineticEnergySetup: failed to rename SampleScene.unity - {error}");
+            }
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+        }
 
         public static void Setup()
         {
@@ -75,6 +103,162 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: setup complete OK");
         }
 
+        static void SetupLevel1()
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(Level1ScenePath) == null)
+            {
+                // Copy Sandbox Scene as the starting point instead of NewScene(EmptyScene) - a
+                // scene created empty starts with NONE of Unity's environment setup (no skybox,
+                // flat default ambient), which is what "feels like different lighting"/"URP
+                // assets are off" actually was. Copying guarantees identical RenderSettings,
+                // LightmapSettings, etc. by construction, rather than trying to replicate every
+                // relevant field by hand and risking missing one.
+                if (!AssetDatabase.CopyAsset(ScenePath, Level1ScenePath))
+                {
+                    throw new Exception("KineticEnergySetup: failed to copy Sandbox Scene to create Level1.");
+                }
+            }
+
+            EditorSceneManager.OpenScene(Level1ScenePath, OpenSceneMode.Single);
+
+            BuildDirectionalLight(); // no-ops if the copy already brought one in, which it will have
+            BuildGlobalVolume();
+
+            GameObject playerAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/Player.prefab");
+            GameObject cameraAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/ThirdPersonCameraRig.prefab");
+            GameObject pauseAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PauseSystem.prefab");
+            if (playerAsset == null || cameraAsset == null || pauseAsset == null)
+            {
+                throw new Exception("KineticEnergySetup: Level1 needs Player/ThirdPersonCameraRig/PauseSystem prefabs - run Setup() (part of SetupAll) first.");
+            }
+
+            // Rebuilt fresh every run rather than patched in place, same as everything else in this
+            // file. Plane is Sandbox Scene's flat floor, copied in along with everything else -
+            // Level1 is platforms only, no floor.
+            // Both camera names are destroyed deliberately: SaveAsPrefabAssetAndConnect
+            // apparently named the saved PREFAB ASSET's root after the asset file
+            // ("ThirdPersonCameraRig"), not the original scene object ("Main Camera") it was
+            // saved from - Sandbox Scene's own instance kept the "Main Camera" override so
+            // Setup() never noticed, but every instance freshly instantiated FROM the asset
+            // (every one ever added here) comes out named "ThirdPersonCameraRig". Searching for
+            // only "Main Camera" matched nothing, every single run, so old instances were never
+            // actually destroyed - only ever added to. This is what actually produced the "4
+            // cameras" (really "1 correctly-named ghost + N never-found ThirdPersonCameraRigs").
+            DestroyIfExists("Player");
+            DestroyIfExists("Main Camera");
+            DestroyIfExists("ThirdPersonCameraRig");
+            DestroyIfExists("PauseSystem");
+            DestroyIfExists("LevelGenerator");
+            DestroyIfExists("Plane");
+
+            GameObject playerGo = (GameObject)PrefabUtility.InstantiatePrefab(playerAsset);
+            GameObject camGo = (GameObject)PrefabUtility.InstantiatePrefab(cameraAsset);
+            GameObject pauseGo = (GameObject)PrefabUtility.InstantiatePrefab(pauseAsset);
+
+            KineticCubeController controller = playerGo.GetComponent<KineticCubeController>();
+            ThirdPersonOrbitCamera orbitCam = camGo.GetComponent<ThirdPersonOrbitCamera>();
+
+            // Same cross-hierarchy wiring as Setup() does for Sandbox Scene, but these are plain
+            // prefab instances (not being re-saved as prefab assets here), so it can just be
+            // assigned directly - the "save both assets first" rule only applies when the
+            // instance itself is about to be captured back into a .prefab file.
+            controller.cameraTransform = camGo.transform;
+            orbitCam.target = playerGo.transform;
+
+            Text modeLabel = pauseGo.transform.Find("PauseCanvas/PreviewModeLabel")?.GetComponent<Text>();
+            controller.landingPreview.modeLabel = modeLabel;
+
+            EditorUtility.SetDirty(controller);
+            EditorUtility.SetDirty(orbitCam);
+            EditorUtility.SetDirty(controller.landingPreview);
+
+            GameObject generatorGo = new GameObject("LevelGenerator");
+            LevelGenerator generator = generatorGo.AddComponent<LevelGenerator>();
+            generator.player = playerGo.transform;
+            generator.cameraTransform = camGo.transform;
+            generator.platformCount = 9;
+            generator.platformSize = new Vector3(3f, 0.5f, 3f);
+            generator.minHorizontalDistance = 7f;
+            generator.maxHorizontalDistance = 13f;
+            generator.minHeightDifference = -1.5f;
+            generator.maxHeightDifference = 2f;
+            generator.platformColor = new Color(0.5f, 0.5f, 0.55f);
+            generator.finishPadColor = new Color(0.2f, 1f, 0.5f, 0.45f);
+            generator.finishText = "Finish";
+            generator.finishTextHeight = 2.5f;
+            generator.finishTextColor = new Color(0.15f, 0.45f, 1f); // vivid blue - contrast via color, not a backing plate
+            generator.finishFontSize = 48;
+            generator.finishCharacterSize = 0.2f;
+            generator.safetyFloorMargin = 8f;
+            // Widened alongside the larger horizontal-distance range above - worst-case cumulative
+            // drift over platformCount-1 steps scales with maxHorizontalDistance, and needs to
+            // stay comfortably inside the floor's half-extent (safetyFloorSize / 2) or a shot far
+            // out toward the edge of a heavily-drifted layout could miss the safety net entirely.
+            generator.safetyFloorSize = 260f;
+
+            Scene level1Scene = EditorSceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(level1Scene);
+            EditorSceneManager.SaveScene(level1Scene);
+
+            Debug.Log("KineticEnergySetup: Level1 setup complete OK");
+        }
+
+        static void BuildDirectionalLight()
+        {
+            if (GameObject.Find("Directional Light") != null) return;
+
+            GameObject lightGo = new GameObject("Directional Light");
+            lightGo.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+            Light light = lightGo.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.intensity = 2f;
+            light.shadows = LightShadows.Soft;
+        }
+
+        static void BuildGlobalVolume()
+        {
+            if (GameObject.Find("Global Volume") != null) return;
+
+            GameObject volumeGo = new GameObject("Global Volume");
+            UnityEngine.Rendering.Volume volume = volumeGo.AddComponent<UnityEngine.Rendering.Volume>();
+            volume.isGlobal = true;
+
+            UnityEngine.Rendering.VolumeProfile profile = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.VolumeProfile>(VolumeProfilePath);
+            if (profile != null) volume.sharedProfile = profile;
+        }
+
+        static void DestroyIfExists(string name)
+        {
+            // Loop, not a single Find+Destroy - GameObject.Find only ever returns ONE match,
+            // so if duplicates ever accumulate (as happened with the camera rig - 4 instances
+            // found in Level1.unity, while Player/PauseSystem/LevelGenerator each stayed at a
+            // correct 1), a single-shot destroy silently leaves the rest behind and the count
+            // never actually goes back to zero on a re-run. This converges to zero regardless
+            // of however many are actually present.
+            int destroyed = 0;
+            GameObject go;
+            while ((go = GameObject.Find(name)) != null)
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+                destroyed++;
+                if (destroyed > 50)
+                {
+                    Debug.LogError($"KineticEnergySetup: DestroyIfExists('{name}') aborted after 50 - Find() keeps returning a live object after Destroy.");
+                    break;
+                }
+            }
+            if (destroyed > 1) Debug.LogWarning($"KineticEnergySetup: DestroyIfExists('{name}') removed {destroyed} accumulated duplicates - expected at most 1.");
+        }
+
+        static void UpdateBuildSettings()
+        {
+            EditorBuildSettings.scenes = new[]
+            {
+                new EditorBuildSettingsScene(ScenePath, true),
+                new EditorBuildSettingsScene(Level1ScenePath, true)
+            };
+        }
+
         static KineticCubeController BuildPlayerCube(GameObject player, InputActionReference moveRef, InputActionReference launchRef, InputActionReference fireRef,
             InputActionReference selectGhostRef, InputActionReference selectTrailRef, InputActionReference selectCrosshairRef, InputActionReference selectNoneRef)
         {
@@ -106,19 +290,20 @@ namespace KineticEnergy.EditorSetup
             // loads, so relying on the initializer alone silently keeps stale numbers on every
             // re-run of this script after the first. This intentionally means re-running Setup()
             // always resets these to the current code-defined defaults.
-            controller.minLaunchForce = 8f;
-            controller.maxLaunchForce = 40f;
+            controller.minLaunchForce = 6f;
+            controller.maxLaunchForce = 28f;
             controller.maxChargeTime = 1.5f;
             controller.aimDeadzone = 0.15f;
             controller.aimRotationSpeed = 90f;
             controller.minAimPitch = -80f;
             controller.maxAimPitch = 80f;
+            controller.defaultAimPitch = 20f;
             controller.groundNormalDot = 0.5f;
-            controller.groundLevel = 0f;
             controller.maxPredictionSteps = 3000;
             controller.previewLineHeight = 0.65f;
             controller.restVelocityThreshold = 0.05f;
             controller.groundCheckDistance = 0.6f;
+            controller.fallResetY = -30f;
             controller.moveAction = moveRef;
             controller.launchAction = launchRef;
             controller.fireAction = fireRef;
@@ -156,6 +341,7 @@ namespace KineticEnergy.EditorSetup
             Material arrowMat = new Material(FindBestShader());
             Color arrowColor = new Color(1f, 0.85f, 0.1f);
             arrowMat.color = arrowColor;
+            arrowMat = SaveMaterialAsset(arrowMat, "AimArrowMaterial");
             shaftGo.GetComponent<Renderer>().sharedMaterial = arrowMat;
             headGo.GetComponent<Renderer>().sharedMaterial = arrowMat;
 
@@ -181,9 +367,11 @@ namespace KineticEnergy.EditorSetup
             Material ghostMat = new Material(FindBestShader());
             ghostMat.color = previewColor;
             MakeTransparent(ghostMat, previewColor.a);
+            ghostMat = SaveMaterialAsset(ghostMat, "GhostPreviewMaterial");
 
             Material solidMat = new Material(FindBestShader());
             solidMat.color = new Color(0.4f, 0.9f, 1f, 1f);
+            solidMat = SaveMaterialAsset(solidMat, "PreviewSolidMaterial");
 
             GameObject ghost = GameObject.CreatePrimitive(PrimitiveType.Cube);
             ghost.name = "GhostCube";
@@ -193,7 +381,11 @@ namespace KineticEnergy.EditorSetup
 
             GameObject trail = new GameObject("Trail");
             trail.transform.SetParent(root.transform, false);
-            Transform[] dots = new Transform[14];
+            // Pool sized for the longest realistic shot (near max force/charge) at roughly
+            // maxDotSpacing apart; LandingPreviewController activates only as many of these as
+            // the actual predicted arc length needs each frame, so short shots just use a
+            // fraction of the pool instead of stretching 14 dots across a long gap.
+            Transform[] dots = new Transform[60];
             for (int i = 0; i < dots.Length; i++)
             {
                 GameObject dot = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -230,10 +422,15 @@ namespace KineticEnergy.EditorSetup
 
             LandingPreviewController preview = root.AddComponent<LandingPreviewController>();
             preview.ghostGroup = ghost;
-            preview.ghostGroundOffset = 0.5f; // half the Player cube's height, so it sits ON the floor, not embedded in it
+            preview.ghostGroundOffset = 0f; // PredictLandingPoint now returns the cube's own rest-center (BoxCast-based), already correct with no offset
+            preview.markerGroundOffset = -0.5f; // crosshair marks the ground surface, half a cube-height below that center
             preview.trailGroup = trail;
             preview.crosshairGroup = crosshair;
             preview.trailDots = dots;
+            preview.maxDotSpacing = 1f;
+            preview.positionSmoothTime = 0.05f;
+            preview.snapDistance = 25f;
+            preview.ghostAndCrosshairEnabled = false;
 
             return preview;
         }
@@ -242,6 +439,10 @@ namespace KineticEnergy.EditorSetup
         // explicitly switched to Transparent via these properties/keywords/render queue (there's
         // no single "make transparent" call). This is the one visual detail I can't confirm
         // without Play-mode access - worth a look once this actually runs in the Editor.
+        // _ALPHABLEND_ON is the BUILT-IN RENDER PIPELINE's Standard-shader keyword, not URP's -
+        // requesting it on a URP shader asks for a keyword/property combination with no matching
+        // compiled variant, which is exactly what renders as Unity's pink/magenta error material.
+        // URP's actual surface-type keyword is _SURFACE_TYPE_TRANSPARENT.
         static void MakeTransparent(Material mat, float alpha)
         {
             Color c = mat.color;
@@ -250,13 +451,15 @@ namespace KineticEnergy.EditorSetup
 
             mat.SetFloat("_Surface", 1f);
             mat.SetFloat("_Blend", 0f);
+            mat.SetFloat("_AlphaClip", 0f);
             mat.SetOverrideTag("RenderType", "Transparent");
             mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
             mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
             mat.SetInt("_ZWrite", 0);
             mat.DisableKeyword("_ALPHATEST_ON");
-            mat.EnableKeyword("_ALPHABLEND_ON");
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            mat.DisableKeyword("_ALPHAMODULATE_ON");
             mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
         }
 
@@ -457,6 +660,39 @@ namespace KineticEnergy.EditorSetup
             text.fontStyle = FontStyle.Bold;
 
             return go;
+        }
+
+        const string MaterialFolder = "Assets/Materials";
+
+        // The actual root cause behind "looks pink": a Material created via `new Material(...)`
+        // and assigned to a renderer is a loose, non-persistent object - PrefabUtility does NOT
+        // automatically embed it as a sub-asset when the GameObject is saved as a prefab (unlike
+        // an already-asset-backed reference, e.g. the Player's own Yellow.mat), so the renderer's
+        // material slot silently serializes as null ({fileID: 0}) and Unity renders it with its
+        // built-in missing-material fallback, which IS pink. Every dynamically-created 3D material
+        // in this file needs to go through this to actually survive a save. (LevelGenerator.cs's
+        // materials don't have this problem - they're created at Play-mode runtime, never need to
+        // survive being written to disk.)
+        static Material SaveMaterialAsset(Material mat, string name)
+        {
+            if (!AssetDatabase.IsValidFolder(MaterialFolder))
+            {
+                AssetDatabase.CreateFolder("Assets", "Materials");
+            }
+
+            string path = MaterialFolder + "/" + name + ".mat";
+            Material existing = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (existing != null)
+            {
+                existing.shader = mat.shader;
+                existing.CopyPropertiesFromMaterial(mat);
+                EditorUtility.SetDirty(existing);
+                UnityEngine.Object.DestroyImmediate(mat);
+                return existing;
+            }
+
+            AssetDatabase.CreateAsset(mat, path);
+            return mat;
         }
 
         static Font FindBestFont()
