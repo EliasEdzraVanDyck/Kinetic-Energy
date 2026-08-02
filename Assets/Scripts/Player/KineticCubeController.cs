@@ -86,7 +86,6 @@ namespace KineticEnergy.Player
         float aimYaw;
         float aimPitch;
         ControlScheme controlScheme = ControlScheme.LaunchInstantly;
-        float lastRtAnalogValue;
 
         bool launchQueued;
         Vector3 queuedDirection;
@@ -182,7 +181,6 @@ namespace KineticEnergy.Player
                 {
                     isAiming = true;
                     chargeTime = 0f;
-                    lastRtAnalogValue = 0f;
                     SeedAimFromCamera();
                     aimArrow?.SetVisible(true);
                     landingPreview?.SetVisible(true);
@@ -207,17 +205,14 @@ namespace KineticEnergy.Player
 
                     case ControlScheme.AnalogPressure:
                         // LT only aims. Charge directly tracks how hard RT is CURRENTLY pressed
-                        // (no ramp-up time) rather than building up over time, so the arrow/power
-                        // preview responds live to trigger pressure. lastRtAnalogValue (this
-                        // frame's reading, captured at the end of this block for use next frame)
-                        // is used instead of this frame's own rtAnalogValue when computing the
-                        // launch, because on the exact frame WasReleasedThisFrame fires, IsPressed
-                        // has already gone false and the raw analog value can already be partway
-                        // through the trigger's physical return to rest - using the prior frame's
-                        // value (while it was still genuinely held) reflects the power level the
-                        // player actually intended to release at.
-                        chargeTime = Mathf.Clamp01(rtHeld ? rtAnalogValue : lastRtAnalogValue) * maxChargeTime;
-                        launchNow = rtReleased;
+                        // (no ramp-up time, drops back toward 0 the moment RT is let go) rather
+                        // than building up over time, so the arrow/power preview responds live to
+                        // trigger pressure. The actual launch trigger for this scheme isn't RT at
+                        // all anymore - it's releasing LT while RT is still held, handled below in
+                        // the isAiming/LT-released branch, since that's the frame ltHeld itself
+                        // goes false and control never reaches this switch.
+                        chargeTime = Mathf.Clamp01(rtAnalogValue) * maxChargeTime;
+                        launchNow = false;
                         break;
 
                     default: // HoldRelease
@@ -228,8 +223,6 @@ namespace KineticEnergy.Player
                         launchNow = rtReleased;
                         break;
                 }
-
-                lastRtAnalogValue = rtAnalogValue;
 
                 Vector2 stick = moveAction != null && moveAction.action != null
                     ? moveAction.action.ReadValue<Vector2>()
@@ -282,7 +275,32 @@ namespace KineticEnergy.Player
             }
             else if (isAiming)
             {
-                // LT released without firing - cancel, no launch.
+                // The Analog scheme's actual launch trigger: releasing LT while RT is still
+                // held fires, using RT's pressure at that exact instant as the charge level.
+                // Read fresh here rather than trusting chargeTime's value from the last
+                // ltHeld-active frame (one frame stale) - aimYaw/aimPitch don't need the same
+                // treatment since nothing else touches them once ltHeld goes false, so
+                // AimDirection() below still reflects exactly where the player last aimed.
+                // If RT was already let go before LT (not held on this exact frame), this
+                // falls through to the same cancel behavior every other scheme already has for
+                // a plain LT release.
+                bool analogLaunch = controlScheme == ControlScheme.AnalogPressure
+                    && fireAction != null && fireAction.action != null && fireAction.action.IsPressed();
+
+                if (analogLaunch)
+                {
+                    float rtAnalogValue = fireAction.action.ReadValue<float>();
+                    chargeTime = Mathf.Clamp01(rtAnalogValue) * maxChargeTime;
+                    float chargeFraction = ChargeFraction();
+
+                    queuedDirection = AimDirection();
+                    queuedForce = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
+                    queuedDamping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
+                    launchQueued = true;
+                    hasLaunched = true;
+                    waitingForLtRelease = true;
+                }
+
                 isAiming = false;
                 chargeTime = 0f;
                 aimArrow?.SetVisible(false);
