@@ -155,23 +155,24 @@ namespace KineticEnergy.Player
         // of alternateSchemesEnabled above, since both of these two specifically need to stay
         // switchable during play, unlike Hold-Release/Analog.
         public InputActionReference switchSchemeAction;
+        // South: the up ("jump") launch, moved off Left Trigger so LT can be dedicated entirely
+        // to the down launch - see UpdateStickAimScheme.
+        public InputActionReference upLaunchAction;
         // Live-tuned via the Inspector during testing and carried forward as the new default -
         // this is now THE launch speed knob in practice, StickAim being the only reachable
         // scheme (see schemeSwitchingEnabled) - kept public/exposed for exactly that reason,
         // same as gravity above.
         public float stickAimForce = 50f;
         public float stickAimDamping = 0.7f;
-        // LT, grounded ("jump"): launches straight up if the stick is centered (within
-        // aimDeadzone), or tilted this many degrees above horizontal toward wherever the stick
-        // is pointing otherwise.
+        // South ("jump"): launches straight up if the stick is centered (within aimDeadzone), or
+        // tilted this many degrees above horizontal toward wherever the stick is pointing
+        // otherwise. Usable any time (not just grounded) - see UpdateStickAimScheme.
         public float stickAimUpAngle = 80f;
-        // LT, airborne ("slam" - see stickAimDownAngle below): shallower than the jump by
-        // request, kept as its own separate field rather than reusing stickAimUpAngle so the two
-        // can be tuned independently.
+        // Left Trigger ("slam"): shallower than the jump by request, kept as its own separate
+        // field rather than reusing stickAimUpAngle so the two can be tuned independently.
         public float stickAimDownAngle = 60f;
-        // RT, stick held: tilted this many degrees toward wherever the stick is pointing.
-        // Usable whether grounded or airborne - a follow-up boost/redirect off an existing LT
-        // launch, or a standalone launch on its own.
+        // Right Trigger, stick held: tilted this many degrees toward wherever the stick is
+        // pointing.
         public float stickAimForwardAngle = 30f;
         // RT, stick centered: a small tilt toward the player's current facing direction (see
         // FacingFlatDirection) rather than perfectly flat - kept separate from
@@ -313,6 +314,7 @@ namespace KineticEnergy.Player
             selectAnalogSchemeAction?.action?.Enable();
             selectNoneAction?.action?.Enable();
             switchSchemeAction?.action?.Enable();
+            upLaunchAction?.action?.Enable();
         }
 
         void OnDisable()
@@ -325,6 +327,7 @@ namespace KineticEnergy.Player
             selectAnalogSchemeAction?.action?.Disable();
             selectNoneAction?.action?.Disable();
             switchSchemeAction?.action?.Disable();
+            upLaunchAction?.action?.Disable();
         }
 
         void Update()
@@ -341,7 +344,11 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            HandlePreviewModeSwitch();
+            // South is now StickAim's up-launch button (see upLaunchAction/UpdateStickAimScheme)
+            // - skipping the old preview-toggle handler here while StickAim is active avoids the
+            // same physical press doing two unrelated things (it's also pointless in StickAim,
+            // which never shows a trail/ghost/crosshair preview to toggle in the first place).
+            if (controlScheme != ControlScheme.StickAim) HandlePreviewModeSwitch();
             HandleSchemeSwitch();
 
             // Kept outside the StickAim-only branch below (and updated unconditionally every
@@ -685,9 +692,10 @@ namespace KineticEnergy.Player
                 controlsHintLabel.text = stickAim
                     ? "Move (on the ground): Left Stick\n" +
                       "Nudge (in the air): Left Stick\n" +
-                      "Launch Up (grounded): Left Trigger (80 deg toward stick or straight up)\n" +
-                      "Launch Down (airborne): Left Trigger (80 deg toward stick or straight down)\n" +
-                      "Launch Forward: Right Trigger (30 deg toward stick or dead ahead if holding still)\n" +
+                      "Launch Up: South (80 deg toward stick or straight up if holding still)\n" +
+                      "Launch Down: Left Trigger (60 deg toward stick or straight down if holding still)\n" +
+                      "Launch Forward: Right Trigger (30 deg toward stick or 5 deg ahead if holding still)\n" +
+                      "Each once, any order, until grounded again\n" +
                       "Camera: Right Stick\n" +
                       switchLine +
                       "Pause: Start / Options / Esc"
@@ -706,13 +714,14 @@ namespace KineticEnergy.Player
                 controlsPanelBody.text = stickAim
                     ? "Left Stick - Move (on the ground)\n" +
                       "Left Stick (in the air) - Nudge distance / drift sideways\n" +
-                      "Left Trigger (grounded) - Jump: straight up if the stick is centered, or\n" +
-                      "  tilted 80 degrees toward the stick otherwise. Once per flight.\n" +
-                      "Left Trigger (airborne) - Slam: straight down if the stick is centered, or\n" +
-                      "  tilted 80 degrees toward the stick otherwise. Once per flight, independent\n" +
-                      "  of the grounded jump above - always available in the air either way.\n" +
-                      "Right Trigger - Launch: dead ahead if the stick is centered, or tilted 30\n" +
-                      "  degrees toward the stick otherwise. Ground or air, once per flight.\n" +
+                      "South - Jump: straight up if the stick is centered, or tilted 80 degrees\n" +
+                      "  toward the stick otherwise.\n" +
+                      "Left Trigger - Slam: straight down if the stick is centered, or tilted 60\n" +
+                      "  degrees toward the stick otherwise.\n" +
+                      "Right Trigger - Launch: tilted 5 degrees ahead if the stick is centered, or\n" +
+                      "  30 degrees toward the stick otherwise.\n" +
+                      "Each of the three above works any time, in any order, once per flight -\n" +
+                      "  all three reset together the moment the cube genuinely lands again.\n" +
                       "Right Stick - Camera\n" +
                       switchLinePanel +
                       "Start / Options / Esc - Pause"
@@ -768,31 +777,29 @@ namespace KineticEnergy.Player
             bool stickHeld = stick.sqrMagnitude > aimDeadzone * aimDeadzone;
             Vector3 stickDirection = stickHeld ? StickWorldDirection(stick) : Vector3.zero;
 
+            bool upPressed = upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
             bool ltPressed = launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
             bool rtPressed = fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
 
-            // LT is now context-sensitive: grounded fires the "jump" (up), airborne fires a
-            // mirror-image "slam" (down) - same direction logic either way (tilt stickAimUpAngle
-            // toward the held stick, or straight up/down if the stick is centered), just flipped.
-            // Each half has its own independent once-per-flight limiter (hasUsedUpLaunch /
-            // hasUsedDownLaunch, both reset alongside hasLaunched on landing) - grounded-LT no
-            // longer needs a separate isGrounded-mid-air-exception for a forward-launch follow-up
-            // the way it briefly did; the airborne case is its own thing now, always available in
-            // the air regardless of how the cube got there or whether RT was already used.
-            bool ltUpAllowed = !hasUsedUpLaunch && isGrounded && !hasLaunched;
-            bool ltDownAllowed = !hasUsedDownLaunch && !isGrounded;
-
-            if (ltPressed && ltUpAllowed)
+            // All three are now fully symmetric: one independent once-per-flight limiter each
+            // (reset together on landing), none gated on isGrounded/hasLaunched - each is usable
+            // any time, in any order, so all three can be chained together (up, down, forward, in
+            // whichever sequence) before the cube has to land again to re-arm.
+            if (upPressed && !hasUsedUpLaunch)
             {
                 Vector3 dir = stickHeld ? TiltedDirection(stickDirection, stickAimUpAngle) : Vector3.up;
                 // TEMPORARY diagnostic - pins down whether a reported "stick direction doesn't
                 // work" is a real direction-reading bug or one of the once-per-flight limiters
                 // silently blocking a later attempt.
-                Debug.Log($"StickAim LT UP: stick={stick} stickHeld={stickHeld} dir={dir}");
+                Debug.Log($"StickAim UP (South): stick={stick} stickHeld={stickHeld} dir={dir}");
                 QueueStickAimLaunch(dir);
                 hasUsedUpLaunch = true;
             }
-            else if (ltPressed && ltDownAllowed)
+            else if (upPressed && hasUsedUpLaunch)
+            {
+                Debug.Log("StickAim UP BLOCKED: already used this flight");
+            }
+            else if (ltPressed && !hasUsedDownLaunch)
             {
                 // Negative angle reuses TiltedDirection unchanged - cos is even (same magnitude
                 // either sign) and sin flips sign, so passing -stickAimDownAngle mirrors the tilt
@@ -802,19 +809,15 @@ namespace KineticEnergy.Player
                 QueueStickAimLaunch(dir);
                 hasUsedDownLaunch = true;
             }
-            else if (ltPressed)
+            else if (ltPressed && hasUsedDownLaunch)
             {
-                Debug.Log($"StickAim LT BLOCKED: hasUsedUpLaunch={hasUsedUpLaunch} hasUsedDownLaunch={hasUsedDownLaunch} isGrounded={isGrounded} hasLaunched={hasLaunched}");
+                Debug.Log("StickAim LT BLOCKED: already used this flight");
             }
             else if (rtPressed && !hasUsedForwardLaunch)
             {
-                // Deliberately NOT gated on isGrounded/hasLaunched - this works as a mid-air
-                // follow-up (re-queuing a fresh launch while hasLaunched is already true from an
-                // earlier one) just as much as a standalone grounded launch. hasUsedForwardLaunch
-                // is the actual limiter: only one of these per flight, reset the moment the cube
-                // genuinely lands again. A shallower, separate angle when the stick is centered
-                // (toward facing) than when it's actually held (toward the stick) - see
-                // stickAimForwardNeutralAngle's own comment for why these are independent knobs.
+                // A shallower, separate angle when the stick is centered (toward facing) than
+                // when it's actually held (toward the stick) - see stickAimForwardNeutralAngle's
+                // own comment for why these are independent knobs.
                 Vector3 dir = stickHeld
                     ? TiltedDirection(stickDirection, stickAimForwardAngle)
                     : TiltedDirection(FacingFlatDirection(), stickAimForwardNeutralAngle);

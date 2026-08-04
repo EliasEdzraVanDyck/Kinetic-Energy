@@ -71,6 +71,7 @@ namespace KineticEnergy.EditorSetup
             InputActionReference selectCrosshairRef = FindActionReference("Player", "SelectCrosshairPreview");
             InputActionReference selectNoneRef = FindActionReference("Player", "SelectNonePreview");
             InputActionReference switchSchemeRef = FindActionReference("Player", "SwitchControlScheme");
+            InputActionReference upLaunchRef = FindActionReference("Player", "LaunchUp");
 
             GameObject player = GameObject.Find("Player");
             if (player == null) throw new Exception("KineticEnergySetup: could not find 'Player' GameObject in scene.");
@@ -78,7 +79,7 @@ namespace KineticEnergy.EditorSetup
             GameObject mainCamGo = GameObject.Find("Main Camera");
             if (mainCamGo == null) throw new Exception("KineticEnergySetup: could not find 'Main Camera' GameObject in scene.");
 
-            KineticCubeController controller = BuildPlayerCube(player, moveRef, launchRef, fireRef, selectGhostRef, selectTrailRef, selectCrosshairRef, selectNoneRef, switchSchemeRef,
+            KineticCubeController controller = BuildPlayerCube(player, moveRef, launchRef, fireRef, selectGhostRef, selectTrailRef, selectCrosshairRef, selectNoneRef, switchSchemeRef, upLaunchRef,
                 out KineticCubeControllerFreeMove freeMoveController);
             ThirdPersonOrbitCamera orbitCam = BuildCameraRig(mainCamGo, lookRef);
 
@@ -339,7 +340,7 @@ namespace KineticEnergy.EditorSetup
 
         static KineticCubeController BuildPlayerCube(GameObject player, InputActionReference moveRef, InputActionReference launchRef, InputActionReference fireRef,
             InputActionReference selectGhostRef, InputActionReference selectTrailRef, InputActionReference selectCrosshairRef, InputActionReference selectNoneRef,
-            InputActionReference switchSchemeRef,
+            InputActionReference switchSchemeRef, InputActionReference upLaunchRef,
             out KineticCubeControllerFreeMove freeMoveController)
         {
             SphereCollider oldCollider = player.GetComponent<SphereCollider>();
@@ -427,6 +428,7 @@ namespace KineticEnergy.EditorSetup
             controller.selectAnalogSchemeAction = selectCrosshairRef;
             controller.selectNoneAction = selectNoneRef;
             controller.switchSchemeAction = switchSchemeRef;
+            controller.upLaunchAction = upLaunchRef;
             controller.aimArrow = BuildAimArrow(player.transform);
             controller.landingPreview = BuildLandingPreview(player.transform);
 

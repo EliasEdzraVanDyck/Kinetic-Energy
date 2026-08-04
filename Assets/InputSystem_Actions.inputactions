@@ -157,6 +157,15 @@
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
+                },
+                {
+                    "name": "LaunchUp",
+                    "type": "Button",
+                    "id": "3a4b5c6d-7e8f-4901-a2b3-c4d5e6f70819",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
                 }
             ],
             "bindings": [
@@ -729,6 +738,28 @@
                     "processors": "",
                     "groups": "Keyboard&Mouse",
                     "action": "SwitchControlScheme",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "4b5c6d7e-8f90-4a12-b3c4-d5e6f7081920",
+                    "path": "<Gamepad>/buttonSouth",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Gamepad",
+                    "action": "LaunchUp",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "5c6d7e8f-9012-4b34-c5d6-e7f708192a3c",
+                    "path": "<Keyboard>/5",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Keyboard&Mouse",
+                    "action": "LaunchUp",
                     "isComposite": false,
                     "isPartOfComposite": false
                 }
