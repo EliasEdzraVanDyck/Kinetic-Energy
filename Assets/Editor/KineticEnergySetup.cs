@@ -307,11 +307,14 @@ namespace KineticEnergy.EditorSetup
             // comment in KineticCubeController.cs for the empirical verification.
             controller.minLaunchDamping = 2.8f;
             controller.maxLaunchDamping = 1.0f;
-            // 20% down from the previous 45, per direct feedback that StickAim launched too hard.
-            controller.stickAimForce = 36f;
+            // Live-tuned via the Inspector in Sandbox Scene during testing (50, up from the
+            // previous 36) and carried forward here as the new default for every scene.
+            controller.stickAimForce = 50f;
             controller.stickAimDamping = 0.7f;
             controller.stickAimUpAngle = 80f;
+            controller.stickAimDownAngle = 60f;
             controller.stickAimForwardAngle = 30f;
+            controller.stickAimForwardNeutralAngle = 5f;
 
             // StickAim is now the only reachable scheme by request - Launch Instantly/Hold-
             // Release/Analog stay fully in the project (nothing deleted), just locked out.
@@ -320,8 +323,9 @@ namespace KineticEnergy.EditorSetup
             // Matches ProjectSettings/DynamicsManager.asset's own gravity - kept in sync here too
             // since KineticCubeController.Awake/OnValidate applies this OVER the project setting
             // at runtime, and it's meant to be a fast public testing knob, not a second source of
-            // truth that can quietly drift from the project value.
-            controller.gravity = -18f;
+            // truth that can quietly drift from the project value. Also live-tuned in Sandbox
+            // Scene (-30, up from the previous -18) and carried forward as the new default.
+            controller.gravity = -30f;
         }
 
         static void UpdateBuildSettings()
