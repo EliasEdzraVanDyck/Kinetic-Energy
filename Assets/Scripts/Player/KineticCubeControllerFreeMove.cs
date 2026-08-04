@@ -42,8 +42,13 @@ namespace KineticEnergy.Player
         [Range(0f, 1f)] public float moveDeadzone = 0.15f;
 
         [Header("Air Correction")]
-        [Tooltip("Max acceleration (m/s^2) applied from stick input while airborne - kept well below gravity (9.81) so this only ever nudges the existing fall, never overrides it. This is the 'relatively subtle, minor launch corrections' knob.")]
-        public float airControlAcceleration = 3f;
+        // Raised from 3 - project gravity went from 9.81 to 18 two rounds ago (see
+        // ProjectSettings/DynamicsManager.asset), which alone made this weaker relative to
+        // gravity than it used to feel even before "increase midair control" was asked for
+        // directly. Still kept below gravity so it only ever nudges an existing fall rather than
+        // overriding it outright.
+        [Tooltip("Max acceleration (m/s^2) applied from stick input while airborne - kept below gravity so this only ever nudges the existing fall, never overrides it.")]
+        public float airControlAcceleration = 7f;
         [Range(0f, 1f)] public float airControlDeadzone = 0.1f;
 
         [Header("Leaning")]
@@ -71,6 +76,11 @@ namespace KineticEnergy.Player
         bool wasGrounded;
         Quaternion visualTargetRotation = Quaternion.identity;
         float launchFacingYaw;
+
+        // Read by KineticCubeController's StickAim scheme (RT's neutral-stick fallback direction)
+        // and FacingArrowIndicator (the always-on red arrow) - both need "which way is the cube
+        // currently facing", which is exactly what this field already tracks for the lean visual.
+        public float FacingYaw => launchFacingYaw;
 
         void Awake()
         {
@@ -136,6 +146,16 @@ namespace KineticEnergy.Player
 
                 Vector3 horizontalVelocity = moveDirection * moveSpeed;
                 rb.linearVelocity = new Vector3(horizontalVelocity.x, rb.linearVelocity.y, horizontalVelocity.z);
+
+                // StickAim-only: face movement direction instantly while walking. The charge-based
+                // schemes deliberately leave facing alone while grounded (see the comment just
+                // below) - only StickAim ties facing to movement, since its own launches/arrow
+                // already key off the same "current facing" concept.
+                if (moveDirection.sqrMagnitude > 0.0001f && launchController != null && launchController.CurrentScheme == ControlScheme.StickAim)
+                {
+                    launchFacingYaw = Mathf.Atan2(moveDirection.x, moveDirection.z) * Mathf.Rad2Deg;
+                    if (visual != null) visual.localRotation = Quaternion.Euler(0f, launchFacingYaw, 0f);
+                }
 
                 // Pitch/roll (lean) reset to level, but yaw (launchFacingYaw) is deliberately
                 // left alone - landing shouldn't re-orient which way the cube is facing, only

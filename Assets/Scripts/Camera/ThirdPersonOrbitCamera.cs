@@ -13,12 +13,28 @@ namespace KineticEnergy.Camera
         public float distance = 6f;
         public float rotationSpeed = 120f;
         public float minPitch = -20f;
-        public float maxPitch = 60f;
+        // Pulled back from an earlier 89 - that was close enough to true top-down (90) that
+        // Quaternion.LookRotation(lookDir, Vector3.up) started reading as visibly "spinning"
+        // while rotating: as lookDir approaches anti-parallel to the Vector3.up hint, tiny
+        // positional differences (SmoothDamp lag makes the ACTUAL camera position lag behind the
+        // theoretical orbit spot, so this isn't just the exact 90-degree instant) flip which way
+        // LookRotation resolves roll, which reads as spin. 75 keeps a real margin from that
+        // degenerate zone while still allowing a dramatically steep, near-top-down view.
+        public float maxPitch = 75f;
         public bool invertY = false;
 
         [Header("Smoothing")]
         public float positionSmoothTime = 0.08f;
         public float maxDeltaTime = 0.05f;
+
+        [Header("Auto Recenter")]
+        // Used by StickAim launches (see KineticCubeController.QueueStickAimLaunch) to swing the
+        // camera back behind the player after firing - NOT used by the charge-based schemes,
+        // which need the camera to stay exactly where the player left it so the landing-preview
+        // trail stays fully visible and un-yanked-at (see LandingPreviewController's own accuracy
+        // requirements). Cancels itself the instant the player provides any manual look input, so
+        // it never fights the player's own camera control.
+        public float recenterSpeed = 240f;
 
         [Header("Input")]
         public InputActionReference lookAction;
@@ -27,6 +43,8 @@ namespace KineticEnergy.Camera
         float pitch = 15f;
         Vector3 velocity;
         bool yawInitialized;
+        bool recentering;
+        float recenterTargetYaw;
 
         void Start()
         {
@@ -63,6 +81,16 @@ namespace KineticEnergy.Camera
             }
         }
 
+        // Starts a smooth (not instant) swing of the orbit yaw back to directly behind
+        // targetYawDegrees (the player's new facing) - "move behind the player again", not
+        // "snap" (that's what SetInitialYaw is for, at level load). Actual interpolation happens
+        // in LateUpdate so it can be interrupted cleanly by manual look input at any point.
+        public void RecenterBehindTarget(float targetYawDegrees)
+        {
+            recenterTargetYaw = targetYawDegrees;
+            recentering = true;
+        }
+
         void OnEnable()
         {
             lookAction?.action?.Enable();
@@ -90,7 +118,19 @@ namespace KineticEnergy.Camera
             // garbage value in one frame, making the camera look broken/unresponsive afterward.
             float dt = Mathf.Min(Time.deltaTime, maxDeltaTime);
 
-            yaw += look.x * rotationSpeed * dt;
+            // Manual input always wins outright, the instant there is any - recentering only
+            // ever happens while the player isn't already telling the camera what to do.
+            if (look.sqrMagnitude > 0.0001f) recentering = false;
+
+            if (recentering)
+            {
+                yaw = Mathf.MoveTowardsAngle(yaw, recenterTargetYaw, recenterSpeed * dt);
+                if (Mathf.Abs(Mathf.DeltaAngle(yaw, recenterTargetYaw)) < 0.5f) recentering = false;
+            }
+            else
+            {
+                yaw += look.x * rotationSpeed * dt;
+            }
             float pitchDelta = (invertY ? look.y : -look.y) * rotationSpeed * dt;
             pitch = Mathf.Clamp(pitch + pitchDelta, minPitch, maxPitch);
 

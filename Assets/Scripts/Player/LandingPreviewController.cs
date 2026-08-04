@@ -134,9 +134,21 @@ namespace KineticEnergy.Player
 
             int neededDots = Mathf.Clamp(Mathf.CeilToInt(totalLength / Mathf.Max(maxDotSpacing, 0.01f)), 1, trailDots.Length);
 
+            // endGap: a small, FIXED buffer (not a fraction of totalLength) so the very last dot
+            // doesn't visually sit exactly on top of the Ghost/Crosshair marker. The previous
+            // version used (d+1)/(neededDots+1) instead of (d+1)/neededDots, which leaves out
+            // roughly one whole maxDotSpacing unit before the true endpoint - that's a roughly
+            // CONSTANT gap regardless of trajectory length, so it barely showed on the short
+            // shots this was originally tuned against, but reads as "doesn't end accurately"
+            // outright now that shots regularly run 3-5x longer. Using a small fixed distance
+            // here instead keeps the same "don't overlap the marker" intent without the gap
+            // growing (in relative terms, it now shrinks) as shots get longer.
+            float endGap = Mathf.Min(0.2f, totalLength * 0.5f);
+            float usableLength = Mathf.Max(totalLength - endGap, 0f);
+
             if (trajectory != null && trajectoryCount > 1)
             {
-                PlaceDotsAlongTrajectory(trajectory, trajectoryCount, totalLength, neededDots);
+                PlaceDotsAlongTrajectory(trajectory, trajectoryCount, usableLength, neededDots);
             }
             else
             {
@@ -151,7 +163,7 @@ namespace KineticEnergy.Player
                     }
                     trailDots[i].gameObject.SetActive(true);
 
-                    float t = (float)(i + 1) / (neededDots + 1);
+                    float t = totalLength > 0.0001f ? (usableLength * (i + 1) / neededDots) / totalLength : 0f;
                     trailDots[i].position = Vector3.Lerp(lineStart, landingPoint, t);
                 }
             }
@@ -166,7 +178,10 @@ namespace KineticEnergy.Player
         // trajectory once and linearly interpolating between the two adjacent simulated points
         // (only Time.fixedDeltaTime apart, so this is effectively exactly on the curve) fixes
         // both: correct spacing AND exact correspondence to the real flight path.
-        void PlaceDotsAlongTrajectory(Vector3[] trajectory, int trajectoryCount, float totalLength, int neededDots)
+        // usableLength is already totalLength minus the small fixed end gap (see SetLandingPoint)
+        // - the last dot (d == neededDots - 1) lands exactly AT usableLength here, not short of
+        // it by another fraction on top.
+        void PlaceDotsAlongTrajectory(Vector3[] trajectory, int trajectoryCount, float usableLength, int neededDots)
         {
             int segmentEnd = 1;
             float segmentStartLength = 0f;
@@ -183,7 +198,7 @@ namespace KineticEnergy.Player
                 }
                 trailDots[d].gameObject.SetActive(true);
 
-                float targetLength = totalLength * (d + 1) / (neededDots + 1);
+                float targetLength = usableLength * (d + 1) / neededDots;
 
                 while (segmentEnd < trajectoryCount - 1 && segmentStartLength + segmentLength < targetLength)
                 {

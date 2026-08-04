@@ -18,8 +18,8 @@ namespace KineticEnergy.Player
     public class KineticCubeController : MonoBehaviour
     {
         [Header("Launch Force")]
-        public float minLaunchForce = 8.6f;
-        public float maxLaunchForce = 40f;
+        public float minLaunchForce = 16f;
+        public float maxLaunchForce = 70f;
         public float maxChargeTime = 1.5f;
 
         // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
@@ -33,8 +33,18 @@ namespace KineticEnergy.Player
         // baseline (~46.0) at the new max force (40) needed only ~0.65. Interpolated by charge
         // fraction at launch time (same curve minLaunchForce/maxLaunchForce already use) so both
         // ends of the charge range land close to their old distances despite the higher exit speed.
-        public float minLaunchDamping = 1.9f;
-        public float maxLaunchDamping = 0.65f;
+        // Re-tuned alongside the project's gravity increase (see ProjectSettings/
+        // DynamicsManager.asset, -9.81 -> -18) and the force increase above - stronger gravity
+        // alone would have shortened every trajectory despite the higher exit speed, and "much
+        // faster, launch further" needed both force AND damping to move together, not just force.
+        // Then raised again on their own (force UNCHANGED) per direct feedback: "distance ~50%
+        // lower but preserve speed" - damping is the only lever that cuts distance without
+        // touching exit speed (that's purely force/mass). Verified with a real-physics batch
+        // simulation at the 30-degree reference angle: (2.8, 1.0) lands at 18.06m/55.70m
+        // (mid/max charge) against a 34.64m/109.08m baseline - within a few percent of exactly
+        // half, at the identical exit speed either way.
+        public float minLaunchDamping = 2.8f;
+        public float maxLaunchDamping = 1.0f;
 
         [Header("Aiming")]
         [Range(0f, 1f)] public float aimDeadzone = 0.15f;
@@ -43,6 +53,11 @@ namespace KineticEnergy.Player
         public float maxAimPitch = 80f;
         public float defaultAimPitch = 20f;
         public Transform cameraTransform;
+        // Only used by StickAim (see QueueStickAimLaunch's RecenterBehindTarget call) - the
+        // charge-based schemes never touch this, since yanking the camera right after firing
+        // would fight the "watch the trail all the way to the landing point" experience those
+        // schemes are built around.
+        public KineticEnergy.Camera.ThirdPersonOrbitCamera cameraOrbit;
         public AimArrowIndicator aimArrow;
 
         [Header("Landing")]
@@ -117,16 +132,23 @@ namespace KineticEnergy.Player
         // of alternateSchemesEnabled above, since both of these two specifically need to stay
         // switchable during play, unlike Hold-Release/Analog.
         public InputActionReference switchSchemeAction;
-        public float stickAimForce = 24f;
-        public float stickAimDamping = 1.2f;
+        // Same "much faster / launch further despite stronger gravity" re-tuning as the Launch
+        // Force header above, since scaled back down 20% per direct feedback that it launched
+        // too hard.
+        public float stickAimForce = 36f;
+        public float stickAimDamping = 0.7f;
         // LT: launches straight up if the stick is centered (within aimDeadzone), or tilted this
         // many degrees above horizontal toward wherever the stick is pointing otherwise.
         // Grounded-only (see UpdateStickAimScheme) - reads as a "jump", not a mid-air move.
         public float stickAimUpAngle = 80f;
         // RT: same idea but shallower, and usable whether grounded or airborne - a follow-up
         // boost/redirect off an existing LT launch, or a standalone low launch on its own. Falls
-        // back to facing forward (camera-relative), not straight up, when the stick is centered.
+        // back to the player's current facing direction, not straight up, when the stick is
+        // centered - see FacingFlatDirection.
         public float stickAimForwardAngle = 30f;
+        // Shown flat on top of the player, always facing the same direction FacingFlatDirection
+        // resolves to, whenever StickAim is the active scheme - wired by KineticEnergySetup.
+        public FacingArrowIndicator facingArrow;
 
         Rigidbody rb;
         BoxCollider boxCollider;
@@ -138,6 +160,10 @@ namespace KineticEnergy.Player
         float aimYaw;
         float aimPitch;
         ControlScheme controlScheme = ControlScheme.LaunchInstantly;
+
+        // Read by KineticCubeControllerFreeMove to know whether it should instantly face
+        // movement direction while walking (StickAim only - see its FixedUpdate).
+        public ControlScheme CurrentScheme => controlScheme;
 
         // Split in two, not one flag - the two things a complementary movement system
         // (KineticCubeControllerFreeMove) might do while a launch is in flight carry very
@@ -175,6 +201,10 @@ namespace KineticEnergy.Player
         float launchGraceTimer;
         Vector3 launchStartPosition;
         float restTimer;
+        // StickAim-only: RT is limited to one use per flight, reset alongside hasLaunched at the
+        // exact same "genuinely landed" moment (see FixedUpdate's re-arm block) - reuses the same
+        // debounced grounded-check rather than a separate, possibly-inconsistent one.
+        bool hasUsedForwardLaunch;
 
         Vector3[] trajectoryBuffer;
 
@@ -251,6 +281,15 @@ namespace KineticEnergy.Player
 
             HandlePreviewModeSwitch();
             HandleSchemeSwitch();
+
+            // Kept outside the StickAim-only branch below (and updated unconditionally every
+            // frame) so it also correctly hides itself the instant the player switches back to a
+            // charge-based scheme.
+            if (facingArrow != null)
+            {
+                facingArrow.SetVisible(controlScheme == ControlScheme.StickAim);
+                facingArrow.SetFacingYaw(freeMoveController != null ? freeMoveController.FacingYaw : 0f);
+            }
 
             if (controlScheme == ControlScheme.StickAim)
             {
@@ -470,6 +509,7 @@ namespace KineticEnergy.Player
                 if (restTimer >= restConfirmDuration)
                 {
                     hasLaunched = false;
+                    hasUsedForwardLaunch = false;
                 }
             }
             else
@@ -597,17 +637,28 @@ namespace KineticEnergy.Player
             if (ltPressed && isGrounded && !hasLaunched)
             {
                 Vector3 dir = stickHeld ? TiltedDirection(stickDirection, stickAimUpAngle) : Vector3.up;
+                // TEMPORARY diagnostic - pins down whether a reported "stick direction doesn't
+                // work" is a real direction-reading bug or the hasUsedForwardLaunch limiter
+                // silently blocking a later attempt (see the else-if branch's own log below).
+                Debug.Log($"StickAim LT: stick={stick} stickHeld={stickHeld} dir={dir}");
                 QueueStickAimLaunch(dir);
             }
-            else if (rtPressed)
+            else if (rtPressed && !hasUsedForwardLaunch)
             {
                 // Deliberately NOT gated on isGrounded/hasLaunched the way the LT branch is -
                 // this is meant to work as a mid-air follow-up to an LT jump (re-queuing a fresh
                 // launch while hasLaunched is already true from the first one) just as much as a
-                // standalone grounded launch.
-                Vector3 flatDir = stickHeld ? stickDirection : CameraForwardFlat();
+                // standalone grounded launch. hasUsedForwardLaunch is the actual limiter: only one
+                // of these per flight, reset the moment the cube genuinely lands again.
+                Vector3 flatDir = stickHeld ? stickDirection : FacingFlatDirection();
                 Vector3 dir = TiltedDirection(flatDir, stickAimForwardAngle);
+                Debug.Log($"StickAim RT: stick={stick} stickHeld={stickHeld} flatDir={flatDir} dir={dir}");
                 QueueStickAimLaunch(dir);
+                hasUsedForwardLaunch = true;
+            }
+            else if (rtPressed && hasUsedForwardLaunch)
+            {
+                Debug.Log($"StickAim RT BLOCKED: hasUsedForwardLaunch is still true (already used this flight) - stick={stick} stickHeld={stickHeld}");
             }
         }
 
@@ -626,6 +677,22 @@ namespace KineticEnergy.Player
             launchQueued = true;
             hasLaunched = true;
             launchGraceTimer = launchGraceDuration;
+
+            // "Camera moves behind the player again after launching" - swings back to directly
+            // behind the new launch direction, smoothly, cancelling instantly on manual look
+            // input (see ThirdPersonOrbitCamera.RecenterBehindTarget). A straight-up jump (LT,
+            // stick centered) has direction == Vector3.up, with NO horizontal component -
+            // Atan2(0, 0) returns 0 (world +Z) in that case, which silently ignored whatever
+            // direction the player actually happened to be facing and snapped the camera to an
+            // arbitrary world-relative spot instead. Falling back to the player's current facing
+            // whenever the launch itself doesn't establish a new horizontal direction fixes that
+            // - "behind the player" for a vertical jump means behind whichever way they were
+            // already facing, not behind some fixed world direction.
+            Vector3 flatLaunchDir = new Vector3(direction.x, 0f, direction.z);
+            float launchYaw = flatLaunchDir.sqrMagnitude > 0.0001f
+                ? Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg
+                : (freeMoveController != null ? freeMoveController.FacingYaw : 0f);
+            cameraOrbit?.RecenterBehindTarget(launchYaw);
         }
 
         // Takes a flat (Y=0) direction and tilts it upward by angleDeg above horizontal,
@@ -641,6 +708,15 @@ namespace KineticEnergy.Player
         {
             Vector3 dir = CameraForwardFlat() * stick.y + CameraRightFlat() * stick.x;
             return dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.forward;
+        }
+
+        // The player's own current facing (same yaw the red FacingArrowIndicator shows), not the
+        // camera's - "launch forward" should mean the direction the cube is actually pointing,
+        // which is also what the arrow promises it means.
+        Vector3 FacingFlatDirection()
+        {
+            float yaw = freeMoveController != null ? freeMoveController.FacingYaw : 0f;
+            return Quaternion.Euler(0f, yaw, 0f) * Vector3.forward;
         }
 
         // Same camera-relative-forward/right convention as KineticCubeControllerFreeMove's own

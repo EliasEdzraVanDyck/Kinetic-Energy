@@ -94,6 +94,7 @@ namespace KineticEnergy.EditorSetup
             PrefabUtility.SaveAsPrefabAssetAndConnect(mainCamGo, PrefabFolder + "/ThirdPersonCameraRig.prefab", InteractionMode.AutomatedAction);
 
             controller.cameraTransform = mainCamGo.transform;
+            controller.cameraOrbit = orbitCam;
             freeMoveController.cameraTransform = mainCamGo.transform;
             orbitCam.target = player.transform;
             EditorUtility.SetDirty(controller);
@@ -181,8 +182,17 @@ namespace KineticEnergy.EditorSetup
             // assigned directly - the "save both assets first" rule only applies when the
             // instance itself is about to be captured back into a .prefab file.
             controller.cameraTransform = camGo.transform;
+            controller.cameraOrbit = orbitCam;
             freeMoveController.cameraTransform = camGo.transform;
             orbitCam.target = playerGo.transform;
+
+            // Level1's Player is a plain instance of the SAME Player.prefab BuildPlayerCube just
+            // saved, not rebuilt from scratch here - which meant launch tuning silently relied on
+            // instance inheritance ever actually working exactly as expected. ApplyLaunchTuning
+            // makes it explicit instead (matching the anti-staleness pattern every other tunable
+            // in this file already uses), so this scene can never end up quietly out of sync with
+            // Sandbox Scene's numbers again, no matter how prefab-instance inheritance behaves.
+            ApplyLaunchTuning(controller);
 
             Text modeLabel = pauseGo.transform.Find("PauseCanvas/PreviewModeLabel")?.GetComponent<Text>();
             controller.landingPreview.modeLabel = modeLabel;
@@ -273,6 +283,28 @@ namespace KineticEnergy.EditorSetup
             if (destroyed > 1) Debug.LogWarning($"KineticEnergySetup: DestroyIfExists('{name}') removed {destroyed} accumulated duplicates - expected at most 1.");
         }
 
+        // Single source of truth for launch tuning, called from BOTH BuildPlayerCube (Sandbox
+        // Scene, rebuilding Player.prefab itself) and SetupLevel1 (which only ever instantiates
+        // that already-saved prefab, never rebuilds it) - the latter previously relied on plain
+        // prefab-instance inheritance to stay in sync instead of reassigning these explicitly,
+        // which is exactly the kind of staleness every other tunable in this file already guards
+        // against on purpose. Two separate copies of these numbers would only reintroduce the
+        // same risk the next time any of them changes.
+        static void ApplyLaunchTuning(KineticCubeController controller)
+        {
+            controller.minLaunchForce = 16f;
+            controller.maxLaunchForce = 70f;
+            // Halves distance vs the previous (1.3, 0.4) at the same force - see the field's own
+            // comment in KineticCubeController.cs for the empirical verification.
+            controller.minLaunchDamping = 2.8f;
+            controller.maxLaunchDamping = 1.0f;
+            // 20% down from the previous 45, per direct feedback that StickAim launched too hard.
+            controller.stickAimForce = 36f;
+            controller.stickAimDamping = 0.7f;
+            controller.stickAimUpAngle = 80f;
+            controller.stickAimForwardAngle = 30f;
+        }
+
         static void UpdateBuildSettings()
         {
             EditorBuildSettings.scenes = new[]
@@ -348,10 +380,7 @@ namespace KineticEnergy.EditorSetup
             // loads, so relying on the initializer alone silently keeps stale numbers on every
             // re-run of this script after the first. This intentionally means re-running Setup()
             // always resets these to the current code-defined defaults.
-            controller.minLaunchForce = 8.6f;
-            controller.maxLaunchForce = 40f;
-            controller.minLaunchDamping = 1.9f;
-            controller.maxLaunchDamping = 0.65f;
+            ApplyLaunchTuning(controller);
             controller.maxChargeTime = 1.5f;
             controller.aimDeadzone = 0.15f;
             controller.aimRotationSpeed = 90f;
@@ -381,10 +410,7 @@ namespace KineticEnergy.EditorSetup
             // Hold-Release and Analog kept in the project, not removed, but not selectable for
             // now - Launch Instantly is the only reachable scheme (see HandlePreviewModeSwitch).
             controller.alternateSchemesEnabled = false;
-            controller.stickAimForce = 24f;
-            controller.stickAimDamping = 1.2f;
-            controller.stickAimUpAngle = 80f;
-            controller.stickAimForwardAngle = 30f;
+            controller.facingArrow = BuildFacingArrow(player.transform);
 
             // The core launch mechanic - always enabled. Runs together with
             // KineticCubeControllerFreeMove below rather than one disabling the other; the two
@@ -399,7 +425,7 @@ namespace KineticEnergy.EditorSetup
 
             freeMoveController.moveSpeed = 4f;
             freeMoveController.moveDeadzone = 0.15f;
-            freeMoveController.airControlAcceleration = 3f;
+            freeMoveController.airControlAcceleration = 7f;
             freeMoveController.airControlDeadzone = 0.1f;
             freeMoveController.maxLeanAngle = 22f;
             freeMoveController.leanSpeed = 8f;
@@ -448,6 +474,52 @@ namespace KineticEnergy.EditorSetup
             indicator.head = headGo.transform;
             indicator.arrowColor = arrowColor;
             indicator.SetAim(Vector3.forward, 0f);
+            indicator.SetVisible(false);
+
+            return indicator;
+        }
+
+        // Flat, yaw-only marker shown on top of the player while StickAim is active (see
+        // KineticCubeController.facingArrow) - parented under the player ROOT rather than the
+        // `visual` child, same reasoning as AimArrow above but more important here: `visual`
+        // leans with pitch/roll while airborne (KineticCubeControllerFreeMove), and this arrow
+        // needs to stay perfectly flat regardless, which only the root (FreezeRotation) guarantees.
+        static FacingArrowIndicator BuildFacingArrow(Transform parent)
+        {
+            Transform existing = parent.Find("FacingArrow");
+            if (existing != null) UnityEngine.Object.DestroyImmediate(existing.gameObject);
+
+            GameObject arrowRoot = new GameObject("FacingArrow");
+            arrowRoot.transform.SetParent(parent, false);
+            arrowRoot.transform.localPosition = new Vector3(0f, 0.55f, 0f); // just clear of the cube's top face (half-height 0.5)
+
+            GameObject shaftGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            shaftGo.name = "Shaft";
+            UnityEngine.Object.DestroyImmediate(shaftGo.GetComponent<Collider>());
+            shaftGo.transform.SetParent(arrowRoot.transform, false);
+            shaftGo.transform.localScale = new Vector3(0.12f, 0.05f, 0.6f);
+            shaftGo.transform.localPosition = new Vector3(0f, 0f, 0.3f);
+
+            GameObject headGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            headGo.name = "Head";
+            UnityEngine.Object.DestroyImmediate(headGo.GetComponent<Collider>());
+            headGo.transform.SetParent(arrowRoot.transform, false);
+            headGo.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
+            headGo.transform.localScale = new Vector3(0.32f, 0.05f, 0.32f);
+            headGo.transform.localPosition = new Vector3(0f, 0f, 0.62f);
+
+            Material arrowMat = new Material(FindBestShader());
+            Color arrowColor = new Color(0.9f, 0.05f, 0.05f);
+            arrowMat.color = arrowColor;
+            arrowMat = SaveMaterialAsset(arrowMat, "FacingArrowMaterial");
+            shaftGo.GetComponent<Renderer>().sharedMaterial = arrowMat;
+            headGo.GetComponent<Renderer>().sharedMaterial = arrowMat;
+
+            FacingArrowIndicator indicator = arrowRoot.AddComponent<FacingArrowIndicator>();
+            indicator.shaft = shaftGo.transform;
+            indicator.head = headGo.transform;
+            indicator.arrowColor = arrowColor;
+            indicator.SetFacingYaw(0f);
             indicator.SetVisible(false);
 
             return indicator;
@@ -735,6 +807,14 @@ namespace KineticEnergy.EditorSetup
             ThirdPersonOrbitCamera orbitCam = camGo.GetComponent<ThirdPersonOrbitCamera>();
             if (orbitCam == null) orbitCam = camGo.AddComponent<ThirdPersonOrbitCamera>();
             orbitCam.lookAction = lookRef;
+            // Explicitly (re)assigned, not left to the component's own field defaults - unlike a
+            // freshly-added component, GetComponent above finds the EXISTING one on every re-run
+            // after the first, whose serialized values are whatever they were the very first time
+            // this ran, regardless of any later change to the code-side default (the same
+            // staleness risk every other tunable in this file already guards against explicitly).
+            orbitCam.minPitch = -20f;
+            orbitCam.maxPitch = 75f;
+            orbitCam.recenterSpeed = 240f;
             return orbitCam;
         }
 
