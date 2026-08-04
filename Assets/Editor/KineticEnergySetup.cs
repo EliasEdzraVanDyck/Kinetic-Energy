@@ -312,6 +312,16 @@ namespace KineticEnergy.EditorSetup
             controller.stickAimDamping = 0.7f;
             controller.stickAimUpAngle = 80f;
             controller.stickAimForwardAngle = 30f;
+
+            // StickAim is now the only reachable scheme by request - Launch Instantly/Hold-
+            // Release/Analog stay fully in the project (nothing deleted), just locked out.
+            controller.SetControlScheme(ControlScheme.StickAim);
+            controller.schemeSwitchingEnabled = false;
+            // Matches ProjectSettings/DynamicsManager.asset's own gravity - kept in sync here too
+            // since KineticCubeController.Awake/OnValidate applies this OVER the project setting
+            // at runtime, and it's meant to be a fast public testing knob, not a second source of
+            // truth that can quietly drift from the project value.
+            controller.gravity = -18f;
         }
 
         static void UpdateBuildSettings()

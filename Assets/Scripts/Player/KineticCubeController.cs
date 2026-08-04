@@ -136,6 +136,19 @@ namespace KineticEnergy.Player
         // Instantly is reachable while this is false. Matches the same disable-without-deleting
         // pattern as LandingPreviewController.ghostAndCrosshairEnabled.
         public bool alternateSchemesEnabled = false;
+        // StickAim is now the only reachable scheme by default - this blocks BOTH the RB toggle
+        // (HandleSchemeSwitch) and West's unconditional "back to Launch Instantly" (
+        // HandlePreviewModeSwitch) from ever leaving StickAim, without deleting either scheme's
+        // logic. Flip true to get the old switching behavior back for testing.
+        public bool schemeSwitchingEnabled = false;
+
+        [Header("Testing")]
+        // Applied to the GLOBAL Physics.gravity every time this changes (Awake + OnValidate, so
+        // it also takes effect live if tweaked in the Inspector during Play mode) - exposed here,
+        // not just in Project Settings, specifically so it's a quick, obvious knob to test
+        // against while StickAim is the only scheme in play. Matches ProjectSettings/
+        // DynamicsManager.asset's own value (-18) by default.
+        public float gravity = -18f;
 
         [Header("Stick Aim Scheme")]
         // RB toggles directly between LaunchInstantly and StickAim - always reachable regardless
@@ -144,7 +157,9 @@ namespace KineticEnergy.Player
         public InputActionReference switchSchemeAction;
         // Same "much faster / launch further despite stronger gravity" re-tuning as the Launch
         // Force header above, since scaled back down 20% per direct feedback that it launched
-        // too hard.
+        // too hard. This is now THE launch speed knob in practice - StickAim is the only
+        // reachable scheme (see schemeSwitchingEnabled) - kept public/exposed for exactly that
+        // reason, same as gravity above.
         public float stickAimForce = 36f;
         public float stickAimDamping = 0.7f;
         // LT: launches straight up if the stick is centered (within aimDeadzone), or tilted this
@@ -169,11 +184,21 @@ namespace KineticEnergy.Player
         float chargeTime;
         float aimYaw;
         float aimPitch;
-        ControlScheme controlScheme = ControlScheme.LaunchInstantly;
+        ControlScheme controlScheme = ControlScheme.StickAim;
 
         // Read by KineticCubeControllerFreeMove to know whether it should instantly face
         // movement direction while walking (StickAim only - see its FixedUpdate).
         public ControlScheme CurrentScheme => controlScheme;
+
+        // Editor-script-only setter (controlScheme itself stays private/encapsulated, only ever
+        // changed internally by HandleSchemeSwitch/HandlePreviewModeSwitch at runtime) - needed
+        // so KineticEnergySetup can explicitly (re)assign the default scheme on every run, the
+        // same anti-staleness reasoning as every other tunable it sets: a serialized value from
+        // before this default changed would otherwise keep loading as Launch Instantly forever.
+        public void SetControlScheme(ControlScheme scheme)
+        {
+            controlScheme = scheme;
+        }
 
         // Split in two, not one flag - the two things a complementary movement system
         // (KineticCubeControllerFreeMove) might do while a launch is in flight carry very
@@ -242,6 +267,20 @@ namespace KineticEnergy.Player
             // Same Player object as KineticCubeControllerFreeMove - used to snap the visual to
             // instantly face the launch direction the moment a launch fires (see FixedUpdate).
             freeMoveController = GetComponent<KineticCubeControllerFreeMove>();
+            ApplyGravity();
+        }
+
+        // OnValidate re-applies this the instant the Inspector value changes, including while
+        // already in Play mode - the whole point of exposing gravity as a public field here
+        // instead of only via Project Settings is to make it a fast, live testing knob.
+        void OnValidate()
+        {
+            ApplyGravity();
+        }
+
+        void ApplyGravity()
+        {
+            Physics.gravity = new Vector3(0f, gravity, 0f);
         }
 
         void Start()
@@ -577,7 +616,7 @@ namespace KineticEnergy.Player
         // nothing else is left to bring it back otherwise.
         void HandlePreviewModeSwitch()
         {
-            if (selectClassicSchemeAction != null && selectClassicSchemeAction.action != null && selectClassicSchemeAction.action.WasPressedThisFrame())
+            if (schemeSwitchingEnabled && selectClassicSchemeAction != null && selectClassicSchemeAction.action != null && selectClassicSchemeAction.action.WasPressedThisFrame())
             {
                 controlScheme = ControlScheme.LaunchInstantly;
                 UpdateSchemeLabel();
@@ -621,6 +660,15 @@ namespace KineticEnergy.Player
         void UpdateControlsText()
         {
             bool stickAim = controlScheme == ControlScheme.StickAim;
+            // Only mention the Right Bumper toggle when it can actually do something - with
+            // schemeSwitchingEnabled false (the default now that StickAim is locked in), telling
+            // the player about a button that does nothing would just be inaccurate.
+            string switchLine = schemeSwitchingEnabled
+                ? (stickAim ? "Switch Scheme: Right Bumper\n" : "Right Bumper - Switch to the Stick Aim scheme\n")
+                : "";
+            string switchLinePanel = schemeSwitchingEnabled
+                ? (stickAim ? "Right Bumper - Switch back to the original launch scheme\n" : "Right Bumper - Switch to the Stick Aim scheme\n")
+                : "";
 
             if (controlsHintLabel != null)
             {
@@ -630,18 +678,15 @@ namespace KineticEnergy.Player
                       "Launch Up: Left Trigger (80 deg toward stick or straight up if holding still)\n" +
                       "Launch Forward: Right Trigger (30 deg toward stick or forward if holding still)\n" +
                       "Camera: Right Stick\n" +
-                      "Switch Scheme: Right Bumper\n" +
+                      switchLine +
                       "Pause: Start / Options / Esc"
-
-                    : 
-                      
-                      "Move (on the ground): Left Stick\n" +
+                    : "Move (on the ground): Left Stick\n" +
                       "Nudge (in the air): Left Stick\n" +
                       "Aim: Left Trigger (hold)\n" +
                       "Adjust Aim: Left Stick (while aiming)\n" +
                       "Launch: Right Trigger\n" +
                       "Camera: Right Stick\n" +
-                      "Switch Scheme: Right Bumper\n" +
+                      switchLine +
                       "Pause: Start / Options / Esc";
             }
 
@@ -656,7 +701,7 @@ namespace KineticEnergy.Player
                       "  toward the stick otherwise. Ground or air, once per flight (Left Trigger can\n" +
                       "  follow it once more in the air, and vice versa).\n" +
                       "Right Stick - Camera\n" +
-                      "Right Bumper - Switch back to the original launch scheme\n" +
+                      switchLinePanel +
                       "Start / Options / Esc - Pause"
                     : "Left Stick - Move (on the ground, while not aiming)\n" +
                       "Left Stick (in the air) - Nudge distance / drift sideways\n" +
@@ -665,7 +710,7 @@ namespace KineticEnergy.Player
                       "Right Trigger - Launch\n" +
                       "South - Show/hide the landing preview\n" +
                       "Right Stick - Camera\n" +
-                      "Right Bumper - Switch to the Stick Aim scheme\n" +
+                      switchLinePanel +
                       "Start / Options / Esc - Pause" +
                       (alternateSchemesEnabled ? "" : "\n\n(Hold-Release and Analog launch schemes are still in the project, just disabled)");
             }
@@ -676,6 +721,7 @@ namespace KineticEnergy.Player
         // West/North/East can reach Hold-Release/Analog - it has no bearing on this toggle).
         void HandleSchemeSwitch()
         {
+            if (!schemeSwitchingEnabled) return;
             if (switchSchemeAction == null || switchSchemeAction.action == null || !switchSchemeAction.action.WasPressedThisFrame()) return;
 
             controlScheme = controlScheme == ControlScheme.StickAim ? ControlScheme.LaunchInstantly : ControlScheme.StickAim;
