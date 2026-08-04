@@ -316,8 +316,20 @@ namespace KineticEnergy.EditorSetup
             controller.stickAimDownAngle = 60f;
             controller.stickAimForwardAngle = 30f;
             controller.stickAimForwardNeutralAngle = 5f;
+            // Flat, low damping so a downward launch keeps accelerating under gravity instead of
+            // the arc-shaping damping curve above fighting it to a near-constant fall speed - see
+            // the field's own comment in KineticCubeController.cs.
+            controller.downLaunchDamping = 0.2f;
+            // Only counts the stick as "held" (tilted angle vs. neutral) past 90% deflection -
+            // see the field's own comment in KineticCubeController.cs.
+            controller.stickAimDeadzone = 0.9f;
             // "Bullet time" while charging any launch - see the field's own comment.
             controller.chargeTimeScale = 0.5f;
+            // Moved here (was only set in BuildPlayerCube) so Level1's instance gets the same
+            // explicit anti-staleness reassignment Sandbox Scene's prefab does - the exact same
+            // reasoning this method already exists for. Negative tilts UP (see the field's own
+            // comment) - -30 starts noticeably higher than the previous +20.
+            controller.defaultAimPitch = -30f;
 
             // StickAim stays the default STARTING scheme, but all three (Launch Instantly/
             // StickAim/Mixed) are reachable again via the Right Bumper cycle - Hold-Release/
@@ -414,7 +426,6 @@ namespace KineticEnergy.EditorSetup
             controller.aimRotationSpeed = 90f;
             controller.minAimPitch = -80f;
             controller.maxAimPitch = 80f;
-            controller.defaultAimPitch = 20f;
             controller.groundNormalDot = 0.5f;
             controller.maxPredictionSteps = 3000;
             controller.previewLineHeight = 0.65f;

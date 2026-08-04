@@ -147,11 +147,16 @@ namespace KineticEnergy.Player
                 Vector3 horizontalVelocity = moveDirection * moveSpeed;
                 rb.linearVelocity = new Vector3(horizontalVelocity.x, rb.linearVelocity.y, horizontalVelocity.z);
 
-                // StickAim-only: face movement direction instantly while walking. The charge-based
-                // schemes deliberately leave facing alone while grounded (see the comment just
-                // below) - only StickAim ties facing to movement, since its own launches/arrow
-                // already key off the same "current facing" concept.
-                if (moveDirection.sqrMagnitude > 0.0001f && launchController != null && launchController.CurrentScheme == ControlScheme.StickAim)
+                // StickAim/LaunchInstantly/Mixed: face movement direction instantly while
+                // walking (direct request extended this from StickAim-only to the old scheme and
+                // Mixed's grounded phase too). Only HoldRelease/AnalogPressure - kept in the
+                // project but currently unreachable - still leave facing alone while grounded.
+                bool instantGroundFacing = launchController != null && (
+                    launchController.CurrentScheme == ControlScheme.StickAim ||
+                    launchController.CurrentScheme == ControlScheme.LaunchInstantly ||
+                    launchController.CurrentScheme == ControlScheme.Mixed);
+
+                if (moveDirection.sqrMagnitude > 0.0001f && instantGroundFacing)
                 {
                     launchFacingYaw = Mathf.Atan2(moveDirection.x, moveDirection.z) * Mathf.Rad2Deg;
                     if (visual != null) visual.localRotation = Quaternion.Euler(0f, launchFacingYaw, 0f);

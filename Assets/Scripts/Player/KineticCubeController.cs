@@ -56,7 +56,12 @@ namespace KineticEnergy.Player
         public float aimRotationSpeed = 90f;
         public float minAimPitch = -80f;
         public float maxAimPitch = 80f;
-        public float defaultAimPitch = 20f;
+        // Negative tilts UP in this project's Quaternion.Euler(pitch, yaw, 0) convention -
+        // empirically confirmed (pitch=20 => world Y -0.34, pitch=-20 => +0.34) rather than
+        // assumed, since the sign is easy to get backwards. -30 starts the old scheme's (and
+        // Mixed-grounded's) very first aim frame noticeably higher than the previous +20 -
+        // direct request: "should start much higher, say at 30 degrees".
+        public float defaultAimPitch = -30f;
         public Transform cameraTransform;
         // Only used by StickAim/Mixed-air (see RecenterCameraForStickAimLaunch) - the
         // charge-based schemes never touch this, since yanking the camera right after firing
@@ -178,6 +183,23 @@ namespace KineticEnergy.Player
         // Left Trigger ("slam"): shallower than the jump by request, kept as its own separate
         // field rather than reusing stickAimUpAngle so the two can be tuned independently.
         public float stickAimDownAngle = 60f;
+        // A downward launch uses this fixed, low damping instead of the minLaunchDamping/
+        // maxLaunchDamping charge curve the other two directions share. That curve is tuned to
+        // shape a horizontal ARC (see the Launch Force header comment) and, at a purely vertical
+        // velocity, is strong enough to counteract gravity's pull faster than gravity can add to
+        // it - the fall settled toward a near-constant speed instead of accelerating, reading as
+        // the launch's own strength overriding gravity rather than gravity still visibly
+        // affecting it (direct request). Flat rather than charge-interpolated like the other two
+        // - charging still controls exit speed via minLaunchForce/maxLaunchForce as before, only
+        // the drag fighting gravity on the way down changes.
+        public float downLaunchDamping = 0.2f;
+        // How far the stick has to be pushed (as a fraction of full deflection) before
+        // UpdateStickAimChargeScheme treats it as "held" and uses the tilted angle instead of
+        // the neutral case - much stricter than the general aimDeadzone above (direct request:
+        // "atleast 90% all the way through"), kept as its own field rather than reusing
+        // aimDeadzone since the two are tuned for different purposes (old scheme's continuous
+        // aim adjustment vs. this system's binary tilted/neutral decision).
+        [Range(0f, 1f)] public float stickAimDeadzone = 0.9f;
         // Right Trigger, stick held: tilted this many degrees toward wherever the stick is
         // pointing.
         public float stickAimForwardAngle = 30f;
@@ -277,6 +299,19 @@ namespace KineticEnergy.Player
         // separate bool since exactly one of four states applies at a time.
         enum StickAimChargeType { None, Up, Down, Forward }
         StickAimChargeType stickAimChargeType = StickAimChargeType.None;
+        // Forward-only: the last FLAT (horizontal) stick direction the stick was genuinely held
+        // past stickAimDeadzone, remembered so a release can keep launching that same horizontal
+        // direction while dropping to the shallow neutral angle (see the Forward case in
+        // UpdateStickAimChargeScheme) - direct request: "the direction should be frozen when
+        // launching forward but the lower angle should be used". Up/Down deliberately do NOT
+        // freeze at all - they always go straight up/down the instant the stick isn't held past
+        // the deadzone, same direct request. Only meaningful once the stick has actually been
+        // held past the deadzone at least once THIS charge (stickAimHasAimed) - before that, the
+        // neutral fallback (facing direction) is still correct. Charge strength (chargeTime/
+        // force) is untouched by any of this - it keeps accumulating every frame regardless of
+        // stick state, same as before.
+        Vector3 stickAimLastFlatDirection;
+        bool stickAimHasAimed;
 
         Vector3[] trajectoryBuffer;
 
@@ -379,7 +414,10 @@ namespace KineticEnergy.Player
             // charge-based scheme.
             if (facingArrow != null)
             {
-                bool showFacingArrow = controlScheme == ControlScheme.StickAim || controlScheme == ControlScheme.Mixed;
+                // Mixed's grounded phase behaves like the old scheme (no arrow there either) and
+                // its airborne phase reuses StickAim's charge system but isn't StickAim itself -
+                // direct request: the arrow "shouldn't appear for the 3rd control scheme".
+                bool showFacingArrow = controlScheme == ControlScheme.StickAim;
                 facingArrow.SetVisible(showFacingArrow);
                 facingArrow.SetFacingYaw(freeMoveController != null ? freeMoveController.FacingYaw : 0f);
             }
@@ -926,7 +964,7 @@ namespace KineticEnergy.Player
             Vector2 stick = moveAction != null && moveAction.action != null
                 ? moveAction.action.ReadValue<Vector2>()
                 : Vector2.zero;
-            bool stickHeld = stick.sqrMagnitude > aimDeadzone * aimDeadzone;
+            bool stickHeld = stick.sqrMagnitude > stickAimDeadzone * stickAimDeadzone;
             Vector3 stickDirection = stickHeld ? StickWorldDirection(stick) : Vector3.zero;
 
             bool cancelPressed = cancelChargeAction != null && cancelChargeAction.action != null && cancelChargeAction.action.WasPressedThisFrame();
@@ -947,12 +985,39 @@ namespace KineticEnergy.Player
                 };
 
                 chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime);
-                Vector3 dir = ComputeStickAimDirection(stickAimChargeType, stickHeld, stickDirection);
+                Vector3 dir;
+                if (stickHeld)
+                {
+                    dir = ComputeStickAimDirection(stickAimChargeType, true, stickDirection);
+                    stickAimLastFlatDirection = stickDirection;
+                    stickAimHasAimed = true;
+                }
+                else if (stickAimChargeType == StickAimChargeType.Forward)
+                {
+                    // Forward keeps launching the last direction the stick actually pointed (if
+                    // any), but drops to the shallow neutral angle the instant the stick isn't
+                    // held past stickAimDeadzone anymore - direct request: "the direction should
+                    // be frozen when launching forward but the lower angle should be used".
+                    Vector3 flat = stickAimHasAimed ? stickAimLastFlatDirection : FacingFlatDirection();
+                    dir = TiltedDirection(flat, stickAimForwardNeutralAngle);
+                }
+                else
+                {
+                    // Up/Down: always straight up/down the instant the stick isn't held past
+                    // stickAimDeadzone - unlike Forward, these never freeze at an angle (same
+                    // direct request).
+                    dir = ComputeStickAimDirection(stickAimChargeType, false, stickDirection);
+                }
+
                 float chargeFraction = ChargeFraction();
                 aimArrow?.SetAim(dir, chargeFraction);
 
                 float previewForce = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
-                float previewDamping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
+                // Down uses its own fixed, low damping so gravity stays visibly in control of the
+                // fall - see downLaunchDamping's own comment.
+                float previewDamping = stickAimChargeType == StickAimChargeType.Down
+                    ? downLaunchDamping
+                    : Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
 
                 // rb.linearVelocity is held at zero for the whole charge (see FixedUpdate), so
                 // unlike the charge-based schemes' initialVelocity this doesn't need to add it in.
@@ -1006,6 +1071,7 @@ namespace KineticEnergy.Player
         {
             stickAimChargeType = type;
             chargeTime = 0f;
+            stickAimHasAimed = false;
             // Instant stop, same reasoning as the charge-based schemes' aim-start - FixedUpdate
             // keeps re-applying this for the whole charge, not just this one frame, so an
             // airborne charge doesn't slowly start falling again from gravity.
