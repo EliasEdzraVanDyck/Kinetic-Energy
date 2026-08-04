@@ -17,8 +17,10 @@ namespace KineticEnergy.UI
         [Header("Panels")]
         public GameObject pausePanel;
         public GameObject controlsPanel;
+        public GameObject scenesPanel;
         public GameObject firstPauseButton;
         public GameObject firstControlsButton;
+        public GameObject firstScenesButton;
 
         [Header("Controls Text")]
         [TextArea]
@@ -47,6 +49,7 @@ namespace KineticEnergy.UI
             if (controlsBodyText != null) controlsBodyText.text = controlsText;
             pausePanel?.SetActive(false);
             controlsPanel?.SetActive(false);
+            scenesPanel?.SetActive(false);
         }
 
 #if UNITY_EDITOR
@@ -85,6 +88,7 @@ namespace KineticEnergy.UI
             Time.timeScale = 1f;
             pausePanel?.SetActive(false);
             controlsPanel?.SetActive(false);
+            scenesPanel?.SetActive(false);
             Select(null);
         }
 
@@ -106,6 +110,31 @@ namespace KineticEnergy.UI
             controlsPanel?.SetActive(false);
             pausePanel?.SetActive(true);
             Select(firstPauseButton);
+        }
+
+        public void OnScenesClicked()
+        {
+            pausePanel?.SetActive(false);
+            scenesPanel?.SetActive(true);
+            Select(firstScenesButton);
+        }
+
+        public void OnScenesBackClicked()
+        {
+            scenesPanel?.SetActive(false);
+            pausePanel?.SetActive(true);
+            Select(firstPauseButton);
+        }
+
+        // Called by each per-scene button in ScenesPanel (see KineticEnergySetup.BuildPauseSystem)
+        // with that scene's name baked in as a persistent listener argument - resets timeScale
+        // first for the same reason OnRestartClicked does: this component only ever calls
+        // LoadScene while paused (Time.timeScale == 0f), and leaving it at 0 would freeze the
+        // destination scene's own physics/Update-driven logic the instant it loads.
+        public void LoadSceneByName(string sceneName)
+        {
+            Time.timeScale = 1f;
+            SceneManager.LoadScene(sceneName);
         }
 
         public void OnQuitClicked()

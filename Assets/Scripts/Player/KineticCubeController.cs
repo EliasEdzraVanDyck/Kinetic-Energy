@@ -8,7 +8,10 @@ namespace KineticEnergy.Player
     {
         LaunchInstantly, // West: LT aims+charges over time together, RT press = instant launch (the original system)
         HoldRelease,     // North: LT aims only, RT held charges over time, RT release = launch
-        AnalogPressure   // East: LT aims only, charge directly tracks RT's analog pressure, RT release = launch
+        AnalogPressure,  // East: LT aims only, charge directly tracks RT's analog pressure, RT release = launch
+        StickAim         // RB toggles directly to/from this one - no charging or holding at all,
+                          // LT/RT each instantly fire in whatever direction the left stick is
+                          // currently pointing (see UpdateStickAimScheme).
     }
 
     [RequireComponent(typeof(Rigidbody))]
@@ -47,6 +50,23 @@ namespace KineticEnergy.Player
         public int maxPredictionSteps = 3000;
         public float previewLineHeight = 0.65f;
         public float restVelocityThreshold = 0.05f;
+        // Grounded+slow has to hold for this many consecutive seconds before a launch is
+        // considered actually landed, not just one single FixedUpdate tick. A vertical or
+        // steep shot's velocity crosses zero at its apex for barely more than a tick (gravity
+        // alone moves it back past restVelocityThreshold almost immediately), and the
+        // BoxCast-based isGrounded below is a PROXIMITY check (true within groundCheckDistance
+        // of a surface, not only while actually touching one) - a low apex can sit inside that
+        // proximity band too. Together a single-tick check could misread "still airborne, at
+        // the top of its arc" as "landed", which silently re-armed hasLaunched mid-flight and
+        // let the very next Update() tick's ltHeld (still requiring only !hasLaunched &&
+        // isGrounded) treat a still-held LT as starting a brand new aim - instantly zeroing
+        // velocity mid-air. That's what "cut off after an incredibly short time" actually was;
+        // it never touched OnCollisionEnter, which is why launchGraceDuration and
+        // minLaunchClearDistance had no effect no matter how they were tuned. A genuine landing
+        // stays slow and grounded continuously (friction/damping keep it there), so requiring
+        // the condition to hold this long costs no real responsiveness while completely
+        // filtering out the momentary apex dip.
+        public float restConfirmDuration = 0.1f;
         public float groundCheckDistance = 0.6f;
         public LandingPreviewController landingPreview;
 
@@ -62,6 +82,16 @@ namespace KineticEnergy.Player
         // inside this window is necessarily spurious and safe to ignore outright.
         public float launchGraceDuration = 0.15f;
 
+        // A fixed time window alone wasn't enough - a shallow, low-angle shot travels mostly
+        // horizontally and can stay close to (or dip back down near) its own launch platform for
+        // noticeably longer than a lofted one, so it could still genuinely re-touch that same
+        // platform right after the grace window expired, getting treated as a real landing and
+        // cutting the launch short - "cut off from launching if the angle is too low". This is a
+        // second, independent guard: also require the cube to have actually travelled at least
+        // this far from where it launched, regardless of how much time has passed, before a
+        // ground contact is allowed to count.
+        public float minLaunchClearDistance = 2f;
+
         [Header("Input")]
         public InputActionReference moveAction;
         public InputActionReference launchAction;
@@ -76,6 +106,28 @@ namespace KineticEnergy.Player
         public InputActionReference selectAnalogSchemeAction;
         public InputActionReference selectNoneAction;
 
+        [Header("Scheme Restriction")]
+        // Hold-Release and Analog kept, not removed, but not selectable for now - only Launch
+        // Instantly is reachable while this is false. Matches the same disable-without-deleting
+        // pattern as LandingPreviewController.ghostAndCrosshairEnabled.
+        public bool alternateSchemesEnabled = false;
+
+        [Header("Stick Aim Scheme")]
+        // RB toggles directly between LaunchInstantly and StickAim - always reachable regardless
+        // of alternateSchemesEnabled above, since both of these two specifically need to stay
+        // switchable during play, unlike Hold-Release/Analog.
+        public InputActionReference switchSchemeAction;
+        public float stickAimForce = 24f;
+        public float stickAimDamping = 1.2f;
+        // LT: launches straight up if the stick is centered (within aimDeadzone), or tilted this
+        // many degrees above horizontal toward wherever the stick is pointing otherwise.
+        // Grounded-only (see UpdateStickAimScheme) - reads as a "jump", not a mid-air move.
+        public float stickAimUpAngle = 80f;
+        // RT: same idea but shallower, and usable whether grounded or airborne - a follow-up
+        // boost/redirect off an existing LT launch, or a standalone low launch on its own. Falls
+        // back to facing forward (camera-relative), not straight up, when the stick is centered.
+        public float stickAimForwardAngle = 30f;
+
         Rigidbody rb;
         BoxCollider boxCollider;
         bool isAiming;
@@ -87,11 +139,42 @@ namespace KineticEnergy.Player
         float aimPitch;
         ControlScheme controlScheme = ControlScheme.LaunchInstantly;
 
+        // Split in two, not one flag - the two things a complementary movement system
+        // (KineticCubeControllerFreeMove) might do while a launch is in flight carry very
+        // different risk, and gating them the same way is what broke real launches: a fixed,
+        // short post-launch window (launchGraceTimer) becoming false again says nothing about
+        // whether the cube has actually LANDED. A shallow, low-angle shot stays close to the
+        // ground for far longer than the grace window lasts, so FreeMove's own, independent
+        // isGrounded check could easily read true again while the cube is still genuinely
+        // mid-flight - and its GROUNDED branch sets rb.linearVelocity directly every tick,
+        // silently overwriting the launch's actual velocity the instant that happened. That's
+        // the real "cut off from launching" bug: it had nothing to do with OnCollisionEnter,
+        // launchGraceDuration, or minLaunchClearDistance, which is exactly why tuning either had
+        // no effect, and why it was worse at low angles (shallow shots stay near the ground
+        // longer) and "random" at others (any trajectory that happens to pass close to any
+        // surface, launch platform or not).
+        //
+        // AllowGroundedMovement: safe for FreeMove to directly SET velocity (walking on the
+        // ground). Gated on the FULL flight (hasLaunched), not just the grace window - directly
+        // overwriting velocity is exactly what must never happen while a real launch is still in
+        // progress, no matter how close to some surface the cube's own ground check thinks it is.
+        public bool AllowGroundedMovement => !isAiming && !hasLaunched;
+
+        // AllowAirborneNudge: safe for FreeMove to apply a small, ADDITIVE force (air control,
+        // leaning) while genuinely airborne. Only needs to wait out the brief post-launch grace
+        // window, not the whole flight - an additive nudge can't stomp the launch the way
+        // directly setting velocity can, so there's no reason to also suppress this for the
+        // entire duration of every shot (which is what silently killed air-nudging for launched
+        // shots the last time this was "fixed").
+        public bool AllowAirborneNudge => !isAiming && launchGraceTimer <= 0f;
+
         bool launchQueued;
         Vector3 queuedDirection;
         float queuedForce;
         float queuedDamping;
         float launchGraceTimer;
+        Vector3 launchStartPosition;
+        float restTimer;
 
         Vector3[] trajectoryBuffer;
 
@@ -105,11 +188,16 @@ namespace KineticEnergy.Player
         bool predictionSceneReady;
         static int predictionSceneCounter;
 
+        KineticCubeControllerFreeMove freeMoveController;
+
         void Awake()
         {
             rb = GetComponent<Rigidbody>();
             boxCollider = GetComponent<BoxCollider>();
             trajectoryBuffer = new Vector3[Mathf.Max(maxPredictionSteps, 1)];
+            // Same Player object as KineticCubeControllerFreeMove - used to snap the visual to
+            // instantly face the launch direction the moment a launch fires (see FixedUpdate).
+            freeMoveController = GetComponent<KineticCubeControllerFreeMove>();
         }
 
         void Start()
@@ -132,6 +220,7 @@ namespace KineticEnergy.Player
             selectHoldReleaseSchemeAction?.action?.Enable();
             selectAnalogSchemeAction?.action?.Enable();
             selectNoneAction?.action?.Enable();
+            switchSchemeAction?.action?.Enable();
         }
 
         void OnDisable()
@@ -143,6 +232,7 @@ namespace KineticEnergy.Player
             selectHoldReleaseSchemeAction?.action?.Disable();
             selectAnalogSchemeAction?.action?.Disable();
             selectNoneAction?.action?.Disable();
+            switchSchemeAction?.action?.Disable();
         }
 
         void Update()
@@ -160,6 +250,13 @@ namespace KineticEnergy.Player
             }
 
             HandlePreviewModeSwitch();
+            HandleSchemeSwitch();
+
+            if (controlScheme == ControlScheme.StickAim)
+            {
+                UpdateStickAimScheme();
+                return;
+            }
 
             // Only one launch allowed per landing (hasLaunched), AND launching only ever starts
             // from a currently-grounded state (isGrounded, the same real-time raycast check
@@ -181,6 +278,13 @@ namespace KineticEnergy.Player
                 {
                     isAiming = true;
                     chargeTime = 0f;
+                    // Instantly stop dead, even if the complementary free-move system had the
+                    // cube moving right up until this frame - aiming has to start from a
+                    // perfectly stationary cube (AllowFreeMovement going false only stops NEW
+                    // movement input from being applied; it doesn't touch whatever velocity was
+                    // already there).
+                    rb.linearVelocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
                     SeedAimFromCamera();
                     aimArrow?.SetVisible(true);
                     landingPreview?.SetVisible(true);
@@ -265,6 +369,14 @@ namespace KineticEnergy.Player
                     queuedDamping = previewDamping;
                     launchQueued = true;
                     hasLaunched = true;
+                    // Armed here already (not just when FixedUpdate actually applies the
+                    // impulse) so AllowFreeMovement is already false the instant firing is
+                    // decided - closes a script-execution-order edge case where
+                    // KineticCubeControllerFreeMove's FixedUpdate could otherwise run before
+                    // this component's on the very first physics tick after firing, see it as
+                    // still "allowed", and set velocity directly moments before the impulse
+                    // itself gets applied.
+                    launchGraceTimer = launchGraceDuration;
 
                     isAiming = false;
                     chargeTime = 0f;
@@ -298,6 +410,7 @@ namespace KineticEnergy.Player
                     queuedDamping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
                     launchQueued = true;
                     hasLaunched = true;
+                    launchGraceTimer = launchGraceDuration; // see the same comment in the LaunchInstantly/HoldRelease launch branch above
                     waitingForLtRelease = true;
                 }
 
@@ -316,6 +429,8 @@ namespace KineticEnergy.Player
                 rb.linearDamping = queuedDamping;
                 rb.AddForce(queuedDirection * queuedForce, ForceMode.Impulse);
                 launchGraceTimer = launchGraceDuration;
+                launchStartPosition = transform.position;
+                freeMoveController?.FaceLaunchDirection(queuedDirection);
             }
 
             if (launchGraceTimer > 0f) launchGraceTimer -= Time.fixedDeltaTime;
@@ -345,10 +460,21 @@ namespace KineticEnergy.Player
             // Grounded alone isn't enough (a launch fired while already touching the floor never
             // triggers a fresh OnCollisionEnter, since contact was never broken - it just slides
             // to a stop via drag/friction), so this also waits for velocity to settle rather than
-            // relying only on the hard OnCollisionEnter stop below.
+            // relying only on the hard OnCollisionEnter stop below. Debounced over
+            // restConfirmDuration (see its own comment) rather than firing on a single qualifying
+            // tick - required to tell a genuine landing apart from a shot's apex momentarily
+            // reading the same as one.
             if (hasLaunched && isGrounded && rb.linearVelocity.sqrMagnitude < restVelocityThreshold * restVelocityThreshold)
             {
-                hasLaunched = false;
+                restTimer += Time.fixedDeltaTime;
+                if (restTimer >= restConfirmDuration)
+                {
+                    hasLaunched = false;
+                }
+            }
+            else
+            {
+                restTimer = 0f;
             }
         }
 
@@ -356,6 +482,10 @@ namespace KineticEnergy.Player
         {
             if (!IsGroundContact(collision)) return;
             if (launchGraceTimer > 0f) return;
+            // See minLaunchClearDistance's own comment - a second, independent guard alongside
+            // the time-based one above, for a shallow shot that can still genuinely re-touch its
+            // own launch platform after the grace window has already expired.
+            if (hasLaunched && Vector3.Distance(transform.position, launchStartPosition) < minLaunchClearDistance) return;
 
             // TEMPORARY diagnostic: logs exactly how far off the prediction was the moment it's
             // possible to measure (right as the real landing is detected), including which axis
@@ -397,12 +527,12 @@ namespace KineticEnergy.Player
                 controlScheme = ControlScheme.LaunchInstantly;
                 UpdateSchemeLabel();
             }
-            else if (selectHoldReleaseSchemeAction != null && selectHoldReleaseSchemeAction.action != null && selectHoldReleaseSchemeAction.action.WasPressedThisFrame())
+            else if (alternateSchemesEnabled && selectHoldReleaseSchemeAction != null && selectHoldReleaseSchemeAction.action != null && selectHoldReleaseSchemeAction.action.WasPressedThisFrame())
             {
                 controlScheme = ControlScheme.HoldRelease;
                 UpdateSchemeLabel();
             }
-            else if (selectAnalogSchemeAction != null && selectAnalogSchemeAction.action != null && selectAnalogSchemeAction.action.WasPressedThisFrame())
+            else if (alternateSchemesEnabled && selectAnalogSchemeAction != null && selectAnalogSchemeAction.action != null && selectAnalogSchemeAction.action.WasPressedThisFrame())
             {
                 controlScheme = ControlScheme.AnalogPressure;
                 UpdateSchemeLabel();
@@ -416,7 +546,120 @@ namespace KineticEnergy.Player
         void UpdateSchemeLabel()
         {
             if (landingPreview == null || landingPreview.modeLabel == null) return;
-            landingPreview.modeLabel.text = $"West: Launch Instantly   North: Hold-Release   East: Analog   South: Show/Hide   (scheme: {controlScheme})";
+            landingPreview.modeLabel.text = controlScheme == ControlScheme.StickAim
+                ? "LT: Jump (80 deg, grounded only)   RT: Launch (30 deg, ground or air)   RB: Switch Scheme"
+                : alternateSchemesEnabled
+                    ? $"West: Launch Instantly   North: Hold-Release   East: Analog   South: Show/Hide   RB: Switch Scheme   (scheme: {controlScheme})"
+                    : $"South: Show/Hide   RB: Switch Scheme   (scheme: {controlScheme})";
+        }
+
+        // RB always toggles between exactly these two schemes, regardless of which one is
+        // currently active or of alternateSchemesEnabled (that flag only governs whether
+        // West/North/East can reach Hold-Release/Analog - it has no bearing on this toggle).
+        void HandleSchemeSwitch()
+        {
+            if (switchSchemeAction == null || switchSchemeAction.action == null || !switchSchemeAction.action.WasPressedThisFrame()) return;
+
+            controlScheme = controlScheme == ControlScheme.StickAim ? ControlScheme.LaunchInstantly : ControlScheme.StickAim;
+
+            // Switching away from a charge-based scheme mid-aim needs the same clean cancel a
+            // normal LT release would do - once StickAim's own Update() branch takes over
+            // (see the early return above), the ltHeld/isAiming branch below is never reached
+            // again to do this itself, so isAiming would otherwise stay stuck true forever.
+            if (isAiming)
+            {
+                isAiming = false;
+                chargeTime = 0f;
+                aimArrow?.SetVisible(false);
+                landingPreview?.SetVisible(false);
+            }
+
+            UpdateSchemeLabel();
+        }
+
+        // No charging, no held-aim phase - LT/RT each instantly queue a launch the moment
+        // they're pressed, using wherever the left stick happens to be pointing (or a sensible
+        // default direction if it's centered) at that exact instant. Mid-air adjustment and
+        // ground movement both come from KineticCubeControllerFreeMove exactly as they do for
+        // every other scheme (see AllowGroundedMovement/AllowAirborneNudge) - this scheme never
+        // sets isAiming, so those properties behave the same as if nothing were being aimed.
+        void UpdateStickAimScheme()
+        {
+            Vector2 stick = moveAction != null && moveAction.action != null
+                ? moveAction.action.ReadValue<Vector2>()
+                : Vector2.zero;
+            bool stickHeld = stick.sqrMagnitude > aimDeadzone * aimDeadzone;
+            Vector3 stickDirection = stickHeld ? StickWorldDirection(stick) : Vector3.zero;
+
+            bool ltPressed = launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
+            bool rtPressed = fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
+
+            if (ltPressed && isGrounded && !hasLaunched)
+            {
+                Vector3 dir = stickHeld ? TiltedDirection(stickDirection, stickAimUpAngle) : Vector3.up;
+                QueueStickAimLaunch(dir);
+            }
+            else if (rtPressed)
+            {
+                // Deliberately NOT gated on isGrounded/hasLaunched the way the LT branch is -
+                // this is meant to work as a mid-air follow-up to an LT jump (re-queuing a fresh
+                // launch while hasLaunched is already true from the first one) just as much as a
+                // standalone grounded launch.
+                Vector3 flatDir = stickHeld ? stickDirection : CameraForwardFlat();
+                Vector3 dir = TiltedDirection(flatDir, stickAimForwardAngle);
+                QueueStickAimLaunch(dir);
+            }
+        }
+
+        void QueueStickAimLaunch(Vector3 direction)
+        {
+            // Instant, predictable launches every time - same reasoning as the aim-start instant
+            // stop in the charge-based schemes: zeroing first means a mid-air RT re-launch always
+            // produces exactly stickAimForce in the new direction, never additively stacked on
+            // top of whatever velocity the cube already had.
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+
+            queuedDirection = direction;
+            queuedForce = stickAimForce;
+            queuedDamping = stickAimDamping;
+            launchQueued = true;
+            hasLaunched = true;
+            launchGraceTimer = launchGraceDuration;
+        }
+
+        // Takes a flat (Y=0) direction and tilts it upward by angleDeg above horizontal,
+        // producing a unit 3D launch direction.
+        static Vector3 TiltedDirection(Vector3 flatDirection, float angleDeg)
+        {
+            float rad = angleDeg * Mathf.Deg2Rad;
+            Vector3 flat = flatDirection.sqrMagnitude > 0.0001f ? flatDirection.normalized : Vector3.forward;
+            return flat * Mathf.Cos(rad) + Vector3.up * Mathf.Sin(rad);
+        }
+
+        Vector3 StickWorldDirection(Vector2 stick)
+        {
+            Vector3 dir = CameraForwardFlat() * stick.y + CameraRightFlat() * stick.x;
+            return dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.forward;
+        }
+
+        // Same camera-relative-forward/right convention as KineticCubeControllerFreeMove's own
+        // CameraRelativeForward/Right (duplicated rather than shared across the two components -
+        // it's two short lines each, not worth an abstraction for).
+        Vector3 CameraForwardFlat()
+        {
+            if (cameraTransform == null) return Vector3.forward;
+            Vector3 f = cameraTransform.forward;
+            f.y = 0f;
+            return f.sqrMagnitude > 0.0001f ? f.normalized : Vector3.forward;
+        }
+
+        Vector3 CameraRightFlat()
+        {
+            if (cameraTransform == null) return Vector3.right;
+            Vector3 r = cameraTransform.right;
+            r.y = 0f;
+            return r.sqrMagnitude > 0.0001f ? r.normalized : Vector3.right;
         }
 
         // Runs the ACTUAL Unity physics engine on a hidden stand-in Rigidbody, fast-forwarded

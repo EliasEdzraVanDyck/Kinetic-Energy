@@ -148,6 +148,15 @@
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
+                },
+                {
+                    "name": "SwitchControlScheme",
+                    "type": "Button",
+                    "id": "e1f20314-2536-4758-99a1-b2c3d4e5f607",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
                 }
             ],
             "bindings": [
@@ -698,6 +707,28 @@
                     "processors": "",
                     "groups": "Keyboard&Mouse",
                     "action": "SelectNonePreview",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "f1e20314-3546-4859-9a2b-3c4d5e6f7081",
+                    "path": "<Gamepad>/rightShoulder",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Gamepad",
+                    "action": "SwitchControlScheme",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "02e30415-4657-4970-ab3c-4d5e6f708192",
+                    "path": "<Keyboard>/tab",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Keyboard&Mouse",
+                    "action": "SwitchControlScheme",
                     "isComposite": false,
                     "isPartOfComposite": false
                 }

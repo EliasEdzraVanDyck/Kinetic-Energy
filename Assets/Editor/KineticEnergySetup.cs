@@ -24,6 +24,15 @@ namespace KineticEnergy.EditorSetup
         const string ActionsPath = "Assets/InputSystem_Actions.inputactions";
         const string PrefabFolder = "Assets/Prefabs";
 
+        // Label, then the actual scene name LoadSceneByName gets called with (must match a scene
+        // in EditorBuildSettings.scenes - see UpdateBuildSettings). Add an entry here for any
+        // future scene and BuildPauseSystem picks it up automatically, no other changes needed.
+        static readonly (string label, string sceneName)[] SceneMenuEntries =
+        {
+            ("Sandbox", "Sandbox Scene"),
+            ("Level 1", "Level1"),
+        };
+
         public static void SetupAll()
         {
             RenameSandboxSceneIfNeeded();
@@ -61,6 +70,7 @@ namespace KineticEnergy.EditorSetup
             InputActionReference selectTrailRef = FindActionReference("Player", "SelectTrailPreview");
             InputActionReference selectCrosshairRef = FindActionReference("Player", "SelectCrosshairPreview");
             InputActionReference selectNoneRef = FindActionReference("Player", "SelectNonePreview");
+            InputActionReference switchSchemeRef = FindActionReference("Player", "SwitchControlScheme");
 
             GameObject player = GameObject.Find("Player");
             if (player == null) throw new Exception("KineticEnergySetup: could not find 'Player' GameObject in scene.");
@@ -68,7 +78,8 @@ namespace KineticEnergy.EditorSetup
             GameObject mainCamGo = GameObject.Find("Main Camera");
             if (mainCamGo == null) throw new Exception("KineticEnergySetup: could not find 'Main Camera' GameObject in scene.");
 
-            KineticCubeController controller = BuildPlayerCube(player, moveRef, launchRef, fireRef, selectGhostRef, selectTrailRef, selectCrosshairRef, selectNoneRef);
+            KineticCubeController controller = BuildPlayerCube(player, moveRef, launchRef, fireRef, selectGhostRef, selectTrailRef, selectCrosshairRef, selectNoneRef, switchSchemeRef,
+                out KineticCubeControllerFreeMove freeMoveController);
             ThirdPersonOrbitCamera orbitCam = BuildCameraRig(mainCamGo, lookRef);
 
             if (!AssetDatabase.IsValidFolder(PrefabFolder))
@@ -83,8 +94,10 @@ namespace KineticEnergy.EditorSetup
             PrefabUtility.SaveAsPrefabAssetAndConnect(mainCamGo, PrefabFolder + "/ThirdPersonCameraRig.prefab", InteractionMode.AutomatedAction);
 
             controller.cameraTransform = mainCamGo.transform;
+            freeMoveController.cameraTransform = mainCamGo.transform;
             orbitCam.target = player.transform;
             EditorUtility.SetDirty(controller);
+            EditorUtility.SetDirty(freeMoveController);
             EditorUtility.SetDirty(orbitCam);
 
             Text previewModeLabel = BuildPauseSystem(pauseRef);
@@ -93,6 +106,10 @@ namespace KineticEnergy.EditorSetup
             // rule applies, so this wiring happens on the scene instances, after both are saved.
             controller.landingPreview.modeLabel = previewModeLabel;
             EditorUtility.SetDirty(controller.landingPreview);
+
+            BuildPlayerShadow(player.transform);
+            BuildSandboxSignText();
+            BuildSandboxPlatforms(player.transform.position);
 
             Scene scene = EditorSceneManager.GetActiveScene();
             EditorSceneManager.MarkSceneDirty(scene);
@@ -156,6 +173,7 @@ namespace KineticEnergy.EditorSetup
             GameObject pauseGo = (GameObject)PrefabUtility.InstantiatePrefab(pauseAsset);
 
             KineticCubeController controller = playerGo.GetComponent<KineticCubeController>();
+            KineticCubeControllerFreeMove freeMoveController = playerGo.GetComponent<KineticCubeControllerFreeMove>();
             ThirdPersonOrbitCamera orbitCam = camGo.GetComponent<ThirdPersonOrbitCamera>();
 
             // Same cross-hierarchy wiring as Setup() does for Sandbox Scene, but these are plain
@@ -163,12 +181,14 @@ namespace KineticEnergy.EditorSetup
             // assigned directly - the "save both assets first" rule only applies when the
             // instance itself is about to be captured back into a .prefab file.
             controller.cameraTransform = camGo.transform;
+            freeMoveController.cameraTransform = camGo.transform;
             orbitCam.target = playerGo.transform;
 
             Text modeLabel = pauseGo.transform.Find("PauseCanvas/PreviewModeLabel")?.GetComponent<Text>();
             controller.landingPreview.modeLabel = modeLabel;
 
             EditorUtility.SetDirty(controller);
+            EditorUtility.SetDirty(freeMoveController);
             EditorUtility.SetDirty(orbitCam);
             EditorUtility.SetDirty(controller.landingPreview);
 
@@ -196,6 +216,8 @@ namespace KineticEnergy.EditorSetup
             // stay comfortably inside the floor's half-extent (safetyFloorSize / 2) or a shot far
             // out toward the edge of a heavily-drifted layout could miss the safety net entirely.
             generator.safetyFloorSize = 260f;
+
+            BuildPlayerShadow(playerGo.transform);
 
             Scene level1Scene = EditorSceneManager.GetActiveScene();
             EditorSceneManager.MarkSceneDirty(level1Scene);
@@ -261,17 +283,52 @@ namespace KineticEnergy.EditorSetup
         }
 
         static KineticCubeController BuildPlayerCube(GameObject player, InputActionReference moveRef, InputActionReference launchRef, InputActionReference fireRef,
-            InputActionReference selectGhostRef, InputActionReference selectTrailRef, InputActionReference selectCrosshairRef, InputActionReference selectNoneRef)
+            InputActionReference selectGhostRef, InputActionReference selectTrailRef, InputActionReference selectCrosshairRef, InputActionReference selectNoneRef,
+            InputActionReference switchSchemeRef,
+            out KineticCubeControllerFreeMove freeMoveController)
         {
             SphereCollider oldCollider = player.GetComponent<SphereCollider>();
             if (oldCollider != null) UnityEngine.Object.DestroyImmediate(oldCollider);
 
-            MeshFilter meshFilter = player.GetComponent<MeshFilter>();
-            meshFilter.sharedMesh = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
-
             if (player.GetComponent<BoxCollider>() == null)
             {
                 player.AddComponent<BoxCollider>();
+            }
+
+            // The visible mesh lives on its own "Visual" child rather than directly on the
+            // physics root - KineticCubeControllerFreeMove leans it while airborne, and the root
+            // Rigidbody has to stay upright (FreezeRotation, set below) for its BoxCast ground
+            // check to keep working exactly like KineticCubeController's does. Idempotent: only
+            // moves anything the first time this runs - on a re-run the root's MeshFilter/
+            // MeshRenderer are already gone, having been moved to Visual previously.
+            MeshFilter rootMeshFilter = player.GetComponent<MeshFilter>();
+            MeshRenderer rootMeshRenderer = player.GetComponent<MeshRenderer>();
+
+            Transform visualTransform = player.transform.Find("Visual");
+            GameObject visualGo = visualTransform != null ? visualTransform.gameObject : new GameObject("Visual");
+            visualGo.transform.SetParent(player.transform, false);
+            visualGo.transform.localPosition = Vector3.zero;
+            visualGo.transform.localRotation = Quaternion.identity;
+            visualGo.transform.localScale = Vector3.one;
+
+            MeshFilter visualMeshFilter = visualGo.GetComponent<MeshFilter>();
+            if (visualMeshFilter == null) visualMeshFilter = visualGo.AddComponent<MeshFilter>();
+            MeshRenderer visualMeshRenderer = visualGo.GetComponent<MeshRenderer>();
+            if (visualMeshRenderer == null) visualMeshRenderer = visualGo.AddComponent<MeshRenderer>();
+
+            if (rootMeshFilter != null)
+            {
+                visualMeshFilter.sharedMesh = rootMeshFilter.sharedMesh;
+                UnityEngine.Object.DestroyImmediate(rootMeshFilter);
+            }
+            if (rootMeshRenderer != null)
+            {
+                visualMeshRenderer.sharedMaterial = rootMeshRenderer.sharedMaterial;
+                UnityEngine.Object.DestroyImmediate(rootMeshRenderer);
+            }
+            if (visualMeshFilter.sharedMesh == null)
+            {
+                visualMeshFilter.sharedMesh = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
             }
 
             Rigidbody rb = player.GetComponent<Rigidbody>();
@@ -305,8 +362,11 @@ namespace KineticEnergy.EditorSetup
             controller.maxPredictionSteps = 3000;
             controller.previewLineHeight = 0.65f;
             controller.restVelocityThreshold = 0.05f;
+            controller.restConfirmDuration = 0.1f;
             controller.groundCheckDistance = 0.6f;
             controller.fallResetY = -30f;
+            controller.launchGraceDuration = 0.15f;
+            controller.minLaunchClearDistance = 2f;
             controller.moveAction = moveRef;
             controller.launchAction = launchRef;
             controller.fireAction = fireRef;
@@ -314,8 +374,43 @@ namespace KineticEnergy.EditorSetup
             controller.selectHoldReleaseSchemeAction = selectTrailRef;
             controller.selectAnalogSchemeAction = selectCrosshairRef;
             controller.selectNoneAction = selectNoneRef;
+            controller.switchSchemeAction = switchSchemeRef;
             controller.aimArrow = BuildAimArrow(player.transform);
             controller.landingPreview = BuildLandingPreview(player.transform);
+
+            // Hold-Release and Analog kept in the project, not removed, but not selectable for
+            // now - Launch Instantly is the only reachable scheme (see HandlePreviewModeSwitch).
+            controller.alternateSchemesEnabled = false;
+            controller.stickAimForce = 24f;
+            controller.stickAimDamping = 1.2f;
+            controller.stickAimUpAngle = 80f;
+            controller.stickAimForwardAngle = 30f;
+
+            // The core launch mechanic - always enabled. Runs together with
+            // KineticCubeControllerFreeMove below rather than one disabling the other; the two
+            // coordinate directly (see KineticCubeController.AllowGroundedMovement /
+            // AllowAirborneNudge) so free movement only ever goes passive for exactly as long as
+            // each specific kind of movement is actually unsafe, instead of needing to be toggled
+            // off entirely.
+            controller.enabled = true;
+
+            freeMoveController = player.GetComponent<KineticCubeControllerFreeMove>();
+            if (freeMoveController == null) freeMoveController = player.AddComponent<KineticCubeControllerFreeMove>();
+
+            freeMoveController.moveSpeed = 4f;
+            freeMoveController.moveDeadzone = 0.15f;
+            freeMoveController.airControlAcceleration = 3f;
+            freeMoveController.airControlDeadzone = 0.1f;
+            freeMoveController.maxLeanAngle = 22f;
+            freeMoveController.leanSpeed = 8f;
+            freeMoveController.groundCheckDistance = 0.6f;
+            freeMoveController.fallResetY = -30f;
+            freeMoveController.moveAction = moveRef;
+            freeMoveController.visual = visualGo.transform;
+
+            // Also always enabled - see the comment on controller.enabled above. Free movement
+            // and launching are complementary now, not alternatives to switch between.
+            freeMoveController.enabled = true;
 
             return controller;
         }
@@ -356,6 +451,175 @@ namespace KineticEnergy.EditorSetup
             indicator.SetVisible(false);
 
             return indicator;
+        }
+
+        // Deliberately NOT parented under the player (unlike AimArrow above) - it needs to sit at
+        // ground level via its own raycast, independent of however high the player currently is,
+        // so a child transform (which would inherit the player's height) wouldn't work here.
+        // Found/destroyed by name instead of the parent.Find(...) pattern above for the same
+        // reason - there's no meaningful parent to search under.
+        static void BuildPlayerShadow(Transform player)
+        {
+            GameObject existing = GameObject.Find("PlayerShadow");
+            if (existing != null) UnityEngine.Object.DestroyImmediate(existing);
+
+            GameObject shadowGo = new GameObject("PlayerShadow");
+            PlayerShadow shadowScript = shadowGo.AddComponent<PlayerShadow>();
+
+            GameObject visualGo = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            visualGo.name = "ShadowVisual";
+            visualGo.transform.SetParent(shadowGo.transform, false);
+            UnityEngine.Object.DestroyImmediate(visualGo.GetComponent<Collider>());
+
+            // A cylinder's flat caps already face up/down with no rotation needed - scaling its
+            // height down to near-nothing turns it into a flat disc, the simplest way to get a
+            // circular shadow shape out of a built-in primitive without a custom mesh or texture.
+            const float diameter = 1.6f;
+            const float thickness = 0.02f;
+            visualGo.transform.localScale = new Vector3(diameter, thickness, diameter);
+
+            Color shadowColor = new Color(0f, 0f, 0f, 0.5f);
+            Material shadowMat = new Material(FindBestShader());
+            shadowMat.color = shadowColor;
+            MakeTransparent(shadowMat, shadowColor.a);
+            shadowMat = SaveMaterialAsset(shadowMat, "PlayerShadowMaterial");
+            visualGo.GetComponent<Renderer>().sharedMaterial = shadowMat;
+
+            shadowScript.player = player;
+            shadowScript.shadowVisual = visualGo.transform;
+            shadowScript.maxDistance = 500f;
+            shadowScript.surfaceOffset = 0.02f;
+
+            EditorUtility.SetDirty(shadowScript);
+        }
+
+        static void BuildSandboxSignText()
+        {
+            // Leftover from this method's previous world-space-TextMesh version, which used to
+            // idempotency-check under this name - a scene saved by that old version would
+            // otherwise keep this orphaned GameObject around forever, since nothing looks for it
+            // by this name anymore.
+            GameObject stale = GameObject.Find("SandboxSignText");
+            if (stale != null) UnityEngine.Object.DestroyImmediate(stale);
+
+            GameObject existing = GameObject.Find("ParkourHint");
+            if (existing != null) UnityEngine.Object.DestroyImmediate(existing);
+
+            // Its own standalone Canvas rather than a child of PauseSystem's PauseCanvas -
+            // PauseSystem is a shared prefab instantiated identically in both scenes, and this
+            // message ("head to the Parkour level") only makes sense in Sandbox Scene, so it
+            // needs to exist independently of that shared hierarchy rather than as an override
+            // on top of it.
+            GameObject root = new GameObject("ParkourHint");
+            Canvas canvas = root.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 50; // below PauseCanvas's 100, so pausing immediately still draws on top
+
+            CanvasScaler scaler = root.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+
+            GameObject textGo = new GameObject("ParkourHintText", typeof(RectTransform));
+            textGo.transform.SetParent(root.transform, false);
+            RectTransform rt = textGo.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(1f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(1f, 1f);
+            rt.anchoredPosition = new Vector2(-24f, -24f);
+            rt.sizeDelta = new Vector2(460f, 140f);
+
+            Text text = textGo.AddComponent<Text>();
+            text.font = FindBestFont();
+            text.fontSize = 22;
+            text.alignment = TextAnchor.UpperRight;
+            text.color = Color.white;
+            text.text =
+                "Once you're comfortable with the controls,\n" +
+                "you can head to the Parkour level\n" +
+                "through the Pause Menu.";
+
+            Shadow shadow = textGo.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.85f);
+            shadow.effectDistance = new Vector2(1.5f, -1.5f);
+
+            TimedMessage timed = textGo.AddComponent<TimedMessage>();
+            timed.displayDuration = 3f;
+        }
+
+        const int SandboxPlatformCount = 5;
+        // 8.5 sits in the empirically-measured gap between what a shallow shot near minimum
+        // charge reaches (angle 10-25 deg, charge 0.05-0.20 -> ~2.2 to ~6.5m) and what a steep
+        // shot near max charge reaches (angle 55-75 deg, charge 0.85-1.0 -> ~10.4 to ~33m) -
+        // verified with a temporary real-physics batch simulation (mirroring
+        // KineticCubeController's actual force/damping curve) rather than guessed, since drag
+        // makes this non-linear enough that eyeballing it would likely be wrong. Both play styles
+        // land within reach of this radius once the jitter below is factored in.
+        const float SandboxPlatformRadius = 8.5f;
+        const float SandboxPlatformRadiusJitter = 1.5f;
+        const float SandboxPlatformAngleJitterDeg = 10f;
+        // How far the platform's BOTTOM face sits above the ground plane - always strictly
+        // positive (see the bug note on BuildSandboxPlatforms below), so this is a clearance
+        // range, not a center-position jitter that could go negative.
+        const float SandboxPlatformMinGap = 0.02f;
+        const float SandboxPlatformMaxGap = 0.15f;
+
+        static void BuildSandboxPlatforms(Vector3 spawnPosition)
+        {
+            GameObject container = GameObject.Find("SandboxPlatforms");
+            if (container != null) UnityEngine.Object.DestroyImmediate(container);
+            container = new GameObject("SandboxPlatforms");
+
+            GameObject planeGo = GameObject.Find("Plane");
+            float groundY = planeGo != null ? planeGo.transform.position.y : 0f;
+
+            Material platformMat = new Material(FindBestShader());
+            platformMat.color = new Color(1f, 0.55f, 0.15f);
+            platformMat = SaveMaterialAsset(platformMat, "SandboxPlatformMaterial");
+
+            Vector3 platformSize = new Vector3(2.2f, 0.3f, 2.2f);
+
+            // Baked directly into the scene here, once, at edit time - deliberately NOT a
+            // runtime spawner (unlike LevelGenerator, which regenerates Level1's platforms every
+            // time that scene loads). These are meant to just sit in Sandbox Scene as permanent
+            // fixtures the same way the Plane/Player/PauseSystem already do.
+            //
+            // BUG NOTE (found via the trail-flicker report - flickers only while standing on a
+            // platform, never on the open plane): the original center-position formula here was
+            // `groundY + protrusion - platformSize.y * 0.5f` with protrusion averaging 0.12
+            // against a platform half-height of 0.15 - i.e. the platform's bottom face was BELOW
+            // groundY in the typical case, genuinely overlapping the plane's collider rather than
+            // just resting on it. KineticCubeController's landing-preview prediction clones every
+            // static collider into an isolated PhysicsScene and simulates real physics through
+            // it (PredictLandingPoint/BuildPredictionGeometryProxies) - contact resolution right
+            // at an overlapping-collider seam is exactly the kind of degenerate geometry that
+            // produces unstable, frame-to-frame-varying contact normals, which would show up as
+            // exactly this symptom: fine on the plane (a single unambiguous surface), unstable on
+            // a platform (two overlapping surfaces right underfoot). Fixed below by keeping the
+            // platform's bottom face strictly above groundY at all times.
+            for (int i = 0; i < SandboxPlatformCount; i++)
+            {
+                // Evenly spaced base angle (360/count apart) plus jitter on angle AND radius -
+                // jittering angle alone would keep every platform on a perfect circle just
+                // unevenly spaced around it; jittering radius too is what actually breaks the
+                // circle shape itself.
+                float angleDeg = i * (360f / SandboxPlatformCount) + UnityEngine.Random.Range(-SandboxPlatformAngleJitterDeg, SandboxPlatformAngleJitterDeg);
+                float radius = SandboxPlatformRadius + UnityEngine.Random.Range(-SandboxPlatformRadiusJitter, SandboxPlatformRadiusJitter);
+                float angleRad = angleDeg * Mathf.Deg2Rad;
+
+                float x = spawnPosition.x + radius * Mathf.Sin(angleRad);
+                float z = spawnPosition.z + radius * Mathf.Cos(angleRad);
+                // Bottom face at groundY + gap (gap always > 0), NOT a center-position jitter
+                // that could push the bottom face below groundY - see the bug note above.
+                float gap = UnityEngine.Random.Range(SandboxPlatformMinGap, SandboxPlatformMaxGap);
+                float y = groundY + gap + platformSize.y * 0.5f;
+
+                GameObject platform = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                platform.name = "SandboxPlatform" + i;
+                platform.transform.SetParent(container.transform, true);
+                platform.transform.position = new Vector3(x, y, z);
+                platform.transform.localScale = platformSize;
+                platform.GetComponent<Renderer>().sharedMaterial = platformMat;
+            }
         }
 
         static LandingPreviewController BuildLandingPreview(Transform parent)
@@ -503,7 +767,9 @@ namespace KineticEnergy.EditorSetup
             // Rebuild the panels fresh each run rather than patching them in place.
             DestroyChildIfExists(canvasGo.transform, "PausePanel");
             DestroyChildIfExists(canvasGo.transform, "ControlsPanel");
+            DestroyChildIfExists(canvasGo.transform, "ScenesPanel");
             DestroyChildIfExists(canvasGo.transform, "PreviewModeLabel");
+            DestroyChildIfExists(canvasGo.transform, "ControlsHintLabel");
 
             // Created before the panels below so it's an earlier sibling and renders BEHIND
             // them - otherwise this permanent corner label would poke through the pause backdrop.
@@ -522,11 +788,42 @@ namespace KineticEnergy.EditorSetup
             previewModeLabel.color = Color.white;
             previewModeLabel.text = "";
 
+            // Always-on control reminder, top-left corner - unlike ControlsPanel (above) this
+            // doesn't need the pause menu opened to read. Same earlier-sibling trick as
+            // PreviewModeLabel so the pause backdrop still covers it while paused.
+            GameObject hintGo = new GameObject("ControlsHintLabel", typeof(RectTransform));
+            hintGo.transform.SetParent(canvasGo.transform, false);
+            RectTransform hintRt = hintGo.GetComponent<RectTransform>();
+            hintRt.anchorMin = new Vector2(0f, 1f);
+            hintRt.anchorMax = new Vector2(0f, 1f);
+            hintRt.pivot = new Vector2(0f, 1f);
+            hintRt.anchoredPosition = new Vector2(24f, -24f);
+            hintRt.sizeDelta = new Vector2(460f, 220f);
+            Text hintText = hintGo.AddComponent<Text>();
+            hintText.font = font;
+            hintText.fontSize = 20;
+            hintText.alignment = TextAnchor.UpperLeft;
+            hintText.color = new Color(1f, 1f, 1f, 0.9f);
+            hintText.text =
+                "Move: Left Stick\n" +
+                "Aim: Left Trigger (hold)\n" +
+                "Adjust Aim: Left Stick (while aiming)\n" +
+                "Launch: Right Trigger\n" +
+                "Camera: Right Stick\n" +
+                "Toggle Preview: South\n" +
+                "Pause: Start / Options / Esc";
+            // Plain white text on top of a busy 3D scene is often unreadable depending on
+            // background - a soft drop shadow keeps it legible without needing a backing panel.
+            Shadow hintShadow = hintGo.AddComponent<Shadow>();
+            hintShadow.effectColor = new Color(0f, 0f, 0f, 0.85f);
+            hintShadow.effectDistance = new Vector2(1.5f, -1.5f);
+
             GameObject pausePanel = CreatePanel("PausePanel", canvasGo.transform, backdrop);
-            CreateText("Title", pausePanel.transform, "PAUSED", font, 48, new Vector2(0f, 160f), new Vector2(600f, 80f));
-            GameObject restartBtn = CreateButton("RestartButton", pausePanel.transform, "Restart", font, accent, new Vector2(0f, 50f), new Vector2(300f, 70f));
-            GameObject controlsBtn = CreateButton("ControlsButton", pausePanel.transform, "Controls", font, accent, new Vector2(0f, -40f), new Vector2(300f, 70f));
-            GameObject quitBtn = CreateButton("QuitButton", pausePanel.transform, "Quit", font, accent, new Vector2(0f, -130f), new Vector2(300f, 70f));
+            CreateText("Title", pausePanel.transform, "PAUSED", font, 48, new Vector2(0f, 200f), new Vector2(600f, 80f));
+            GameObject restartBtn = CreateButton("RestartButton", pausePanel.transform, "Restart", font, accent, new Vector2(0f, 95f), new Vector2(300f, 70f));
+            GameObject scenesBtn = CreateButton("ScenesButton", pausePanel.transform, "Scenes", font, accent, new Vector2(0f, 5f), new Vector2(300f, 70f));
+            GameObject controlsBtn = CreateButton("ControlsButton", pausePanel.transform, "Controls", font, accent, new Vector2(0f, -85f), new Vector2(300f, 70f));
+            GameObject quitBtn = CreateButton("QuitButton", pausePanel.transform, "Quit", font, accent, new Vector2(0f, -175f), new Vector2(300f, 70f));
 
             GameObject controlsPanel = CreatePanel("ControlsPanel", canvasGo.transform, backdrop);
             CreateText("ControlsTitle", controlsPanel.transform, "CONTROLS", font, 48, new Vector2(0f, 220f), new Vector2(600f, 80f));
@@ -534,8 +831,20 @@ namespace KineticEnergy.EditorSetup
             controlsBody.alignment = TextAnchor.MiddleLeft;
             GameObject backBtn = CreateButton("BackButton", controlsPanel.transform, "Back", font, accent, new Vector2(0f, -170f), new Vector2(300f, 70f));
 
+            GameObject scenesPanel = CreatePanel("ScenesPanel", canvasGo.transform, backdrop);
+            CreateText("ScenesTitle", scenesPanel.transform, "SCENES", font, 48, new Vector2(0f, 220f), new Vector2(600f, 80f));
+            GameObject[] sceneButtons = new GameObject[SceneMenuEntries.Length];
+            float sceneButtonY = 100f;
+            for (int i = 0; i < SceneMenuEntries.Length; i++)
+            {
+                sceneButtons[i] = CreateButton("Scene_" + i + "Button", scenesPanel.transform, SceneMenuEntries[i].label, font, accent, new Vector2(0f, sceneButtonY), new Vector2(300f, 70f));
+                sceneButtonY -= 90f;
+            }
+            GameObject scenesBackBtn = CreateButton("ScenesBackButton", scenesPanel.transform, "Back", font, accent, new Vector2(0f, sceneButtonY - 40f), new Vector2(300f, 70f));
+
             pausePanel.SetActive(false);
             controlsPanel.SetActive(false);
+            scenesPanel.SetActive(false);
 
             GameObject controllerGo = FindOrCreateChild(root.transform, "PauseController");
             PauseController controller = controllerGo.GetComponent<PauseController>();
@@ -544,9 +853,24 @@ namespace KineticEnergy.EditorSetup
             controller.pauseAction = pauseRef;
             controller.pausePanel = pausePanel;
             controller.controlsPanel = controlsPanel;
+            controller.scenesPanel = scenesPanel;
             controller.firstPauseButton = restartBtn;
             controller.firstControlsButton = backBtn;
+            controller.firstScenesButton = sceneButtons.Length > 0 ? sceneButtons[0] : scenesBackBtn;
             controller.controlsBodyText = controlsBody;
+            // Explicitly (re)assigned, same reason as every KineticCubeController tunable above -
+            // a serialized value from a previous Setup() run would otherwise keep showing the old
+            // charge-and-launch instructions even after this default string changes in code.
+            controller.controlsText =
+                "Left Stick - Move (on the ground, while not aiming)\n" +
+                "Left Stick (in the air) - Nudge distance / drift sideways\n" +
+                "Left Trigger - Aim (hold; the cube stays put)\n" +
+                "Left Stick (while aiming) - Adjust aim direction\n" +
+                "Right Trigger - Launch\n" +
+                "South - Show/hide the landing preview\n" +
+                "Right Stick - Camera\n" +
+                "Start / Options / Esc - Pause\n\n" +
+                "(Hold-Release and Analog launch schemes are still in the project, just disabled)";
 
             // Persistent listeners only: Button.onClick.AddListener() from an Editor script
             // registers a runtime-only delegate that is NOT serialized, so it would silently
@@ -556,6 +880,12 @@ namespace KineticEnergy.EditorSetup
             WireButton(controlsBtn, controller.OnControlsClicked);
             WireButton(quitBtn, controller.OnQuitClicked);
             WireButton(backBtn, controller.OnControlsBackClicked);
+            WireButton(scenesBtn, controller.OnScenesClicked);
+            WireButton(scenesBackBtn, controller.OnScenesBackClicked);
+            for (int i = 0; i < SceneMenuEntries.Length; i++)
+            {
+                WireSceneButton(sceneButtons[i], controller.LoadSceneByName, SceneMenuEntries[i].sceneName);
+            }
 
             if (!AssetDatabase.IsValidFolder(PrefabFolder))
             {
@@ -572,6 +902,17 @@ namespace KineticEnergy.EditorSetup
             // see DestroyChildIfExists above), so there's never an existing listener to clear first.
             Button button = buttonGo.GetComponent<Button>();
             UnityEventTools.AddPersistentListener(button.onClick, call);
+        }
+
+        // Same persistence reasoning as WireButton, but for LoadSceneByName(string) - each scene
+        // button needs a different baked-in argument, which AddPersistentListener (no-arg only)
+        // can't express. AddStringPersistentListener wires the call AND sets that fixed argument
+        // as a serialized persistent value, equivalent to typing it into the Inspector's onClick
+        // argument field by hand.
+        static void WireSceneButton(GameObject buttonGo, UnityEngine.Events.UnityAction<string> call, string arg)
+        {
+            Button button = buttonGo.GetComponent<Button>();
+            UnityEventTools.AddStringPersistentListener(button.onClick, call, arg);
         }
 
         static GameObject FindOrCreateChild(Transform parent, string name)
