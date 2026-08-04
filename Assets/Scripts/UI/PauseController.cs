@@ -23,13 +23,9 @@ namespace KineticEnergy.UI
         public GameObject firstScenesButton;
 
         [Header("Controls Text")]
-        [TextArea]
-        public string controlsText =
-            "Left Stick - Aim while charging\n" +
-            "Right Stick - Camera\n" +
-            "Left Trigger (hold) - Charge Launch\n" +
-            "Right Trigger - Fire\n" +
-            "Start / Options / Esc - Pause";
+        // Content is no longer static - KineticCubeController writes into this directly
+        // (UpdateControlsText) whenever the active control scheme changes, so the panel always
+        // matches whichever scheme is actually active instead of a fixed string baked in here.
         public Text controlsBodyText;
 
         bool isPaused;
@@ -46,18 +42,10 @@ namespace KineticEnergy.UI
 
         void Start()
         {
-            if (controlsBodyText != null) controlsBodyText.text = controlsText;
             pausePanel?.SetActive(false);
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
         }
-
-#if UNITY_EDITOR
-        void OnValidate()
-        {
-            if (controlsBodyText != null) controlsBodyText.text = controlsText;
-        }
-#endif
 
         void Update()
         {

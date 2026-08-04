@@ -101,11 +101,18 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(freeMoveController);
             EditorUtility.SetDirty(orbitCam);
 
-            Text previewModeLabel = BuildPauseSystem(pauseRef);
+            Text previewModeLabel = BuildPauseSystem(pauseRef, out Text controlsHint, out Text controlsBody);
 
             // PauseSystem is its own prefab, saved inside BuildPauseSystem - same cross-hierarchy
             // rule applies, so this wiring happens on the scene instances, after both are saved.
             controller.landingPreview.modeLabel = previewModeLabel;
+            controller.controlsHintLabel = controlsHint;
+            controller.controlsPanelBody = controlsBody;
+            // Re-marked dirty here - the earlier SetDirty(controller) above ran BEFORE these two
+            // fields were assigned, which silently left them out of the saved scene's prefab
+            // instance overrides entirely (confirmed by comparing against SetupLevel1, which
+            // marks its own controller dirty AFTER the equivalent assignments and saves fine).
+            EditorUtility.SetDirty(controller);
             EditorUtility.SetDirty(controller.landingPreview);
 
             BuildPlayerShadow(player.transform);
@@ -196,6 +203,8 @@ namespace KineticEnergy.EditorSetup
 
             Text modeLabel = pauseGo.transform.Find("PauseCanvas/PreviewModeLabel")?.GetComponent<Text>();
             controller.landingPreview.modeLabel = modeLabel;
+            controller.controlsHintLabel = pauseGo.transform.Find("PauseCanvas/ControlsHintLabel")?.GetComponent<Text>();
+            controller.controlsPanelBody = pauseGo.transform.Find("PauseCanvas/ControlsPanel/ControlsBody")?.GetComponent<Text>();
 
             EditorUtility.SetDirty(controller);
             EditorUtility.SetDirty(freeMoveController);
@@ -818,7 +827,7 @@ namespace KineticEnergy.EditorSetup
             return orbitCam;
         }
 
-        static Text BuildPauseSystem(InputActionReference pauseRef)
+        static Text BuildPauseSystem(InputActionReference pauseRef, out Text controlsHintOut, out Text controlsBodyOut)
         {
             GameObject root = GameObject.Find("PauseSystem");
             if (root == null) root = new GameObject("PauseSystem");
@@ -863,7 +872,7 @@ namespace KineticEnergy.EditorSetup
             labelRt.sizeDelta = new Vector2(900f, 50f);
             Text previewModeLabel = labelGo.AddComponent<Text>();
             previewModeLabel.font = font;
-            previewModeLabel.fontSize = 22;
+            previewModeLabel.fontSize = 30;
             previewModeLabel.alignment = TextAnchor.LowerLeft;
             previewModeLabel.color = Color.white;
             previewModeLabel.text = "";
@@ -878,20 +887,17 @@ namespace KineticEnergy.EditorSetup
             hintRt.anchorMax = new Vector2(0f, 1f);
             hintRt.pivot = new Vector2(0f, 1f);
             hintRt.anchoredPosition = new Vector2(24f, -24f);
-            hintRt.sizeDelta = new Vector2(460f, 220f);
+            // Wider/taller than before to fit fontSize 30 without wrapping/clipping.
+            hintRt.sizeDelta = new Vector2(600f, 300f);
             Text hintText = hintGo.AddComponent<Text>();
             hintText.font = font;
-            hintText.fontSize = 20;
+            hintText.fontSize = 30;
             hintText.alignment = TextAnchor.UpperLeft;
             hintText.color = new Color(1f, 1f, 1f, 0.9f);
-            hintText.text =
-                "Move: Left Stick\n" +
-                "Aim: Left Trigger (hold)\n" +
-                "Adjust Aim: Left Stick (while aiming)\n" +
-                "Launch: Right Trigger\n" +
-                "Camera: Right Stick\n" +
-                "Toggle Preview: South\n" +
-                "Pause: Start / Options / Esc";
+            // Content is set at runtime by KineticCubeController.UpdateControlsText, not here -
+            // it needs to reflect whichever scheme is CURRENTLY active, which this Editor script
+            // has no way to know.
+            hintText.text = "";
             // Plain white text on top of a busy 3D scene is often unreadable depending on
             // background - a soft drop shadow keeps it legible without needing a backing panel.
             Shadow hintShadow = hintGo.AddComponent<Shadow>();
@@ -907,7 +913,9 @@ namespace KineticEnergy.EditorSetup
 
             GameObject controlsPanel = CreatePanel("ControlsPanel", canvasGo.transform, backdrop);
             CreateText("ControlsTitle", controlsPanel.transform, "CONTROLS", font, 48, new Vector2(0f, 220f), new Vector2(600f, 80f));
-            Text controlsBody = CreateText("ControlsBody", controlsPanel.transform, "", font, 26, new Vector2(0f, 50f), new Vector2(760f, 260f));
+            // Wider/shorter-per-line than before to fit fontSize 30's longer StickAim description
+            // without running into the title or Back button.
+            Text controlsBody = CreateText("ControlsBody", controlsPanel.transform, "", font, 30, new Vector2(0f, 50f), new Vector2(900f, 300f));
             controlsBody.alignment = TextAnchor.MiddleLeft;
             GameObject backBtn = CreateButton("BackButton", controlsPanel.transform, "Back", font, accent, new Vector2(0f, -170f), new Vector2(300f, 70f));
 
@@ -938,19 +946,6 @@ namespace KineticEnergy.EditorSetup
             controller.firstControlsButton = backBtn;
             controller.firstScenesButton = sceneButtons.Length > 0 ? sceneButtons[0] : scenesBackBtn;
             controller.controlsBodyText = controlsBody;
-            // Explicitly (re)assigned, same reason as every KineticCubeController tunable above -
-            // a serialized value from a previous Setup() run would otherwise keep showing the old
-            // charge-and-launch instructions even after this default string changes in code.
-            controller.controlsText =
-                "Left Stick - Move (on the ground, while not aiming)\n" +
-                "Left Stick (in the air) - Nudge distance / drift sideways\n" +
-                "Left Trigger - Aim (hold; the cube stays put)\n" +
-                "Left Stick (while aiming) - Adjust aim direction\n" +
-                "Right Trigger - Launch\n" +
-                "South - Show/hide the landing preview\n" +
-                "Right Stick - Camera\n" +
-                "Start / Options / Esc - Pause\n\n" +
-                "(Hold-Release and Analog launch schemes are still in the project, just disabled)";
 
             // Persistent listeners only: Button.onClick.AddListener() from an Editor script
             // registers a runtime-only delegate that is NOT serialized, so it would silently
@@ -973,6 +968,8 @@ namespace KineticEnergy.EditorSetup
             }
             PrefabUtility.SaveAsPrefabAssetAndConnect(root, PrefabFolder + "/PauseSystem.prefab", InteractionMode.AutomatedAction);
 
+            controlsHintOut = hintText;
+            controlsBodyOut = controlsBody;
             return previewModeLabel;
         }
 

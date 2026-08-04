@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 namespace KineticEnergy.Player
 {
@@ -84,6 +85,15 @@ namespace KineticEnergy.Player
         public float restConfirmDuration = 0.1f;
         public float groundCheckDistance = 0.6f;
         public LandingPreviewController landingPreview;
+
+        [Header("Controls Text")]
+        // Always-on top-left corner hint (see KineticEnergySetup.BuildPauseSystem's
+        // ControlsHintLabel) and the pause menu's detailed Controls panel body - both wired here
+        // (cross-hierarchy, PauseSystem is a separate GameObject) so UpdateControlsText can keep
+        // BOTH accurate to whichever scheme is actually active, instead of either one being a
+        // fixed string that silently goes stale the next time a scheme's controls change.
+        public Text controlsHintLabel;
+        public Text controlsPanelBody;
 
         [Header("Fall Reset")]
         public float fallResetY = -30f;
@@ -205,6 +215,10 @@ namespace KineticEnergy.Player
         // exact same "genuinely landed" moment (see FixedUpdate's re-arm block) - reuses the same
         // debounced grounded-check rather than a separate, possibly-inconsistent one.
         bool hasUsedForwardLaunch;
+        // Same one-per-flight limit as hasUsedForwardLaunch, for LT - see UpdateStickAimScheme's
+        // ltAllowed for the actual gating logic (grounded from rest, OR airborne specifically as
+        // a follow-up to an already-used forward launch).
+        bool hasUsedUpLaunch;
 
         Vector3[] trajectoryBuffer;
 
@@ -510,6 +524,7 @@ namespace KineticEnergy.Player
                 {
                     hasLaunched = false;
                     hasUsedForwardLaunch = false;
+                    hasUsedUpLaunch = false;
                 }
             }
             else
@@ -585,12 +600,75 @@ namespace KineticEnergy.Player
 
         void UpdateSchemeLabel()
         {
-            if (landingPreview == null || landingPreview.modeLabel == null) return;
-            landingPreview.modeLabel.text = controlScheme == ControlScheme.StickAim
-                ? "LT: Jump (80 deg, grounded only)   RT: Launch (30 deg, ground or air)   RB: Switch Scheme"
-                : alternateSchemesEnabled
-                    ? $"West: Launch Instantly   North: Hold-Release   East: Analog   South: Show/Hide   RB: Switch Scheme   (scheme: {controlScheme})"
-                    : $"South: Show/Hide   RB: Switch Scheme   (scheme: {controlScheme})";
+            if (landingPreview != null && landingPreview.modeLabel != null)
+            {
+                landingPreview.modeLabel.text = controlScheme == ControlScheme.StickAim
+                    ? /*"LT: Jump (80 deg, grounded only)   RT: Launch (30 deg, ground or air)   RB: Switch Scheme"*/ ""
+                    : alternateSchemesEnabled
+                        ? /*$"West: Launch Instantly   North: Hold-Release   East: Analog   South: Show/Hide   RB: Switch Scheme   (scheme: {controlScheme})"*/ ""
+                        : /*$"South: Show/Hide   RB: Switch Scheme   (scheme: {controlScheme})"*/ "";
+            }
+
+            UpdateControlsText();
+        }
+
+        // Keeps the always-on corner hint AND the pause menu's detailed Controls panel accurate
+        // to whichever scheme is CURRENTLY active - both used to be fixed strings written once at
+        // setup time, which meant either one could silently describe controls that no longer
+        // matched reality the next time a scheme's bindings changed. Called from every place
+        // UpdateSchemeLabel already is (Start, scheme switches), so both stay in sync with no
+        // separate call sites to remember.
+        void UpdateControlsText()
+        {
+            bool stickAim = controlScheme == ControlScheme.StickAim;
+
+            if (controlsHintLabel != null)
+            {
+                controlsHintLabel.text = stickAim
+                    ? "Move (on the ground): Left Stick\n" +
+                      "Nudge (in the air): Left Stick\n" +
+                      "Launch Up: Left Trigger (80 deg toward stick or straight up if holding still)\n" +
+                      "Launch Forward: Right Trigger (30 deg toward stick or forward if holding still)\n" +
+                      "Camera: Right Stick\n" +
+                      "Switch Scheme: Right Bumper\n" +
+                      "Pause: Start / Options / Esc"
+
+                    : 
+                      
+                      "Move (on the ground): Left Stick\n" +
+                      "Nudge (in the air): Left Stick\n" +
+                      "Aim: Left Trigger (hold)\n" +
+                      "Adjust Aim: Left Stick (while aiming)\n" +
+                      "Launch: Right Trigger\n" +
+                      "Camera: Right Stick\n" +
+                      "Switch Scheme: Right Bumper\n" +
+                      "Pause: Start / Options / Esc";
+            }
+
+            if (controlsPanelBody != null)
+            {
+                controlsPanelBody.text = stickAim
+                    ? "Left Stick - Move (on the ground)\n" +
+                      "Left Stick (in the air) - Nudge distance / drift sideways\n" +
+                      "Left Trigger - Jump: straight up if the stick is centered, or tilted 80 degrees\n" +
+                      "  toward the stick otherwise. Grounded only.\n" +
+                      "Right Trigger - Launch: forward if the stick is centered, or tilted 30 degrees\n" +
+                      "  toward the stick otherwise. Ground or air, once per flight (Left Trigger can\n" +
+                      "  follow it once more in the air, and vice versa).\n" +
+                      "Right Stick - Camera\n" +
+                      "Right Bumper - Switch back to the original launch scheme\n" +
+                      "Start / Options / Esc - Pause"
+                    : "Left Stick - Move (on the ground, while not aiming)\n" +
+                      "Left Stick (in the air) - Nudge distance / drift sideways\n" +
+                      "Left Trigger - Aim (hold; the cube stays put)\n" +
+                      "Left Stick (while aiming) - Adjust aim direction\n" +
+                      "Right Trigger - Launch\n" +
+                      "South - Show/hide the landing preview\n" +
+                      "Right Stick - Camera\n" +
+                      "Right Bumper - Switch to the Stick Aim scheme\n" +
+                      "Start / Options / Esc - Pause" +
+                      (alternateSchemesEnabled ? "" : "\n\n(Hold-Release and Analog launch schemes are still in the project, just disabled)");
+            }
         }
 
         // RB always toggles between exactly these two schemes, regardless of which one is
@@ -634,14 +712,25 @@ namespace KineticEnergy.Player
             bool ltPressed = launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
             bool rtPressed = fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
 
-            if (ltPressed && isGrounded && !hasLaunched)
+            // Normally grounded-only (a "jump"), but also allowed once mid-air specifically as a
+            // follow-up to an already-used forward launch (hasUsedForwardLaunch) - lets the combo
+            // work in either order (LT-then-RT, which already worked, or RT-then-LT, which
+            // didn't) while keeping LT itself limited to one use per flight either way.
+            bool ltAllowed = !hasUsedUpLaunch && ((isGrounded && !hasLaunched) || hasUsedForwardLaunch);
+
+            if (ltPressed && ltAllowed)
             {
                 Vector3 dir = stickHeld ? TiltedDirection(stickDirection, stickAimUpAngle) : Vector3.up;
                 // TEMPORARY diagnostic - pins down whether a reported "stick direction doesn't
-                // work" is a real direction-reading bug or the hasUsedForwardLaunch limiter
-                // silently blocking a later attempt (see the else-if branch's own log below).
+                // work" is a real direction-reading bug or one of the hasUsedForwardLaunch/
+                // hasUsedUpLaunch limiters silently blocking a later attempt.
                 Debug.Log($"StickAim LT: stick={stick} stickHeld={stickHeld} dir={dir}");
                 QueueStickAimLaunch(dir);
+                hasUsedUpLaunch = true;
+            }
+            else if (ltPressed && !ltAllowed)
+            {
+                Debug.Log($"StickAim LT BLOCKED: hasUsedUpLaunch={hasUsedUpLaunch} isGrounded={isGrounded} hasLaunched={hasLaunched} hasUsedForwardLaunch={hasUsedForwardLaunch}");
             }
             else if (rtPressed && !hasUsedForwardLaunch)
             {
