@@ -72,6 +72,7 @@ namespace KineticEnergy.EditorSetup
             InputActionReference selectNoneRef = FindActionReference("Player", "SelectNonePreview");
             InputActionReference switchSchemeRef = FindActionReference("Player", "SwitchControlScheme");
             InputActionReference upLaunchRef = FindActionReference("Player", "LaunchUp");
+            InputActionReference cancelChargeRef = FindActionReference("Player", "CancelCharge");
 
             GameObject player = GameObject.Find("Player");
             if (player == null) throw new Exception("KineticEnergySetup: could not find 'Player' GameObject in scene.");
@@ -79,7 +80,7 @@ namespace KineticEnergy.EditorSetup
             GameObject mainCamGo = GameObject.Find("Main Camera");
             if (mainCamGo == null) throw new Exception("KineticEnergySetup: could not find 'Main Camera' GameObject in scene.");
 
-            KineticCubeController controller = BuildPlayerCube(player, moveRef, launchRef, fireRef, selectGhostRef, selectTrailRef, selectCrosshairRef, selectNoneRef, switchSchemeRef, upLaunchRef,
+            KineticCubeController controller = BuildPlayerCube(player, moveRef, launchRef, fireRef, selectGhostRef, selectTrailRef, selectCrosshairRef, selectNoneRef, switchSchemeRef, upLaunchRef, cancelChargeRef,
                 out KineticCubeControllerFreeMove freeMoveController);
             ThirdPersonOrbitCamera orbitCam = BuildCameraRig(mainCamGo, lookRef);
 
@@ -308,19 +309,22 @@ namespace KineticEnergy.EditorSetup
             // comment in KineticCubeController.cs for the empirical verification.
             controller.minLaunchDamping = 2.8f;
             controller.maxLaunchDamping = 1.0f;
-            // Live-tuned via the Inspector in Sandbox Scene during testing (50, up from the
-            // previous 36) and carried forward here as the new default for every scene.
-            controller.stickAimForce = 50f;
-            controller.stickAimDamping = 0.7f;
+            // StickAim's charge (and Mixed's airborne charge) now uses this same
+            // minLaunchForce/maxLaunchForce curve directly - see stickAimUpAngle etc. below for
+            // the per-direction tilt angles, which are all that's still scheme-specific.
             controller.stickAimUpAngle = 80f;
             controller.stickAimDownAngle = 60f;
             controller.stickAimForwardAngle = 30f;
             controller.stickAimForwardNeutralAngle = 5f;
+            // "Bullet time" while charging any launch - see the field's own comment.
+            controller.chargeTimeScale = 0.5f;
 
-            // StickAim is now the only reachable scheme by request - Launch Instantly/Hold-
-            // Release/Analog stay fully in the project (nothing deleted), just locked out.
+            // StickAim stays the default STARTING scheme, but all three (Launch Instantly/
+            // StickAim/Mixed) are reachable again via the Right Bumper cycle - Hold-Release/
+            // Analog stay fully in the project (nothing deleted), just still locked out via
+            // alternateSchemesEnabled, unrelated to this.
             controller.SetControlScheme(ControlScheme.StickAim);
-            controller.schemeSwitchingEnabled = false;
+            controller.schemeSwitchingEnabled = true;
             // Matches ProjectSettings/DynamicsManager.asset's own gravity - kept in sync here too
             // since KineticCubeController.Awake/OnValidate applies this OVER the project setting
             // at runtime, and it's meant to be a fast public testing knob, not a second source of
@@ -340,7 +344,7 @@ namespace KineticEnergy.EditorSetup
 
         static KineticCubeController BuildPlayerCube(GameObject player, InputActionReference moveRef, InputActionReference launchRef, InputActionReference fireRef,
             InputActionReference selectGhostRef, InputActionReference selectTrailRef, InputActionReference selectCrosshairRef, InputActionReference selectNoneRef,
-            InputActionReference switchSchemeRef, InputActionReference upLaunchRef,
+            InputActionReference switchSchemeRef, InputActionReference upLaunchRef, InputActionReference cancelChargeRef,
             out KineticCubeControllerFreeMove freeMoveController)
         {
             SphereCollider oldCollider = player.GetComponent<SphereCollider>();
@@ -429,6 +433,7 @@ namespace KineticEnergy.EditorSetup
             controller.selectNoneAction = selectNoneRef;
             controller.switchSchemeAction = switchSchemeRef;
             controller.upLaunchAction = upLaunchRef;
+            controller.cancelChargeAction = cancelChargeRef;
             controller.aimArrow = BuildAimArrow(player.transform);
             controller.landingPreview = BuildLandingPreview(player.transform);
 

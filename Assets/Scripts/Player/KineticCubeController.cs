@@ -10,9 +10,13 @@ namespace KineticEnergy.Player
         LaunchInstantly, // West: LT aims+charges over time together, RT press = instant launch (the original system)
         HoldRelease,     // North: LT aims only, RT held charges over time, RT release = launch
         AnalogPressure,  // East: LT aims only, charge directly tracks RT's analog pressure, RT release = launch
-        StickAim         // RB toggles directly to/from this one - no charging or holding at all,
-                          // LT/RT each instantly fire in whatever direction the left stick is
-                          // currently pointing (see UpdateStickAimScheme).
+        StickAim,        // RB cycles to/from this one - hold South/LT/RT to charge a launch in
+                          // that direction (up/down/forward), release to fire - see
+                          // UpdateStickAimChargeScheme.
+        Mixed            // RB cycles to/from this one - grounded behaves exactly like
+                          // LaunchInstantly, airborne behaves like StickAim but with a single
+                          // shared once-per-flight limit across all three directions instead of
+                          // one each - see UpdateMixedScheme.
     }
 
     [RequireComponent(typeof(Rigidbody))]
@@ -54,7 +58,7 @@ namespace KineticEnergy.Player
         public float maxAimPitch = 80f;
         public float defaultAimPitch = 20f;
         public Transform cameraTransform;
-        // Only used by StickAim (see QueueStickAimLaunch's RecenterBehindTarget call) - the
+        // Only used by StickAim/Mixed-air (see RecenterCameraForStickAimLaunch) - the
         // charge-based schemes never touch this, since yanking the camera right after firing
         // would fight the "watch the trail all the way to the landing point" experience those
         // schemes are built around.
@@ -146,27 +150,30 @@ namespace KineticEnergy.Player
         // Applied to the GLOBAL Physics.gravity every time this changes (Awake + OnValidate, so
         // it also takes effect live if tweaked in the Inspector during Play mode) - exposed here,
         // not just in Project Settings, specifically so it's a quick, obvious knob to test
-        // against while StickAim is the only scheme in play. Matches ProjectSettings/
-        // DynamicsManager.asset's own value.
+        // against. Matches ProjectSettings/DynamicsManager.asset's own value.
         public float gravity = -30f;
+        // Global Time.timeScale while charging ANY launch (old-style isAiming or the new
+        // hold-to-charge StickAim/Mixed-air system) - "bullet time" so a precise shot is easier
+        // to line up. Restored to 1 the instant charging ends (fire or cancel). Deliberately does
+        // NOT slow down aim/turn responsiveness - see UpdateChargeBasedScheme's use of
+        // Time.unscaledDeltaTime for aimYaw/aimPitch specifically.
+        public float chargeTimeScale = 0.5f;
 
         [Header("Stick Aim Scheme")]
-        // RB toggles directly between LaunchInstantly and StickAim - always reachable regardless
-        // of alternateSchemesEnabled above, since both of these two specifically need to stay
-        // switchable during play, unlike Hold-Release/Analog.
+        // RB cycles through LaunchInstantly -> StickAim -> Mixed -> back - always reachable
+        // regardless of alternateSchemesEnabled above (that flag only gates Hold-Release/Analog).
         public InputActionReference switchSchemeAction;
-        // South: the up ("jump") launch, moved off Left Trigger so LT can be dedicated entirely
-        // to the down launch - see UpdateStickAimScheme.
+        // South: the up ("jump") charge/launch. LT: down ("slam"). RT: forward. All three hold-
+        // to-charge, release-to-fire - see UpdateStickAimChargeScheme.
         public InputActionReference upLaunchAction;
-        // Live-tuned via the Inspector during testing and carried forward as the new default -
-        // this is now THE launch speed knob in practice, StickAim being the only reachable
-        // scheme (see schemeSwitchingEnabled) - kept public/exposed for exactly that reason,
-        // same as gravity above.
-        public float stickAimForce = 50f;
-        public float stickAimDamping = 0.7f;
+        // Aborts whichever charge (old-style isAiming, or the new hold-to-charge system) is
+        // currently in progress, without firing - needed here specifically because "release
+        // fires" for the new system, unlike the charge-based schemes where release-without-RT
+        // already doubled as a cancel.
+        public InputActionReference cancelChargeAction;
         // South ("jump"): launches straight up if the stick is centered (within aimDeadzone), or
         // tilted this many degrees above horizontal toward wherever the stick is pointing
-        // otherwise. Usable any time (not just grounded) - see UpdateStickAimScheme.
+        // otherwise. Usable any time (not just grounded) - see UpdateStickAimChargeScheme.
         public float stickAimUpAngle = 80f;
         // Left Trigger ("slam"): shallower than the jump by request, kept as its own separate
         // field rather than reusing stickAimUpAngle so the two can be tuned independently.
@@ -179,7 +186,7 @@ namespace KineticEnergy.Player
         // stickAimForwardAngle so the "aimed" and "un-aimed" cases can be tuned independently.
         public float stickAimForwardNeutralAngle = 5f;
         // Shown flat on top of the player, always facing the same direction FacingFlatDirection
-        // resolves to, whenever StickAim is the active scheme - wired by KineticEnergySetup.
+        // resolves to, whenever StickAim or Mixed is the active scheme - wired by KineticEnergySetup.
         public FacingArrowIndicator facingArrow;
 
         Rigidbody rb;
@@ -226,7 +233,9 @@ namespace KineticEnergy.Player
         // ground). Gated on the FULL flight (hasLaunched), not just the grace window - directly
         // overwriting velocity is exactly what must never happen while a real launch is still in
         // progress, no matter how close to some surface the cube's own ground check thinks it is.
-        public bool AllowGroundedMovement => !isAiming && !hasLaunched;
+        // Also blocked while charging the new hold-to-charge system (stickAimChargeType), same
+        // reasoning as isAiming - the cube needs to stay put while charging, ground or air.
+        public bool AllowGroundedMovement => !isAiming && !hasLaunched && stickAimChargeType == StickAimChargeType.None;
 
         // AllowAirborneNudge: safe for FreeMove to apply a small, ADDITIVE force (air control,
         // leaning) while genuinely airborne. Only needs to wait out the brief post-launch grace
@@ -234,7 +243,7 @@ namespace KineticEnergy.Player
         // directly setting velocity can, so there's no reason to also suppress this for the
         // entire duration of every shot (which is what silently killed air-nudging for launched
         // shots the last time this was "fixed").
-        public bool AllowAirborneNudge => !isAiming && launchGraceTimer <= 0f;
+        public bool AllowAirborneNudge => !isAiming && launchGraceTimer <= 0f && stickAimChargeType == StickAimChargeType.None;
 
         bool launchQueued;
         Vector3 queuedDirection;
@@ -243,17 +252,31 @@ namespace KineticEnergy.Player
         float launchGraceTimer;
         Vector3 launchStartPosition;
         float restTimer;
-        // StickAim-only: RT is limited to one use per flight, reset alongside hasLaunched at the
-        // exact same "genuinely landed" moment (see FixedUpdate's re-arm block) - reuses the same
-        // debounced grounded-check rather than a separate, possibly-inconsistent one.
+        // StickAim/Mixed-air only: forward charge/launch limited to one use per flight, reset
+        // alongside hasLaunched at the exact same "genuinely landed" moment (see FixedUpdate's
+        // re-arm block) - reuses the same debounced grounded-check rather than a separate,
+        // possibly-inconsistent one.
         bool hasUsedForwardLaunch;
-        // Same one-per-flight limit as hasUsedForwardLaunch, for LT's grounded "jump" - see
-        // UpdateStickAimScheme's ltUpAllowed.
+        // Same one-per-flight limit as hasUsedForwardLaunch, for the up ("jump") charge/launch.
         bool hasUsedUpLaunch;
-        // Same idea, for LT's airborne "slam" (the mirror-image downward launch) - independent
-        // of hasUsedUpLaunch, since grounded-up and airborne-down are two different actions that
-        // happen to share a button. See UpdateStickAimScheme's ltDownAllowed.
+        // Same idea, for the down ("slam") charge/launch - independent of hasUsedUpLaunch, since
+        // up and down are two different actions on two different buttons.
         bool hasUsedDownLaunch;
+        // Mixed scheme only: while airborne, Mixed shares ONE limit across all three directions
+        // (unlike standalone StickAim's three independent flags above) - whichever of South/LT/RT
+        // fires first uses up the single midair launch, and the OTHER two become unavailable too
+        // until landing resets this alongside everything else.
+        bool hasUsedMixedAirLaunch;
+        // LaunchInstantly/HoldRelease/AnalogPressure/Mixed-grounded only: the charge-based aim
+        // flow is normally grounded-only (isGrounded && !hasLaunched to START), but once used,
+        // it's also allowed ONE more time while airborne, using the exact same aim-and-charge
+        // flow - reset alongside hasLaunched on landing, same as the flags above.
+        bool hasUsedAirRelaunch;
+        // Which of South/LT/RT the new hold-to-charge system (UpdateStickAimChargeScheme) is
+        // currently charging, if any. None means "not currently charging" - checked instead of a
+        // separate bool since exactly one of four states applies at a time.
+        enum StickAimChargeType { None, Up, Down, Forward }
+        StickAimChargeType stickAimChargeType = StickAimChargeType.None;
 
         Vector3[] trajectoryBuffer;
 
@@ -344,41 +367,93 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // South is now StickAim's up-launch button (see upLaunchAction/UpdateStickAimScheme)
-            // - skipping the old preview-toggle handler here while StickAim is active avoids the
-            // same physical press doing two unrelated things (it's also pointless in StickAim,
-            // which never shows a trail/ghost/crosshair preview to toggle in the first place).
-            if (controlScheme != ControlScheme.StickAim) HandlePreviewModeSwitch();
+            // South is StickAim/Mixed's up-launch button (see upLaunchAction) - skipping the old
+            // preview-toggle handler here while either is active avoids the same physical press
+            // doing two unrelated things (it's also pointless there, since neither ever shows a
+            // trail/ghost/crosshair preview to toggle via this specific mechanism).
+            if (controlScheme != ControlScheme.StickAim && controlScheme != ControlScheme.Mixed) HandlePreviewModeSwitch();
             HandleSchemeSwitch();
 
-            // Kept outside the StickAim-only branch below (and updated unconditionally every
-            // frame) so it also correctly hides itself the instant the player switches back to a
+            // Kept outside any scheme-specific branch below (and updated unconditionally every
+            // frame) so it also correctly hides itself the instant the player switches to a
             // charge-based scheme.
             if (facingArrow != null)
             {
-                facingArrow.SetVisible(controlScheme == ControlScheme.StickAim);
+                bool showFacingArrow = controlScheme == ControlScheme.StickAim || controlScheme == ControlScheme.Mixed;
+                facingArrow.SetVisible(showFacingArrow);
                 facingArrow.SetFacingYaw(freeMoveController != null ? freeMoveController.FacingYaw : 0f);
             }
 
-            if (controlScheme == ControlScheme.StickAim)
+            // "Game speed 50% while charging, aiming speed unaffected" - applied every frame from
+            // whatever isAiming/stickAimChargeType currently are. A one-frame lag on the exact
+            // instant charging starts/stops (this runs before this frame's scheme update sets
+            // them) is imperceptible, well under 17ms.
+            ApplyChargeTimeScale();
+
+            switch (controlScheme)
             {
-                UpdateStickAimScheme();
+                case ControlScheme.StickAim:
+                    UpdateStickAimChargeScheme(sharedSingleUse: false);
+                    return;
+                case ControlScheme.Mixed:
+                    UpdateMixedScheme();
+                    return;
+            }
+
+            UpdateChargeBasedScheme();
+        }
+
+        void ApplyChargeTimeScale()
+        {
+            bool charging = isAiming || stickAimChargeType != StickAimChargeType.None;
+            Time.timeScale = charging ? chargeTimeScale : 1f;
+        }
+
+        // Shared by LaunchInstantly/HoldRelease/AnalogPressure (standalone) and Mixed's grounded
+        // phase (the combined "case LaunchInstantly / case Mixed" below gives Mixed the exact
+        // same charge/fire rule) - hold LT to aim (stick adjusts yaw/pitch over time, charge
+        // accumulates per-scheme), RT (or release, depending on scheme) fires.
+        void UpdateChargeBasedScheme()
+        {
+            bool ltIsPressed = launchAction != null && launchAction.action != null && launchAction.action.IsPressed();
+            bool cancelPressed = cancelChargeAction != null && cancelChargeAction.action != null && cancelChargeAction.action.WasPressedThisFrame();
+
+            // Universal LB-cancel: aborts the current aim/charge without firing, the instant
+            // it's pressed. Release-without-RT already worked as a cancel too (see the isAiming
+            // branch below) - this is just a faster, always-available way to do the same thing,
+            // needed consistently here since Mixed's grounded phase is otherwise indistinguishable
+            // from standalone LaunchInstantly from the player's point of view.
+            if (isAiming && cancelPressed)
+            {
+                isAiming = false;
+                chargeTime = 0f;
+                aimArrow?.SetVisible(false);
+                landingPreview?.SetVisible(false);
+                waitingForLtRelease = true;
                 return;
             }
 
-            // Only one launch allowed per landing (hasLaunched), AND launching only ever starts
-            // from a currently-grounded state (isGrounded, the same real-time raycast check
-            // FixedUpdate uses) - checking both directly here, rather than trusting hasLaunched
-            // alone to have been reset at the right moment, is what actually guarantees you can
-            // never begin aiming/firing while airborne.
-            bool ltHeld = !hasLaunched && isGrounded && launchAction != null && launchAction.action != null && launchAction.action.IsPressed();
-
-            // One-shot-per-hold: once a launch fires, LT must be fully released before it can gate another.
+            // One-shot-per-hold: once a launch fires, LT must be GENUINELY released (raw button
+            // state) before it can gate another aim session.
             if (waitingForLtRelease)
             {
-                if (!ltHeld) waitingForLtRelease = false;
+                if (!ltIsPressed) waitingForLtRelease = false;
                 return;
             }
+
+            // Grounded: fresh start of a flight. Airborne: allowed ONE more time as a second,
+            // mid-air aim+launch using this exact same flow - "relaunch once while in the air
+            // again, using the same way to aim as before" (direct request). hasUsedAirRelaunch
+            // resets alongside hasLaunched the moment the cube genuinely lands. Only used to gate
+            // a BRAND NEW aim session starting, never to decide whether an ALREADY-ACTIVE one
+            // should keep going (see ltHeld just below) - isGrounded is a proximity check, not a
+            // touching check, and re-deriving this same condition every frame of an
+            // already-active air-relaunch charge could spuriously flip it false for a single tick
+            // near any surface and read as "LT let go", firing prematurely. This exact class of
+            // bug (a BoxCast proximity read misinterpreted as a real grounded/settled signal) has
+            // bitten this project before.
+            bool canStartNewAim = (isGrounded && !hasLaunched) || (!isGrounded && hasLaunched && !hasUsedAirRelaunch);
+            bool ltHeld = isAiming ? ltIsPressed : (ltIsPressed && canStartNewAim);
 
             if (ltHeld)
             {
@@ -386,11 +461,12 @@ namespace KineticEnergy.Player
                 {
                     isAiming = true;
                     chargeTime = 0f;
-                    // Instantly stop dead, even if the complementary free-move system had the
-                    // cube moving right up until this frame - aiming has to start from a
-                    // perfectly stationary cube (AllowFreeMovement going false only stops NEW
-                    // movement input from being applied; it doesn't touch whatever velocity was
-                    // already there).
+                    // Instantly stop dead, even if the complementary free-move system (or an
+                    // existing flight, for the air-relaunch case) had the cube moving right up
+                    // until this frame - aiming has to start from a perfectly stationary cube.
+                    // FixedUpdate keeps re-applying this for the whole duration of the aim, not
+                    // just this one frame, so an airborne aim session doesn't slowly start
+                    // falling again from gravity while the player is still lining it up.
                     rb.linearVelocity = Vector3.zero;
                     rb.angularVelocity = Vector3.zero;
                     SeedAimFromCamera();
@@ -408,9 +484,10 @@ namespace KineticEnergy.Player
                 switch (controlScheme)
                 {
                     case ControlScheme.LaunchInstantly:
+                    case ControlScheme.Mixed:
                         // The original system: LT alone both aims and charges over time for as
                         // long as it's held. RT is a single instant-fire press using whatever
-                        // charge has built up so far.
+                        // charge has built up so far. Mixed's grounded phase behaves identically.
                         chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime);
                         launchNow = rtPressed;
                         break;
@@ -440,10 +517,14 @@ namespace KineticEnergy.Player
                     ? moveAction.action.ReadValue<Vector2>()
                     : Vector2.zero;
 
+                // Unscaled - aim/turn responsiveness must NOT slow down just because
+                // chargeTimeScale is slowing everything else while charging (direct request:
+                // "the speed of aiming shouldn't be affected").
+                float aimDt = Time.unscaledDeltaTime;
                 if (stick.sqrMagnitude > aimDeadzone * aimDeadzone)
                 {
-                    aimYaw = Mathf.Repeat(aimYaw + stick.x * aimRotationSpeed * Time.deltaTime, 360f);
-                    aimPitch = Mathf.Clamp(aimPitch - stick.y * aimRotationSpeed * Time.deltaTime, minAimPitch, maxAimPitch);
+                    aimYaw = Mathf.Repeat(aimYaw + stick.x * aimRotationSpeed * aimDt, 360f);
+                    aimPitch = Mathf.Clamp(aimPitch - stick.y * aimRotationSpeed * aimDt, minAimPitch, maxAimPitch);
                 }
 
                 Vector3 dir = AimDirection();
@@ -472,19 +553,9 @@ namespace KineticEnergy.Player
 
                 if (launchNow)
                 {
-                    queuedDirection = dir;
-                    queuedForce = previewForce;
-                    queuedDamping = previewDamping;
-                    launchQueued = true;
-                    hasLaunched = true;
-                    // Armed here already (not just when FixedUpdate actually applies the
-                    // impulse) so AllowFreeMovement is already false the instant firing is
-                    // decided - closes a script-execution-order edge case where
-                    // KineticCubeControllerFreeMove's FixedUpdate could otherwise run before
-                    // this component's on the very first physics tick after firing, see it as
-                    // still "allowed", and set velocity directly moments before the impulse
-                    // itself gets applied.
-                    launchGraceTimer = launchGraceDuration;
+                    bool wasAirRelaunch = !isGrounded;
+                    QueueLaunch(dir, previewForce, previewDamping);
+                    if (wasAirRelaunch) hasUsedAirRelaunch = true;
 
                     isAiming = false;
                     chargeTime = 0f;
@@ -513,12 +584,9 @@ namespace KineticEnergy.Player
                     chargeTime = Mathf.Clamp01(rtAnalogValue) * maxChargeTime;
                     float chargeFraction = ChargeFraction();
 
-                    queuedDirection = AimDirection();
-                    queuedForce = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
-                    queuedDamping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
-                    launchQueued = true;
-                    hasLaunched = true;
-                    launchGraceTimer = launchGraceDuration; // see the same comment in the LaunchInstantly/HoldRelease launch branch above
+                    bool wasAirRelaunch = !isGrounded;
+                    QueueLaunch(AimDirection(), Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction), Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction));
+                    if (wasAirRelaunch) hasUsedAirRelaunch = true;
                     waitingForLtRelease = true;
                 }
 
@@ -529,8 +597,46 @@ namespace KineticEnergy.Player
             }
         }
 
+        // Grounded: exactly LaunchInstantly's aim/charge/fire flow (see UpdateChargeBasedScheme's
+        // combined switch case). Airborne: StickAim's hold-to-charge system, but with a single
+        // shared once-per-flight limit across all three directions instead of one each -
+        // "only able to do 1 midair launch until you hit the ground and it resets" (direct
+        // request). Once either system has an active charge in progress, stick with it
+        // regardless of isGrounded's exact value that frame - re-deciding by isGrounded alone
+        // every frame could otherwise switch systems mid-charge right at a ledge edge.
+        void UpdateMixedScheme()
+        {
+            if (isAiming)
+            {
+                UpdateChargeBasedScheme();
+            }
+            else if (stickAimChargeType != StickAimChargeType.None)
+            {
+                UpdateStickAimChargeScheme(sharedSingleUse: true);
+            }
+            else if (isGrounded)
+            {
+                UpdateChargeBasedScheme();
+            }
+            else
+            {
+                UpdateStickAimChargeScheme(sharedSingleUse: true);
+            }
+        }
+
         void FixedUpdate()
         {
+            // Continuously (not just once at the instant aiming/charging starts) - gravity would
+            // otherwise keep re-accelerating an airborne aim/charge session downward every tick,
+            // which the old scheme never had to account for since it only ever aimed from solid
+            // ground. This is what actually keeps the air-relaunch and airborne StickAim/Mixed
+            // charges frozen in place for their whole duration, not just their opening frame.
+            if (isAiming || stickAimChargeType != StickAimChargeType.None)
+            {
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+
             if (launchQueued)
             {
                 launchQueued = false;
@@ -581,6 +687,8 @@ namespace KineticEnergy.Player
                     hasUsedForwardLaunch = false;
                     hasUsedUpLaunch = false;
                     hasUsedDownLaunch = false;
+                    hasUsedMixedAirLaunch = false;
+                    hasUsedAirRelaunch = false;
                 }
             }
             else
@@ -658,11 +766,7 @@ namespace KineticEnergy.Player
         {
             if (landingPreview != null && landingPreview.modeLabel != null)
             {
-                landingPreview.modeLabel.text = controlScheme == ControlScheme.StickAim
-                    ? /*"LT: Jump (80 deg, grounded only)   RT: Launch (30 deg, ground or air)   RB: Switch Scheme"*/ ""
-                    : alternateSchemesEnabled
-                        ? /*$"West: Launch Instantly   North: Hold-Release   East: Analog   South: Show/Hide   RB: Switch Scheme   (scheme: {controlScheme})"*/ ""
-                        : /*$"South: Show/Hide   RB: Switch Scheme   (scheme: {controlScheme})"*/ "";
+                landingPreview.modeLabel.text = "";
             }
 
             UpdateControlsText();
@@ -676,85 +780,130 @@ namespace KineticEnergy.Player
         // separate call sites to remember.
         void UpdateControlsText()
         {
-            bool stickAim = controlScheme == ControlScheme.StickAim;
-            // Only mention the Right Bumper toggle when it can actually do something - with
-            // schemeSwitchingEnabled false (the default now that StickAim is locked in), telling
-            // the player about a button that does nothing would just be inaccurate.
-            string switchLine = schemeSwitchingEnabled
-                ? (stickAim ? "Switch Scheme: Right Bumper\n" : "Right Bumper - Switch to the Stick Aim scheme\n")
-                : "";
-            string switchLinePanel = schemeSwitchingEnabled
-                ? (stickAim ? "Right Bumper - Switch back to the original launch scheme\n" : "Right Bumper - Switch to the Stick Aim scheme\n")
-                : "";
+            // Only mention the Right Bumper cycle when it can actually do something - with
+            // schemeSwitchingEnabled false, telling the player about a button that does nothing
+            // would just be inaccurate.
+            string switchLine = schemeSwitchingEnabled ? "Switch Scheme: Right Bumper\n" : "";
+            string switchLinePanel = schemeSwitchingEnabled ? "Right Bumper - Cycle to the next launch scheme\n" : "";
 
             if (controlsHintLabel != null)
             {
-                controlsHintLabel.text = stickAim
-                    ? "Move (on the ground): Left Stick\n" +
-                      "Nudge (in the air): Left Stick\n" +
-                      "Launch Up: South (80 deg toward stick or straight up if holding still)\n" +
-                      "Launch Down: Left Trigger (60 deg toward stick or straight down if holding still)\n" +
-                      "Launch Forward: Right Trigger (30 deg toward stick or 5 deg ahead if holding still)\n" +
-                      "Each once, any order, until grounded again\n" +
-                      "Camera: Right Stick\n" +
-                      switchLine +
-                      "Pause: Start / Options / Esc"
-                    : "Move (on the ground): Left Stick\n" +
-                      "Nudge (in the air): Left Stick\n" +
-                      "Aim: Left Trigger (hold)\n" +
-                      "Adjust Aim: Left Stick (while aiming)\n" +
-                      "Launch: Right Trigger\n" +
-                      "Camera: Right Stick\n" +
-                      switchLine +
-                      "Pause: Start / Options / Esc";
+                controlsHintLabel.text = controlScheme switch
+                {
+                    ControlScheme.StickAim =>
+                        "Move (on the ground): Left Stick\n" +
+                        "Nudge (in the air): Left Stick\n" +
+                        "Hold South / Left Trigger / Right Trigger: charge Up / Down / Forward\n" +
+                        "Longer hold launches further, release to fire, Left Bumper cancels\n" +
+                        "Each once, any order, until grounded again\n" +
+                        "Camera: Right Stick\n" +
+                        switchLine +
+                        "Pause: Start / Options / Esc",
+                    ControlScheme.Mixed =>
+                        "Move (on the ground): Left Stick\n" +
+                        "Grounded: Left Trigger to aim+charge (as the original scheme), Right\n" +
+                        "  Trigger to launch\n" +
+                        "Airborne: hold South / Left Trigger / Right Trigger to charge Up / Down /\n" +
+                        "  Forward - only 1 midair launch until grounded again\n" +
+                        "Left Bumper cancels either\n" +
+                        "Camera: Right Stick\n" +
+                        switchLine +
+                        "Pause: Start / Options / Esc",
+                    _ =>
+                        "Move (on the ground): Left Stick\n" +
+                        "Nudge (in the air): Left Stick\n" +
+                        "Aim: Left Trigger (hold)\n" +
+                        "Adjust Aim: Left Stick (while aiming)\n" +
+                        "Launch: Right Trigger, Left Bumper cancels\n" +
+                        "One more launch allowed mid-air, same way, until grounded again\n" +
+                        "Camera: Right Stick\n" +
+                        switchLine +
+                        "Pause: Start / Options / Esc",
+                };
             }
 
             if (controlsPanelBody != null)
             {
-                controlsPanelBody.text = stickAim
-                    ? "Left Stick - Move (on the ground)\n" +
-                      "Left Stick (in the air) - Nudge distance / drift sideways\n" +
-                      "South - Jump: straight up if the stick is centered, or tilted 80 degrees\n" +
-                      "  toward the stick otherwise.\n" +
-                      "Left Trigger - Slam: straight down if the stick is centered, or tilted 60\n" +
-                      "  degrees toward the stick otherwise.\n" +
-                      "Right Trigger - Launch: tilted 5 degrees ahead if the stick is centered, or\n" +
-                      "  30 degrees toward the stick otherwise.\n" +
-                      "Each of the three above works any time, in any order, once per flight -\n" +
-                      "  all three reset together the moment the cube genuinely lands again.\n" +
-                      "Right Stick - Camera\n" +
-                      switchLinePanel +
-                      "Start / Options / Esc - Pause"
-                    : "Left Stick - Move (on the ground, while not aiming)\n" +
-                      "Left Stick (in the air) - Nudge distance / drift sideways\n" +
-                      "Left Trigger - Aim (hold; the cube stays put)\n" +
-                      "Left Stick (while aiming) - Adjust aim direction\n" +
-                      "Right Trigger - Launch\n" +
-                      "South - Show/hide the landing preview\n" +
-                      "Right Stick - Camera\n" +
-                      switchLinePanel +
-                      "Start / Options / Esc - Pause" +
-                      (alternateSchemesEnabled ? "" : "\n\n(Hold-Release and Analog launch schemes are still in the project, just disabled)");
+                controlsPanelBody.text = controlScheme switch
+                {
+                    ControlScheme.StickAim =>
+                        "Left Stick - Move (on the ground)\n" +
+                        "Left Stick (in the air) - Nudge distance / drift sideways\n" +
+                        "South (hold) - Charge an Up launch: straight up if the stick is centered,\n" +
+                        "  or tilted 80 degrees toward the stick otherwise. Release to fire.\n" +
+                        "Left Trigger (hold) - Charge a Down launch: straight down if centered, or\n" +
+                        "  tilted 60 degrees toward the stick. Release to fire.\n" +
+                        "Right Trigger (hold) - Charge a Forward launch: tilted 5 degrees ahead if\n" +
+                        "  centered, or 30 degrees toward the stick. Release to fire.\n" +
+                        "The longer any of the three is held, the further it launches (same range\n" +
+                        "  as the original scheme). Left Bumper cancels whichever is charging.\n" +
+                        "Each of the three works any time, in any order, once per flight - all\n" +
+                        "  three reset together the moment the cube genuinely lands again.\n" +
+                        "Right Stick - Camera\n" +
+                        switchLinePanel +
+                        "Start / Options / Esc - Pause",
+                    ControlScheme.Mixed =>
+                        "Left Stick - Move (on the ground, while not aiming)\n" +
+                        "Left Stick (in the air) - Nudge distance / drift sideways\n" +
+                        "Grounded - Left Trigger (hold) to aim and charge, Left Stick to adjust\n" +
+                        "  aim, Right Trigger to launch (exactly like the original scheme).\n" +
+                        "Airborne - hold South / Left Trigger / Right Trigger to charge an Up /\n" +
+                        "  Down / Forward launch (exactly like the Stick Aim scheme), but only ONE\n" +
+                        "  of the three is allowed per flight while airborne - whichever fires\n" +
+                        "  first, the other two become unavailable too until the cube lands and\n" +
+                        "  it resets.\n" +
+                        "Left Bumper - Cancel whichever is currently charging, grounded or air.\n" +
+                        "Right Stick - Camera\n" +
+                        switchLinePanel +
+                        "Start / Options / Esc - Pause",
+                    _ =>
+                        "Left Stick - Move (on the ground, while not aiming)\n" +
+                        "Left Stick (in the air) - Nudge distance / drift sideways\n" +
+                        "Left Trigger - Aim (hold; the cube stays put)\n" +
+                        "Left Stick (while aiming) - Adjust aim direction\n" +
+                        "Right Trigger - Launch\n" +
+                        "Left Bumper - Cancel the current aim/charge without firing\n" +
+                        "One more aim+launch is allowed mid-air, the same way, once per flight -\n" +
+                        "  resets the moment the cube genuinely lands again.\n" +
+                        "South - Show/hide the landing preview\n" +
+                        "Right Stick - Camera\n" +
+                        switchLinePanel +
+                        "Start / Options / Esc - Pause" +
+                        (alternateSchemesEnabled ? "" : "\n\n(Hold-Release and Analog launch schemes are still in the project, just disabled)"),
+                };
             }
         }
 
-        // RB always toggles between exactly these two schemes, regardless of which one is
+        // RB always cycles through exactly these three schemes, regardless of which one is
         // currently active or of alternateSchemesEnabled (that flag only governs whether
-        // West/North/East can reach Hold-Release/Analog - it has no bearing on this toggle).
+        // West/North/East can reach Hold-Release/Analog - it has no bearing on this cycle).
         void HandleSchemeSwitch()
         {
             if (!schemeSwitchingEnabled) return;
             if (switchSchemeAction == null || switchSchemeAction.action == null || !switchSchemeAction.action.WasPressedThisFrame()) return;
 
-            controlScheme = controlScheme == ControlScheme.StickAim ? ControlScheme.LaunchInstantly : ControlScheme.StickAim;
+            // Cycles through exactly the three reachable schemes - Hold-Release/Analog stay
+            // reachable only via West/North/East + alternateSchemesEnabled, unrelated to this.
+            controlScheme = controlScheme switch
+            {
+                ControlScheme.LaunchInstantly => ControlScheme.StickAim,
+                ControlScheme.StickAim => ControlScheme.Mixed,
+                _ => ControlScheme.LaunchInstantly, // Mixed (or Hold-Release/Analog, if reached some other way) wraps back to the start
+            };
 
-            // Switching away from a charge-based scheme mid-aim needs the same clean cancel a
-            // normal LT release would do - once StickAim's own Update() branch takes over
-            // (see the early return above), the ltHeld/isAiming branch below is never reached
-            // again to do this itself, so isAiming would otherwise stay stuck true forever.
+            // Cancel whichever charge system was active, cleanly, regardless of which one it
+            // was - once the scheme switches, neither Update() branch that would otherwise
+            // notice a release/cancel is guaranteed to run for it again.
             if (isAiming)
             {
                 isAiming = false;
+                chargeTime = 0f;
+                aimArrow?.SetVisible(false);
+                landingPreview?.SetVisible(false);
+            }
+            if (stickAimChargeType != StickAimChargeType.None)
+            {
+                stickAimChargeType = StickAimChargeType.None;
                 chargeTime = 0f;
                 aimArrow?.SetVisible(false);
                 landingPreview?.SetVisible(false);
@@ -763,13 +912,16 @@ namespace KineticEnergy.Player
             UpdateSchemeLabel();
         }
 
-        // No charging, no held-aim phase - LT/RT each instantly queue a launch the moment
-        // they're pressed, using wherever the left stick happens to be pointing (or a sensible
-        // default direction if it's centered) at that exact instant. Mid-air adjustment and
-        // ground movement both come from KineticCubeControllerFreeMove exactly as they do for
-        // every other scheme (see AllowGroundedMovement/AllowAirborneNudge) - this scheme never
-        // sets isAiming, so those properties behave the same as if nothing were being aimed.
-        void UpdateStickAimScheme()
+        // Hold South/LT/RT to charge a launch in that direction (same charge curve as the
+        // charge-based schemes: minLaunchForce/maxLaunchForce interpolated by how long it's
+        // held, over maxChargeTime), release to fire, Left Bumper cancels without firing. Shows
+        // the same aim arrow + landing trail the charge-based schemes do while charging - "the
+        // same sort of visual... that shows you your exact launch path" (direct request).
+        // sharedSingleUse: false for standalone StickAim (three independent once-per-flight
+        // limits, one per direction). true for Mixed's airborne phase (one limit shared across
+        // all three - whichever fires first uses up the only midair launch and the other two
+        // become unavailable too).
+        void UpdateStickAimChargeScheme(bool sharedSingleUse)
         {
             Vector2 stick = moveAction != null && moveAction.action != null
                 ? moveAction.action.ReadValue<Vector2>()
@@ -777,86 +929,154 @@ namespace KineticEnergy.Player
             bool stickHeld = stick.sqrMagnitude > aimDeadzone * aimDeadzone;
             Vector3 stickDirection = stickHeld ? StickWorldDirection(stick) : Vector3.zero;
 
-            bool upPressed = upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
-            bool ltPressed = launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
-            bool rtPressed = fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
+            bool cancelPressed = cancelChargeAction != null && cancelChargeAction.action != null && cancelChargeAction.action.WasPressedThisFrame();
 
-            // All three are now fully symmetric: one independent once-per-flight limiter each
-            // (reset together on landing), none gated on isGrounded/hasLaunched - each is usable
-            // any time, in any order, so all three can be chained together (up, down, forward, in
-            // whichever sequence) before the cube has to land again to re-arm.
-            if (upPressed && !hasUsedUpLaunch)
+            if (stickAimChargeType != StickAimChargeType.None)
             {
-                Vector3 dir = stickHeld ? TiltedDirection(stickDirection, stickAimUpAngle) : Vector3.up;
-                // TEMPORARY diagnostic - pins down whether a reported "stick direction doesn't
-                // work" is a real direction-reading bug or one of the once-per-flight limiters
-                // silently blocking a later attempt.
-                Debug.Log($"StickAim UP (South): stick={stick} stickHeld={stickHeld} dir={dir}");
-                QueueStickAimLaunch(dir);
-                hasUsedUpLaunch = true;
+                if (cancelPressed)
+                {
+                    CancelStickAimCharge();
+                    return;
+                }
+
+                bool releasedNow = stickAimChargeType switch
+                {
+                    StickAimChargeType.Up => upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasReleasedThisFrame(),
+                    StickAimChargeType.Down => launchAction != null && launchAction.action != null && launchAction.action.WasReleasedThisFrame(),
+                    _ => fireAction != null && fireAction.action != null && fireAction.action.WasReleasedThisFrame(),
+                };
+
+                chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime);
+                Vector3 dir = ComputeStickAimDirection(stickAimChargeType, stickHeld, stickDirection);
+                float chargeFraction = ChargeFraction();
+                aimArrow?.SetAim(dir, chargeFraction);
+
+                float previewForce = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
+                float previewDamping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
+
+                // rb.linearVelocity is held at zero for the whole charge (see FixedUpdate), so
+                // unlike the charge-based schemes' initialVelocity this doesn't need to add it in.
+                Vector3 initialVelocity = dir * previewForce / rb.mass;
+                Vector3 lineStart = transform.position + Vector3.up * previewLineHeight;
+                Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, previewDamping, out int stepCount, out bool didLand);
+                lastPredictedLanding = landingPoint;
+                hasPredictedLanding = true;
+
+                if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
+                {
+                    landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand);
+                }
+
+                if (releasedNow)
+                {
+                    QueueLaunch(dir, previewForce, previewDamping);
+                    RecenterCameraForStickAimLaunch(dir);
+
+                    if (sharedSingleUse)
+                    {
+                        hasUsedMixedAirLaunch = true;
+                    }
+                    else if (stickAimChargeType == StickAimChargeType.Up) hasUsedUpLaunch = true;
+                    else if (stickAimChargeType == StickAimChargeType.Down) hasUsedDownLaunch = true;
+                    else hasUsedForwardLaunch = true;
+
+                    stickAimChargeType = StickAimChargeType.None;
+                    chargeTime = 0f;
+                    aimArrow?.SetVisible(false);
+                    landingPreview?.SetVisible(false);
+                }
             }
-            else if (upPressed && hasUsedUpLaunch)
+            else
             {
-                Debug.Log("StickAim UP BLOCKED: already used this flight");
-            }
-            else if (ltPressed && !hasUsedDownLaunch)
-            {
-                // Negative angle reuses TiltedDirection unchanged - cos is even (same magnitude
-                // either sign) and sin flips sign, so passing -stickAimDownAngle mirrors the tilt
-                // downward through horizontal instead of duplicating the method for one sign flip.
-                Vector3 dir = stickHeld ? TiltedDirection(stickDirection, -stickAimDownAngle) : Vector3.down;
-                Debug.Log($"StickAim LT DOWN: stick={stick} stickHeld={stickHeld} dir={dir}");
-                QueueStickAimLaunch(dir);
-                hasUsedDownLaunch = true;
-            }
-            else if (ltPressed && hasUsedDownLaunch)
-            {
-                Debug.Log("StickAim LT BLOCKED: already used this flight");
-            }
-            else if (rtPressed && !hasUsedForwardLaunch)
-            {
-                // A shallower, separate angle when the stick is centered (toward facing) than
-                // when it's actually held (toward the stick) - see stickAimForwardNeutralAngle's
-                // own comment for why these are independent knobs.
-                Vector3 dir = stickHeld
-                    ? TiltedDirection(stickDirection, stickAimForwardAngle)
-                    : TiltedDirection(FacingFlatDirection(), stickAimForwardNeutralAngle);
-                Debug.Log($"StickAim RT: stick={stick} stickHeld={stickHeld} dir={dir}");
-                QueueStickAimLaunch(dir);
-                hasUsedForwardLaunch = true;
-            }
-            else if (rtPressed && hasUsedForwardLaunch)
-            {
-                Debug.Log($"StickAim RT BLOCKED: hasUsedForwardLaunch is still true (already used this flight) - stick={stick} stickHeld={stickHeld}");
+                bool canUp = sharedSingleUse ? !hasUsedMixedAirLaunch : !hasUsedUpLaunch;
+                bool canDown = sharedSingleUse ? !hasUsedMixedAirLaunch : !hasUsedDownLaunch;
+                bool canForward = sharedSingleUse ? !hasUsedMixedAirLaunch : !hasUsedForwardLaunch;
+
+                bool upPressed = canUp && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
+                bool ltPressed = canDown && launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
+                bool rtPressed = canForward && fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
+
+                if (upPressed) StartStickAimCharge(StickAimChargeType.Up);
+                else if (ltPressed) StartStickAimCharge(StickAimChargeType.Down);
+                else if (rtPressed) StartStickAimCharge(StickAimChargeType.Forward);
             }
         }
 
-        void QueueStickAimLaunch(Vector3 direction)
+        void StartStickAimCharge(StickAimChargeType type)
         {
-            // Instant, predictable launches every time - same reasoning as the aim-start instant
-            // stop in the charge-based schemes: zeroing first means a mid-air RT re-launch always
-            // produces exactly stickAimForce in the new direction, never additively stacked on
-            // top of whatever velocity the cube already had.
+            stickAimChargeType = type;
+            chargeTime = 0f;
+            // Instant stop, same reasoning as the charge-based schemes' aim-start - FixedUpdate
+            // keeps re-applying this for the whole charge, not just this one frame, so an
+            // airborne charge doesn't slowly start falling again from gravity.
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
+            aimArrow?.SetVisible(true);
+            landingPreview?.SetVisible(true);
+        }
 
+        void CancelStickAimCharge()
+        {
+            stickAimChargeType = StickAimChargeType.None;
+            chargeTime = 0f;
+            aimArrow?.SetVisible(false);
+            landingPreview?.SetVisible(false);
+        }
+
+        Vector3 ComputeStickAimDirection(StickAimChargeType type, bool stickHeld, Vector3 stickDirection)
+        {
+            switch (type)
+            {
+                case StickAimChargeType.Up:
+                    return stickHeld ? TiltedDirection(stickDirection, stickAimUpAngle) : Vector3.up;
+                case StickAimChargeType.Down:
+                    // Negative angle reuses TiltedDirection unchanged - cos is even (same
+                    // magnitude either sign) and sin flips sign, so this mirrors the tilt
+                    // downward through horizontal instead of duplicating the method for one sign
+                    // flip.
+                    return stickHeld ? TiltedDirection(stickDirection, -stickAimDownAngle) : Vector3.down;
+                default: // Forward
+                    // A shallower, separate angle when the stick is centered (toward facing)
+                    // than when it's actually held (toward the stick) - see
+                    // stickAimForwardNeutralAngle's own comment for why these are independent.
+                    return stickHeld
+                        ? TiltedDirection(stickDirection, stickAimForwardAngle)
+                        : TiltedDirection(FacingFlatDirection(), stickAimForwardNeutralAngle);
+            }
+        }
+
+        // Shared by every scheme's actual firing moment - just the physics-impulse queuing
+        // (FixedUpdate applies it next tick) plus arming hasLaunched/launchGraceTimer. Doesn't
+        // zero velocity itself: the charge-based flows already hold it at zero continuously for
+        // the whole charge (see FixedUpdate), so by the time this runs it's already correct.
+        void QueueLaunch(Vector3 direction, float force, float damping)
+        {
             queuedDirection = direction;
-            queuedForce = stickAimForce;
-            queuedDamping = stickAimDamping;
+            queuedForce = force;
+            queuedDamping = damping;
             launchQueued = true;
             hasLaunched = true;
+            // Armed here already (not just when FixedUpdate actually applies the impulse) so
+            // AllowGroundedMovement/AllowAirborneNudge are already correct the instant firing is
+            // decided - closes a script-execution-order edge case where
+            // KineticCubeControllerFreeMove's FixedUpdate could otherwise run before this
+            // component's on the very first physics tick after firing, see it as still
+            // "allowed", and set velocity directly moments before the impulse itself applies.
             launchGraceTimer = launchGraceDuration;
+        }
 
+        // StickAim/Mixed-air only - the charge-based schemes deliberately never touch the camera
+        // (see cameraOrbit's own field comment), so this stays separate from QueueLaunch.
+        void RecenterCameraForStickAimLaunch(Vector3 direction)
+        {
             // "Camera moves behind the player again after launching" - swings back to directly
             // behind the new launch direction, smoothly, cancelling instantly on manual look
-            // input (see ThirdPersonOrbitCamera.RecenterBehindTarget). A straight-up jump (LT,
-            // stick centered) has direction == Vector3.up, with NO horizontal component -
-            // Atan2(0, 0) returns 0 (world +Z) in that case, which silently ignored whatever
-            // direction the player actually happened to be facing and snapped the camera to an
-            // arbitrary world-relative spot instead. Falling back to the player's current facing
-            // whenever the launch itself doesn't establish a new horizontal direction fixes that
-            // - "behind the player" for a vertical jump means behind whichever way they were
-            // already facing, not behind some fixed world direction.
+            // input (see ThirdPersonOrbitCamera.RecenterBehindTarget). A straight-up/down launch
+            // (stick centered) has direction with NO horizontal component - Atan2(0, 0) returns 0
+            // (world +Z) in that case, which would silently ignore whatever direction the player
+            // actually happened to be facing and snap the camera to an arbitrary world-relative
+            // spot instead. Falling back to the player's current facing whenever the launch
+            // itself doesn't establish a new horizontal direction fixes that.
             Vector3 flatLaunchDir = new Vector3(direction.x, 0f, direction.z);
             float launchYaw = flatLaunchDir.sqrMagnitude > 0.0001f
                 ? Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg

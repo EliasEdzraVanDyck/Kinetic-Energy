@@ -166,6 +166,15 @@
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
+                },
+                {
+                    "name": "CancelCharge",
+                    "type": "Button",
+                    "id": "6d7e8f90-1234-4b56-c789-d0e1f2081a3b",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
                 }
             ],
             "bindings": [
@@ -760,6 +769,28 @@
                     "processors": "",
                     "groups": "Keyboard&Mouse",
                     "action": "LaunchUp",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "7e8f9012-3456-4c78-d901-e2f3a4b5c6d7",
+                    "path": "<Gamepad>/leftShoulder",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Gamepad",
+                    "action": "CancelCharge",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "8f901234-5678-4d90-ea12-f3a4b5c6d7e8",
+                    "path": "<Keyboard>/q",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Keyboard&Mouse",
+                    "action": "CancelCharge",
                     "isComposite": false,
                     "isPartOfComposite": false
                 }
