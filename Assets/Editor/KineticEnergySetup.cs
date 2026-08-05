@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using UnityEditor;
 using UnityEditor.Events;
 using UnityEditor.SceneManagement;
@@ -577,7 +578,7 @@ namespace KineticEnergy.EditorSetup
 
             // Universal energy economy - see each field's own comment in KineticCubeController.cs.
             controller.startingEnergyFraction = 0.2f;
-            controller.energyCostPerFullCharge = 0.1f;
+            controller.energyCostPerFullCharge = 1f;
             controller.energyGainPerSpeed = 0.03f;
             controller.energyGainSpeedBonus = 0.01f;
             controller.chargeAccumulationRate = 0.3f;
@@ -1344,6 +1345,14 @@ namespace KineticEnergy.EditorSetup
         // A plain solid-color fill bar - Image.Type.Filled/Horizontal stretched over the whole
         // parent rect (minus inset, if any), so SetEnergy/SetCharge (EnergyMeterController) just
         // move fillAmount. inset lets a bar sit inside a border panel instead of covering it.
+        // Image.OnPopulateMesh has an unconditional early-out - "if (sprite == null) {
+        // GenerateSimpleSprite(...); return; }" - that runs BEFORE it ever looks at `type`, so a
+        // Filled-type Image with no sprite assigned silently renders as a full, unfilled
+        // rectangle no matter what fillAmount is set to. That's exactly the bug behind "use a
+        // fill amount for the meter, it's still not normal" - fillAmount was being set correctly
+        // the whole time, it just had no sprite to actually apply it to. A plain solid-white
+        // sprite (not one of Unity's built-in UI sprites, which are 9-sliced/rounded and would
+        // fight "the meter should remain a rectangle") fixes this without changing anything else.
         static Image CreateFillBar(string name, Transform parent, Color color, float inset = 0f)
         {
             GameObject go = new GameObject(name, typeof(RectTransform));
@@ -1356,6 +1365,7 @@ namespace KineticEnergy.EditorSetup
             rt.offsetMax = new Vector2(-inset, -inset);
 
             Image image = go.AddComponent<Image>();
+            image.sprite = GetSolidWhiteSprite();
             image.color = color;
             image.type = Image.Type.Filled;
             image.fillMethod = Image.FillMethod.Horizontal;
@@ -1363,6 +1373,49 @@ namespace KineticEnergy.EditorSetup
             image.fillAmount = 1f;
 
             return image;
+        }
+
+        const string SolidWhiteSpritePath = "Assets/Editor/Generated/UISolidWhite.png";
+        static Sprite cachedSolidWhiteSprite;
+
+        // A flat, un-sliced, borderless 4x4 white square saved as a real project asset (not an
+        // in-memory Sprite.Create result, which wouldn't survive being referenced from a saved
+        // prefab - it has no asset path to serialize against). Generated once and reused/loaded
+        // on every later run, same idempotency pattern as everything else this file creates.
+        static Sprite GetSolidWhiteSprite()
+        {
+            if (cachedSolidWhiteSprite != null) return cachedSolidWhiteSprite;
+
+            Sprite existing = AssetDatabase.LoadAssetAtPath<Sprite>(SolidWhiteSpritePath);
+            if (existing != null)
+            {
+                cachedSolidWhiteSprite = existing;
+                return existing;
+            }
+
+            if (!AssetDatabase.IsValidFolder("Assets/Editor/Generated"))
+            {
+                AssetDatabase.CreateFolder("Assets/Editor", "Generated");
+            }
+
+            Texture2D texture = new Texture2D(4, 4, TextureFormat.RGBA32, false);
+            Color32[] pixels = new Color32[texture.width * texture.height];
+            for (int i = 0; i < pixels.Length; i++) pixels[i] = new Color32(255, 255, 255, 255);
+            texture.SetPixels32(pixels);
+            texture.Apply();
+            File.WriteAllBytes(SolidWhiteSpritePath, texture.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(texture);
+            AssetDatabase.ImportAsset(SolidWhiteSpritePath);
+
+            TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(SolidWhiteSpritePath);
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteImportMode = SpriteImportMode.Single;
+            importer.mipmapEnabled = false;
+            importer.filterMode = FilterMode.Bilinear;
+            importer.SaveAndReimport();
+
+            cachedSolidWhiteSprite = AssetDatabase.LoadAssetAtPath<Sprite>(SolidWhiteSpritePath);
+            return cachedSolidWhiteSprite;
         }
 
         // Shrinks a full-stretch RectTransform (as CreatePanel produces) inward by inset on all

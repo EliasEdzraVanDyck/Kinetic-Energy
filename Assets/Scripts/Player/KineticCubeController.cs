@@ -44,14 +44,20 @@ namespace KineticEnergy.Player
         // GainEnergyFromCrash). Shared across every scheme, not just Defy Gravity.
         [Range(0f, 1f)] public float startingEnergyFraction = 0.2f;
         // Exchange rate: a FULL charge (chargeFraction 1.0) costs this fraction of the entire
-        // energy tank. Lowered from 1 (a full charge used to empty the tank outright) per direct
-        // request: "the energy build up used when charging should be muuuuch lower" - together
-        // with launches no longer being capped by count (see canStartNewAim/canLaunch, now purely
-        // energyFraction > 0f), a lower cost is what actually makes "unlimited launches, as long
-        // as you have energy left" mean something - at the old cost, a single full-power launch
-        // could empty the whole tank. Exposed as its own knob rather than hardcoded so the
-        // exchange rate can be tuned without touching the charge-accumulation code itself.
-        public float energyCostPerFullCharge = 0.1f;
+        // energy tank. MUST stay at 1 - direct request: "you shouldn't be able to charge more
+        // energy than the amount you have stored currently, the amount you charged should be
+        // exactly the same as the energy you subtract from the current stored". At 1,
+        // EnergyChargeCeiling() (below) reduces to energyFraction * maxChargeTime, which makes
+        // ChargeFraction() <= energyFraction ALWAYS hold (charging literally cannot exceed what's
+        // stored) and the QueueLaunch deduction (ChargeFraction() * this field) reduce to exactly
+        // ChargeFraction() - i.e., "charged" and "subtracted" are the same number by construction,
+        // not just approximately. This was briefly lowered (0.1) to make a full-power charge
+        // affordable more than once per tank, but that broke both those guarantees (a full charge
+        // could cost far less than 100% of the meter while still SHOWING as a full-width charge
+        // bar, i.e. visually/mechanically "charging more than currently stored") - use
+        // chargeAccumulationRate instead to make charging feel cheaper/slower without breaking
+        // the 1:1 relationship this field's value of 1 guarantees.
+        public float energyCostPerFullCharge = 1f;
         // Energy gained on crashing scales with impact speed, and the RATE itself increases with
         // speed too (not just a flat multiple) - direct request: "the faster your speed at crash
         // that factor at which you gain more energy should also increase". gainedFraction =
@@ -62,13 +68,12 @@ namespace KineticEnergy.Player
         public EnergyMeterController energyMeter;
         // Multiplies Time.deltaTime in AccumulateCharge, so a second of real holding doesn't turn
         // straight into a second of chargeTime - direct request: "even at the starting energy it
-        // should take say 1 second to charge up to 20%", derived against energyCostPerFullCharge's
-        // ORIGINAL value of 1 (a full charge cost the whole tank, so 20% energy bought exactly a
-        // 20% charge in one real second at this rate). energyCostPerFullCharge has since been
-        // lowered a lot (see its own comment) specifically so a given amount of energy now buys
-        // MORE charge-time than before - this rate is unchanged, so charging still starts out at
-        // the same felt speed, it just now keeps growing past the old 20% ceiling instead of
-        // being cut off there, since energy is no longer the tightest constraint at low charge.
+        // should take say 1 second to charge up to 20%". At startingEnergyFraction (0.2) and
+        // energyCostPerFullCharge (must stay 1 - see its own comment), the energy-imposed charge
+        // ceiling is exactly 0.2 * maxChargeTime (1.5) = 0.3 chargeTime-seconds; reaching that in
+        // 1 real second needs a rate of 0.3/1.0 = 0.3. This is the knob to use for making charging
+        // feel cheaper/slower/faster overall - unlike energyCostPerFullCharge, changing this
+        // doesn't break the "can't charge more than you have stored" guarantee.
         public float chargeAccumulationRate = 0.3f;
 
         [Header("Defy Gravity Scheme")]
