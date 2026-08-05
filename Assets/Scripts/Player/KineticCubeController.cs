@@ -26,6 +26,11 @@ namespace KineticEnergy.Player
         public float minLaunchForce = 16f;
         public float maxLaunchForce = 70f;
         public float maxChargeTime = 1.5f;
+        // Total launches allowed per flight (the first grounded/starting one plus however many
+        // more this allows), shared across every scheme - direct request: "2 launches since
+        // launching, no matter what sort of launching and no matter the control scheme". Resets
+        // alongside hasLaunched the moment the cube genuinely lands again.
+        public int maxLaunchesPerFlight = 2;
 
         // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
         // punchier-feeling launch, but a faster exit speed alone would also fly further - linear
@@ -162,7 +167,7 @@ namespace KineticEnergy.Player
         // to line up. Restored to 1 the instant charging ends (fire or cancel). Deliberately does
         // NOT slow down aim/turn responsiveness - see UpdateChargeBasedScheme's use of
         // Time.unscaledDeltaTime for aimYaw/aimPitch specifically.
-        public float chargeTimeScale = 0.5f;
+        public float chargeTimeScale = 0.75f;
 
         [Header("Stick Aim Scheme")]
         // RB cycles through LaunchInstantly -> StickAim -> Mixed -> back - always reachable
@@ -274,26 +279,13 @@ namespace KineticEnergy.Player
         float launchGraceTimer;
         Vector3 launchStartPosition;
         float restTimer;
-        // StickAim/Mixed-air only: forward charge/launch limited to one use per flight, reset
-        // alongside hasLaunched at the exact same "genuinely landed" moment (see FixedUpdate's
-        // re-arm block) - reuses the same debounced grounded-check rather than a separate,
-        // possibly-inconsistent one.
-        bool hasUsedForwardLaunch;
-        // Same one-per-flight limit as hasUsedForwardLaunch, for the up ("jump") charge/launch.
-        bool hasUsedUpLaunch;
-        // Same idea, for the down ("slam") charge/launch - independent of hasUsedUpLaunch, since
-        // up and down are two different actions on two different buttons.
-        bool hasUsedDownLaunch;
-        // Mixed scheme only: while airborne, Mixed shares ONE limit across all three directions
-        // (unlike standalone StickAim's three independent flags above) - whichever of South/LT/RT
-        // fires first uses up the single midair launch, and the OTHER two become unavailable too
-        // until landing resets this alongside everything else.
-        bool hasUsedMixedAirLaunch;
-        // LaunchInstantly/HoldRelease/AnalogPressure/Mixed-grounded only: the charge-based aim
-        // flow is normally grounded-only (isGrounded && !hasLaunched to START), but once used,
-        // it's also allowed ONE more time while airborne, using the exact same aim-and-charge
-        // flow - reset alongside hasLaunched on landing, same as the flags above.
-        bool hasUsedAirRelaunch;
+        // Every scheme's actual fire moment goes through QueueLaunch (see its own comment), which
+        // increments this - one single shared counter instead of five separate per-scheme/per-
+        // direction flags, so "2 launches since launching, no matter what sort of launching and no
+        // matter the control scheme" (direct request) is enforced identically everywhere rather
+        // than each scheme needing its own matching limit. Reset to 0 alongside hasLaunched at the
+        // exact same "genuinely landed" moment (see FixedUpdate's re-arm block).
+        int launchesUsedThisFlight;
         // Which of South/LT/RT the new hold-to-charge system (UpdateStickAimChargeScheme) is
         // currently charging, if any. None means "not currently charging" - checked instead of a
         // separate bool since exactly one of four states applies at a time.
@@ -431,7 +423,7 @@ namespace KineticEnergy.Player
             switch (controlScheme)
             {
                 case ControlScheme.StickAim:
-                    UpdateStickAimChargeScheme(sharedSingleUse: false);
+                    UpdateStickAimChargeScheme();
                     return;
                 case ControlScheme.Mixed:
                     UpdateMixedScheme();
@@ -479,18 +471,17 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // Grounded: fresh start of a flight. Airborne: allowed ONE more time as a second,
-            // mid-air aim+launch using this exact same flow - "relaunch once while in the air
-            // again, using the same way to aim as before" (direct request). hasUsedAirRelaunch
-            // resets alongside hasLaunched the moment the cube genuinely lands. Only used to gate
-            // a BRAND NEW aim session starting, never to decide whether an ALREADY-ACTIVE one
-            // should keep going (see ltHeld just below) - isGrounded is a proximity check, not a
-            // touching check, and re-deriving this same condition every frame of an
-            // already-active air-relaunch charge could spuriously flip it false for a single tick
-            // near any surface and read as "LT let go", firing prematurely. This exact class of
-            // bug (a BoxCast proximity read misinterpreted as a real grounded/settled signal) has
-            // bitten this project before.
-            bool canStartNewAim = (isGrounded && !hasLaunched) || (!isGrounded && hasLaunched && !hasUsedAirRelaunch);
+            // Grounded: fresh start of a flight. Airborne: allowed again as a mid-air aim+launch
+            // using this exact same flow, as many times as maxLaunchesPerFlight still allows -
+            // "2 launches since launching, no matter what sort of launching" (direct request).
+            // Only used to gate a BRAND NEW aim session starting, never to decide whether an
+            // ALREADY-ACTIVE one should keep going (see ltHeld just below) - isGrounded is a
+            // proximity check, not a touching check, and re-deriving this same condition every
+            // frame of an already-active air-relaunch charge could spuriously flip it false for a
+            // single tick near any surface and read as "LT let go", firing prematurely. This
+            // exact class of bug (a BoxCast proximity read misinterpreted as a real
+            // grounded/settled signal) has bitten this project before.
+            bool canStartNewAim = (isGrounded && !hasLaunched) || (!isGrounded && hasLaunched && launchesUsedThisFlight < maxLaunchesPerFlight);
             bool ltHeld = isAiming ? ltIsPressed : (ltIsPressed && canStartNewAim);
 
             if (ltHeld)
@@ -591,9 +582,7 @@ namespace KineticEnergy.Player
 
                 if (launchNow)
                 {
-                    bool wasAirRelaunch = !isGrounded;
                     QueueLaunch(dir, previewForce, previewDamping);
-                    if (wasAirRelaunch) hasUsedAirRelaunch = true;
 
                     isAiming = false;
                     chargeTime = 0f;
@@ -622,9 +611,7 @@ namespace KineticEnergy.Player
                     chargeTime = Mathf.Clamp01(rtAnalogValue) * maxChargeTime;
                     float chargeFraction = ChargeFraction();
 
-                    bool wasAirRelaunch = !isGrounded;
                     QueueLaunch(AimDirection(), Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction), Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction));
-                    if (wasAirRelaunch) hasUsedAirRelaunch = true;
                     waitingForLtRelease = true;
                 }
 
@@ -636,12 +623,13 @@ namespace KineticEnergy.Player
         }
 
         // Grounded: exactly LaunchInstantly's aim/charge/fire flow (see UpdateChargeBasedScheme's
-        // combined switch case). Airborne: StickAim's hold-to-charge system, but with a single
-        // shared once-per-flight limit across all three directions instead of one each -
-        // "only able to do 1 midair launch until you hit the ground and it resets" (direct
-        // request). Once either system has an active charge in progress, stick with it
-        // regardless of isGrounded's exact value that frame - re-deciding by isGrounded alone
-        // every frame could otherwise switch systems mid-charge right at a ledge edge.
+        // combined switch case). Airborne: StickAim's hold-to-charge system. Both draw from the
+        // same shared launchesUsedThisFlight/maxLaunchesPerFlight cap, so switching between the
+        // two mid-flight (grounded launch, then an airborne StickAim-style follow-up) still adds
+        // up to the same total every scheme gets. Once either system has an active charge in
+        // progress, stick with it regardless of isGrounded's exact value that frame - re-deciding
+        // by isGrounded alone every frame could otherwise switch systems mid-charge right at a
+        // ledge edge.
         void UpdateMixedScheme()
         {
             if (isAiming)
@@ -650,7 +638,7 @@ namespace KineticEnergy.Player
             }
             else if (stickAimChargeType != StickAimChargeType.None)
             {
-                UpdateStickAimChargeScheme(sharedSingleUse: true);
+                UpdateStickAimChargeScheme();
             }
             else if (isGrounded)
             {
@@ -658,7 +646,7 @@ namespace KineticEnergy.Player
             }
             else
             {
-                UpdateStickAimChargeScheme(sharedSingleUse: true);
+                UpdateStickAimChargeScheme();
             }
         }
 
@@ -722,11 +710,7 @@ namespace KineticEnergy.Player
                 if (restTimer >= restConfirmDuration)
                 {
                     hasLaunched = false;
-                    hasUsedForwardLaunch = false;
-                    hasUsedUpLaunch = false;
-                    hasUsedDownLaunch = false;
-                    hasUsedMixedAirLaunch = false;
-                    hasUsedAirRelaunch = false;
+                    launchesUsedThisFlight = 0;
                 }
             }
             else
@@ -833,7 +817,7 @@ namespace KineticEnergy.Player
                         "Nudge (in the air): Left Stick\n" +
                         "Hold South / Left Trigger / Right Trigger: charge Up / Down / Forward\n" +
                         "Longer hold launches further, release to fire, Left Bumper cancels\n" +
-                        "Each once, any order, until grounded again\n" +
+                        "2 launches total, any combination, until grounded again\n" +
                         "Camera: Right Stick\n" +
                         switchLine +
                         "Pause: Start / Options / Esc",
@@ -842,7 +826,8 @@ namespace KineticEnergy.Player
                         "Grounded: Left Trigger to aim+charge (as the original scheme), Right\n" +
                         "  Trigger to launch\n" +
                         "Airborne: hold South / Left Trigger / Right Trigger to charge Up / Down /\n" +
-                        "  Forward - only 1 midair launch until grounded again\n" +
+                        "  Forward\n" +
+                        "2 launches total (grounded + air combined) until grounded again\n" +
                         "Left Bumper cancels either\n" +
                         "Camera: Right Stick\n" +
                         switchLine +
@@ -853,7 +838,7 @@ namespace KineticEnergy.Player
                         "Aim: Left Trigger (hold)\n" +
                         "Adjust Aim: Left Stick (while aiming)\n" +
                         "Launch: Right Trigger, Left Bumper cancels\n" +
-                        "One more launch allowed mid-air, same way, until grounded again\n" +
+                        "2 launches total, same way, until grounded again\n" +
                         "Camera: Right Stick\n" +
                         switchLine +
                         "Pause: Start / Options / Esc",
@@ -875,8 +860,9 @@ namespace KineticEnergy.Player
                         "  centered, or 30 degrees toward the stick. Release to fire.\n" +
                         "The longer any of the three is held, the further it launches (same range\n" +
                         "  as the original scheme). Left Bumper cancels whichever is charging.\n" +
-                        "Each of the three works any time, in any order, once per flight - all\n" +
-                        "  three reset together the moment the cube genuinely lands again.\n" +
+                        "Each of the three works any time, in any order - 2 launches total per\n" +
+                        "  flight, any combination, resetting together the moment the cube\n" +
+                        "  genuinely lands again.\n" +
                         "Right Stick - Camera\n" +
                         switchLinePanel +
                         "Start / Options / Esc - Pause",
@@ -886,10 +872,10 @@ namespace KineticEnergy.Player
                         "Grounded - Left Trigger (hold) to aim and charge, Left Stick to adjust\n" +
                         "  aim, Right Trigger to launch (exactly like the original scheme).\n" +
                         "Airborne - hold South / Left Trigger / Right Trigger to charge an Up /\n" +
-                        "  Down / Forward launch (exactly like the Stick Aim scheme), but only ONE\n" +
-                        "  of the three is allowed per flight while airborne - whichever fires\n" +
-                        "  first, the other two become unavailable too until the cube lands and\n" +
-                        "  it resets.\n" +
+                        "  Down / Forward launch (exactly like the Stick Aim scheme).\n" +
+                        "2 launches total per flight (the grounded one plus this) - whichever\n" +
+                        "  airborne direction fires first, the others become unavailable too\n" +
+                        "  until the cube lands and it resets.\n" +
                         "Left Bumper - Cancel whichever is currently charging, grounded or air.\n" +
                         "Right Stick - Camera\n" +
                         switchLinePanel +
@@ -901,8 +887,8 @@ namespace KineticEnergy.Player
                         "Left Stick (while aiming) - Adjust aim direction\n" +
                         "Right Trigger - Launch\n" +
                         "Left Bumper - Cancel the current aim/charge without firing\n" +
-                        "One more aim+launch is allowed mid-air, the same way, once per flight -\n" +
-                        "  resets the moment the cube genuinely lands again.\n" +
+                        "2 launches total per flight - grounded, then once more mid-air the same\n" +
+                        "  way - resetting the moment the cube genuinely lands again.\n" +
                         "South - Show/hide the landing preview\n" +
                         "Right Stick - Camera\n" +
                         switchLinePanel +
@@ -954,12 +940,10 @@ namespace KineticEnergy.Player
         // charge-based schemes: minLaunchForce/maxLaunchForce interpolated by how long it's
         // held, over maxChargeTime), release to fire, Left Bumper cancels without firing. Shows
         // the same aim arrow + landing trail the charge-based schemes do while charging - "the
-        // same sort of visual... that shows you your exact launch path" (direct request).
-        // sharedSingleUse: false for standalone StickAim (three independent once-per-flight
-        // limits, one per direction). true for Mixed's airborne phase (one limit shared across
-        // all three - whichever fires first uses up the only midair launch and the other two
-        // become unavailable too).
-        void UpdateStickAimChargeScheme(bool sharedSingleUse)
+        // same sort of visual... that shows you your exact launch path" (direct request). All
+        // three directions share the single launchesUsedThisFlight/maxLaunchesPerFlight cap -
+        // same limit, same counter, for both standalone StickAim and Mixed's airborne phase.
+        void UpdateStickAimChargeScheme()
         {
             Vector2 stick = moveAction != null && moveAction.action != null
                 ? moveAction.action.ReadValue<Vector2>()
@@ -1037,14 +1021,6 @@ namespace KineticEnergy.Player
                     QueueLaunch(dir, previewForce, previewDamping);
                     RecenterCameraForStickAimLaunch(dir);
 
-                    if (sharedSingleUse)
-                    {
-                        hasUsedMixedAirLaunch = true;
-                    }
-                    else if (stickAimChargeType == StickAimChargeType.Up) hasUsedUpLaunch = true;
-                    else if (stickAimChargeType == StickAimChargeType.Down) hasUsedDownLaunch = true;
-                    else hasUsedForwardLaunch = true;
-
                     stickAimChargeType = StickAimChargeType.None;
                     chargeTime = 0f;
                     aimArrow?.SetVisible(false);
@@ -1053,13 +1029,11 @@ namespace KineticEnergy.Player
             }
             else
             {
-                bool canUp = sharedSingleUse ? !hasUsedMixedAirLaunch : !hasUsedUpLaunch;
-                bool canDown = sharedSingleUse ? !hasUsedMixedAirLaunch : !hasUsedDownLaunch;
-                bool canForward = sharedSingleUse ? !hasUsedMixedAirLaunch : !hasUsedForwardLaunch;
+                bool canLaunch = launchesUsedThisFlight < maxLaunchesPerFlight;
 
-                bool upPressed = canUp && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
-                bool ltPressed = canDown && launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
-                bool rtPressed = canForward && fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
+                bool upPressed = canLaunch && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
+                bool ltPressed = canLaunch && launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
+                bool rtPressed = canLaunch && fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
 
                 if (upPressed) StartStickAimCharge(StickAimChargeType.Up);
                 else if (ltPressed) StartStickAimCharge(StickAimChargeType.Down);
@@ -1122,6 +1096,11 @@ namespace KineticEnergy.Player
             queuedDamping = damping;
             launchQueued = true;
             hasLaunched = true;
+            // Every scheme's actual fire moment goes through here, so counting it centrally
+            // (rather than at each call site) is what makes the 2-launch cap apply identically
+            // "no matter what sort of launching and no matter the control scheme" - see
+            // launchesUsedThisFlight's own comment.
+            launchesUsedThisFlight++;
             // Armed here already (not just when FixedUpdate actually applies the impulse) so
             // AllowGroundedMovement/AllowAirborneNudge are already correct the instant firing is
             // decided - closes a script-execution-order edge case where
@@ -1218,8 +1197,21 @@ namespace KineticEnergy.Player
             // resumes, and the real cube never has this problem (it's been continuously resting
             // on its platform since it landed), but the clone, repositioned from scratch every
             // call, would otherwise immediately "land" on the platform it launches from before
-            // it has moved at all.
-            predictionRb.position = startPos + Vector3.up * 0.02f;
+            // it has moved at all. 0.02 wasn't actually enough margin - PhysX's own default
+            // contact offset is 0.01 (see ProjectSettings/DynamicsManager.asset), so a 0.02 gap
+            // left only ~0.01 of genuine clearance beyond PhysX's own "already touching" zone,
+            // easily eaten by solver/continuous-detection approximation. Confirmed empirically
+            // (temporary batch-mode diagnostic comparing predicted vs actual real-physics
+            // outcomes): a moderate-strength, moderate-angle shot could register an instant false
+            // "landed" contact with the launch surface at 0.02, get stopped dead by
+            // PredictionCloneStopper within the first step or two, and then just slowly re-settle
+            // under gravity from a standstill - producing a predicted landing point barely more
+            // than a meter away when the real shot (unaffected, since the real cube was never
+            // teleported this close to its own surface to begin with) actually travelled over
+            // 15m further. A stronger shot cleared the margin fast enough within one step to
+            // avoid the false contact, which is why this wasn't uniformly wrong - "isn't accurate
+            // in all cases" is exactly what that looks like from the player's side.
+            predictionRb.position = startPos + Vector3.up * 0.15f;
             predictionRb.rotation = transform.rotation;
             predictionRb.linearVelocity = initialVelocity;
             predictionRb.angularVelocity = Vector3.zero;

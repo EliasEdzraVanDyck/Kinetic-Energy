@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -39,12 +40,26 @@ namespace KineticEnergy.Camera
         [Header("Input")]
         public InputActionReference lookAction;
 
+        [Header("Wall Occlusion")]
+        // "If the camera is looking at a wall from the outside, you should be able to look
+        // through the wall" (direct request - commonly called camera occlusion culling). There
+        // was no camera-collision handling here at all before this - a wall ending up between
+        // the orbit position and the player (e.g. the camera orbits to just outside one of
+        // Level2's hallway walls) just blocked the view outright. Hides (doesn't fade) whichever
+        // renderers are directly between the camera and the player each frame, restoring them
+        // the instant they're no longer in the way.
+        public LayerMask occlusionMask = ~0;
+        public float occlusionCheckRadius = 0.25f;
+
         float yaw;
         float pitch = 15f;
         Vector3 velocity;
         bool yawInitialized;
         bool recentering;
         float recenterTargetYaw;
+
+        readonly List<Renderer> occludedRenderers = new List<Renderer>();
+        readonly List<Renderer> stillOccludedThisFrame = new List<Renderer>();
 
         void Start()
         {
@@ -110,13 +125,21 @@ namespace KineticEnergy.Camera
                 ? lookAction.action.ReadValue<Vector2>()
                 : Vector2.zero;
 
+            // Unscaled, not Time.deltaTime - Time.deltaTime already shrinks 1:1 with
+            // Time.timeScale, which would otherwise make the camera merely ride along with
+            // whatever fraction chargeTimeScale happens to be. Direct request is a flat half
+            // speed specifically WHENEVER the game isn't at full speed, not a proportional
+            // slowdown that tracks the exact charge-time-scale value.
+            //
             // The frame right after a scene reload (Restart, or the new fall-reset) can have an
-            // abnormally large Time.deltaTime - loading everything (Player/Camera/PauseSystem,
-            // plus Level1's platform generation) takes real time before the next frame renders.
+            // abnormally large deltaTime - loading everything (Player/Camera/PauseSystem, plus
+            // Level1's platform generation) takes real time before the next frame renders.
             // Multiplied straight into this accumulator, holding the stick at that exact moment
             // (plausible right after falling or hitting Restart) could snap yaw/pitch to a
-            // garbage value in one frame, making the camera look broken/unresponsive afterward.
-            float dt = Mathf.Min(Time.deltaTime, maxDeltaTime);
+            // garbage value in one frame, making the camera look broken/unresponsive afterward -
+            // still a risk with unscaled time, so the clamp stays.
+            bool gameSpeedNotNormal = !Mathf.Approximately(Time.timeScale, 1f);
+            float dt = Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime) * (gameSpeedNotNormal ? 0.5f : 1f);
 
             // Manual input always wins outright, the instant there is any - recentering only
             // ever happens while the player isn't already telling the camera what to do.
@@ -150,6 +173,48 @@ namespace KineticEnergy.Camera
             if (lookDir.sqrMagnitude > 0.0001f)
             {
                 transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+            }
+
+            UpdateWallOcclusion(focusPoint);
+        }
+
+        // Hides any renderer whose collider sits directly between the camera and the player,
+        // restoring it the instant it no longer does - see occlusionMask's own comment.
+        void UpdateWallOcclusion(Vector3 focusPoint)
+        {
+            stillOccludedThisFrame.Clear();
+
+            Vector3 origin = transform.position;
+            Vector3 toTarget = focusPoint - origin;
+            float distance = toTarget.magnitude;
+
+            if (distance > 0.0001f)
+            {
+                RaycastHit[] hits = Physics.SphereCastAll(origin, occlusionCheckRadius, toTarget / distance, distance, occlusionMask, QueryTriggerInteraction.Ignore);
+                foreach (RaycastHit hit in hits)
+                {
+                    // Only interested in geometry actually BETWEEN the camera and the player -
+                    // never hide the player's own collider/visual.
+                    if (target != null && (hit.collider.transform == target || hit.collider.transform.IsChildOf(target))) continue;
+
+                    Renderer hitRenderer = hit.collider.GetComponent<Renderer>();
+                    if (hitRenderer == null) continue;
+
+                    stillOccludedThisFrame.Add(hitRenderer);
+                    if (!occludedRenderers.Contains(hitRenderer))
+                    {
+                        hitRenderer.enabled = false;
+                        occludedRenderers.Add(hitRenderer);
+                    }
+                }
+            }
+
+            for (int i = occludedRenderers.Count - 1; i >= 0; i--)
+            {
+                if (stillOccludedThisFrame.Contains(occludedRenderers[i])) continue;
+
+                if (occludedRenderers[i] != null) occludedRenderers[i].enabled = true;
+                occludedRenderers.RemoveAt(i);
             }
         }
     }

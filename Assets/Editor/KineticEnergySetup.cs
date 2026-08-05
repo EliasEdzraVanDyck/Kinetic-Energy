@@ -20,6 +20,7 @@ namespace KineticEnergy.EditorSetup
         const string OldScenePath = "Assets/Scenes/SampleScene.unity";
         const string ScenePath = "Assets/Scenes/Sandbox Scene.unity";
         const string Level1ScenePath = "Assets/Scenes/Level1.unity";
+        const string Level2ScenePath = "Assets/Scenes/Level2.unity";
         const string VolumeProfilePath = "Assets/Settings/SampleSceneProfile.asset";
         const string ActionsPath = "Assets/InputSystem_Actions.inputactions";
         const string PrefabFolder = "Assets/Prefabs";
@@ -31,6 +32,7 @@ namespace KineticEnergy.EditorSetup
         {
             ("Sandbox", "Sandbox Scene"),
             ("Level 1", "Level1"),
+            ("Level 2", "Level2"),
         };
 
         public static void SetupAll()
@@ -38,6 +40,7 @@ namespace KineticEnergy.EditorSetup
             RenameSandboxSceneIfNeeded();
             Setup();
             SetupLevel1();
+            SetupLevel2();
             UpdateBuildSettings();
 
             Debug.Log("KineticEnergySetup: SetupAll complete OK");
@@ -79,6 +82,12 @@ namespace KineticEnergy.EditorSetup
 
             GameObject mainCamGo = GameObject.Find("Main Camera");
             if (mainCamGo == null) throw new Exception("KineticEnergySetup: could not find 'Main Camera' GameObject in scene.");
+
+            // Sandbox Scene's own Directional Light predates BuildDirectionalLight (it came from
+            // the original URP template scene this was renamed from) - unlike Level1/Level2,
+            // nothing ever called this here before, so its shadow setting would otherwise stay
+            // whatever the template shipped with regardless of this method's own logic.
+            BuildDirectionalLight();
 
             KineticCubeController controller = BuildPlayerCube(player, moveRef, launchRef, fireRef, selectGhostRef, selectTrailRef, selectCrosshairRef, selectNoneRef, switchSchemeRef, upLaunchRef, cancelChargeRef,
                 out KineticCubeControllerFreeMove freeMoveController);
@@ -247,16 +256,229 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Level1 setup complete OK");
         }
 
+        // Level2 is hand-placed, static level geometry, not a runtime spawner like Level1's
+        // LevelGenerator - direct request: "do not make them random and place them via the
+        // editor". Segments get added to BuildLevel2Segments below one at a time as future
+        // requests ask for them; for now it's just the opening hallway.
+        static void SetupLevel2()
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(Level2ScenePath) == null)
+            {
+                // Same reasoning as SetupLevel1 - copying Sandbox Scene guarantees identical
+                // RenderSettings/skybox/ambient instead of trying to replicate them by hand.
+                if (!AssetDatabase.CopyAsset(ScenePath, Level2ScenePath))
+                {
+                    throw new Exception("KineticEnergySetup: failed to copy Sandbox Scene to create Level2.");
+                }
+            }
+
+            EditorSceneManager.OpenScene(Level2ScenePath, OpenSceneMode.Single);
+
+            BuildDirectionalLight();
+            BuildGlobalVolume();
+
+            GameObject playerAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/Player.prefab");
+            GameObject cameraAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/ThirdPersonCameraRig.prefab");
+            GameObject pauseAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PauseSystem.prefab");
+            if (playerAsset == null || cameraAsset == null || pauseAsset == null)
+            {
+                throw new Exception("KineticEnergySetup: Level2 needs Player/ThirdPersonCameraRig/PauseSystem prefabs - run Setup() (part of SetupAll) first.");
+            }
+
+            // Same duplicate-camera-name trap as SetupLevel1 - both names destroyed deliberately,
+            // see that method's own comment for why.
+            DestroyIfExists("Player");
+            DestroyIfExists("Main Camera");
+            DestroyIfExists("ThirdPersonCameraRig");
+            DestroyIfExists("PauseSystem");
+            DestroyIfExists("LevelGenerator");
+            DestroyIfExists("Plane");
+            // Level2.unity was created by copying Sandbox Scene (see the CopyAsset call above),
+            // which by that point already had its own 5 circular jump platforms built (Setup()
+            // runs before SetupLevel2() in SetupAll) - direct request: those don't belong here,
+            // Level2 is meant to be just the hand-placed segments below.
+            DestroyIfExists("SandboxPlatforms");
+
+            GameObject playerGo = (GameObject)PrefabUtility.InstantiatePrefab(playerAsset);
+            GameObject camGo = (GameObject)PrefabUtility.InstantiatePrefab(cameraAsset);
+            GameObject pauseGo = (GameObject)PrefabUtility.InstantiatePrefab(pauseAsset);
+
+            KineticCubeController controller = playerGo.GetComponent<KineticCubeController>();
+            KineticCubeControllerFreeMove freeMoveController = playerGo.GetComponent<KineticCubeControllerFreeMove>();
+            ThirdPersonOrbitCamera orbitCam = camGo.GetComponent<ThirdPersonOrbitCamera>();
+
+            controller.cameraTransform = camGo.transform;
+            controller.cameraOrbit = orbitCam;
+            freeMoveController.cameraTransform = camGo.transform;
+            orbitCam.target = playerGo.transform;
+
+            // Same single-source-of-truth reasoning as SetupLevel1 - this is a plain instance of
+            // Player.prefab, not rebuilt from scratch here.
+            ApplyLaunchTuning(controller);
+
+            Text modeLabel = pauseGo.transform.Find("PauseCanvas/PreviewModeLabel")?.GetComponent<Text>();
+            controller.landingPreview.modeLabel = modeLabel;
+            controller.controlsHintLabel = pauseGo.transform.Find("PauseCanvas/ControlsHintLabel")?.GetComponent<Text>();
+            controller.controlsPanelBody = pauseGo.transform.Find("PauseCanvas/ControlsPanel/ControlsBody")?.GetComponent<Text>();
+
+            EditorUtility.SetDirty(controller);
+            EditorUtility.SetDirty(freeMoveController);
+            EditorUtility.SetDirty(orbitCam);
+            EditorUtility.SetDirty(controller.landingPreview);
+
+            GameObject nextPlatform = BuildLevel2Segments(playerGo.transform);
+            BuildCameraStartFacing(playerGo.transform, orbitCam, nextPlatform.transform);
+            BuildPlayerShadow(playerGo.transform);
+
+            Scene level2Scene = EditorSceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(level2Scene);
+            EditorSceneManager.SaveScene(level2Scene);
+
+            Debug.Log("KineticEnergySetup: Level2 setup complete OK");
+        }
+
+        // Every segment lines up back-to-back along +Z, in the order added here - "a couple of
+        // level segments spawn in a straight line all after each other and connected". Only the
+        // opening hallway exists so far; future segments get appended to this same method
+        // (advancing z onward from wherever the previous one ended) rather than each becoming
+        // its own standalone entry point. Returns the last segment's own "next platform" (right
+        // now just the hallway's end platform) so the caller can point the camera at it on
+        // bootup.
+        static GameObject BuildLevel2Segments(Transform player)
+        {
+            GameObject container = GameObject.Find("Level2Segments");
+            if (container != null) UnityEngine.Object.DestroyImmediate(container);
+            container = new GameObject("Level2Segments");
+
+            return BuildLevel2OpeningHallway(container.transform, player);
+        }
+
+        // The opening segment: a long straight hallway. Two platforms - start and end - float in
+        // an otherwise empty void, flanked the whole way by tall walls and capped with a
+        // partially-transparent "glass" ceiling that still lets light through (direct request).
+        // Fully hand-placed/static (built once here, not regenerated at runtime), unlike Level1's
+        // random LevelGenerator. Returns the end platform.
+        static GameObject BuildLevel2OpeningHallway(Transform parent, Transform player)
+        {
+            GameObject hallway = new GameObject("OpeningHallway");
+            hallway.transform.SetParent(parent, true);
+
+            // Twice Level1's platform footprint (3, 0.5, 3) - direct request.
+            Vector3 platformSize = new Vector3(6f, 0.5f, 6f);
+            const float hallwayLength = 32f; // start-platform-center to end-platform-center, along +Z
+            const float corridorHalfWidth = 5f; // interior clearance either side of center - comfortably wider than the 6-wide platforms
+            const float wallThickness = 1f;
+            const float wallHeight = 14f; // "high up walls"
+            const float ceilingThickness = 0.3f;
+            // How far past each platform's own outer edge the walls/ceiling extend, so the
+            // hallway visually encloses both platforms too, not just the void between them.
+            float endMargin = platformSize.z * 0.5f;
+
+            Vector3 startCenter = Vector3.zero;
+            Vector3 endCenter = new Vector3(0f, 0f, hallwayLength);
+            float corridorMinZ = startCenter.z - endMargin;
+            float corridorMaxZ = endCenter.z + endMargin;
+            float corridorLength = corridorMaxZ - corridorMinZ;
+            float corridorCenterZ = (corridorMinZ + corridorMaxZ) * 0.5f;
+
+            Material platformMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/CheckeredFloor.mat");
+            if (platformMat == null)
+            {
+                platformMat = new Material(FindBestShader());
+                platformMat.color = new Color(0.5f, 0.5f, 0.55f);
+                platformMat = SaveMaterialAsset(platformMat, "Level2PlatformMaterial");
+            }
+
+            Material wallMat = new Material(FindBestShader());
+            wallMat.color = new Color(0.32f, 0.34f, 0.4f);
+            wallMat = SaveMaterialAsset(wallMat, "Level2WallMaterial");
+
+            Color glassColor = new Color(0.75f, 0.9f, 1f, 0.35f);
+            Material glassMat = new Material(FindBestShader());
+            glassMat.color = glassColor;
+            MakeTransparent(glassMat, glassColor.a);
+            glassMat = SaveMaterialAsset(glassMat, "Level2GlassCeilingMaterial");
+
+            CreateBlock(hallway.transform, "StartPlatform", startCenter, platformSize, platformMat);
+            GameObject endPlatform = CreateBlock(hallway.transform, "EndPlatform", endCenter, platformSize, platformMat);
+
+            Vector3 wallSize = new Vector3(wallThickness, wallHeight, corridorLength);
+            Vector3 wallCenterY = new Vector3(0f, wallHeight * 0.5f, corridorCenterZ);
+            CreateBlock(hallway.transform, "WallLeft", wallCenterY + new Vector3(-(corridorHalfWidth + wallThickness * 0.5f), 0f, 0f), wallSize, wallMat);
+            CreateBlock(hallway.transform, "WallRight", wallCenterY + new Vector3(corridorHalfWidth + wallThickness * 0.5f, 0f, 0f), wallSize, wallMat);
+
+            Vector3 ceilingSize = new Vector3((corridorHalfWidth + wallThickness) * 2f, ceilingThickness, corridorLength);
+            Vector3 ceilingCenter = new Vector3(0f, wallHeight + ceilingThickness * 0.5f, corridorCenterZ);
+            GameObject ceiling = CreateBlock(hallway.transform, "GlassCeiling", ceilingCenter, ceilingSize, glassMat);
+            // Keeps its BoxCollider (unlike the purely-decorative ghost/shadow visuals elsewhere
+            // in this file) - "looks like glass so the player knows they can't go through it"
+            // means it has to actually BE solid, not just look that way. Shadow casting is what's
+            // turned off, not collision - a real pane of glass still blocks a thrown ball, it
+            // just doesn't stop the sun from lighting the room behind it.
+            ceiling.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+            // Same formula LevelGenerator uses to stand the player on a platform's surface:
+            // platform center + half its thickness + the player cube's own half-height.
+            player.position = startCenter + new Vector3(0f, platformSize.y * 0.5f + 0.5f, 0f);
+
+            return endPlatform;
+        }
+
+        // "Camera should face behind the player and look at the next platform on bootup" (direct
+        // request) - same idea as LevelGenerator.FaceCameraTowardFinish for Level1, pulled out
+        // into the reusable CameraStartFacing component (see its own comment) since Level2 has no
+        // LevelGenerator to hang this off of. A runtime component, not a baked scene transform -
+        // does NOT touch any existing object's saved position/rotation.
+        static void BuildCameraStartFacing(Transform player, ThirdPersonOrbitCamera orbitCam, Transform lookAtPoint)
+        {
+            GameObject existing = GameObject.Find("CameraStartFacing");
+            if (existing != null) UnityEngine.Object.DestroyImmediate(existing);
+
+            GameObject go = new GameObject("CameraStartFacing");
+            CameraStartFacing facing = go.AddComponent<CameraStartFacing>();
+            facing.player = player;
+            facing.cameraOrbit = orbitCam;
+            facing.lookAtPoint = lookAtPoint;
+        }
+
+        // Plain solid cube - collider included (never destroyed here, unlike the decorative
+        // ghost/preview cubes elsewhere in this file), since every use of this so far needs to
+        // actually block the player.
+        static GameObject CreateBlock(Transform parent, string name, Vector3 center, Vector3 size, Material material)
+        {
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = name;
+            go.transform.SetParent(parent, true);
+            go.transform.position = center;
+            go.transform.localScale = size;
+            go.GetComponent<Renderer>().sharedMaterial = material;
+            return go;
+        }
+
+        // Explicitly (re)applies every setting on every run, not just when creating the light for
+        // the first time - a plain "create once, no-op if it already exists" check (the previous
+        // behavior) would leave an already-saved scene's Directional Light stuck on whatever
+        // shadow setting it had the very first time this ran, exactly the staleness risk every
+        // other tunable in this file already guards against explicitly.
         static void BuildDirectionalLight()
         {
-            if (GameObject.Find("Directional Light") != null) return;
+            GameObject lightGo = GameObject.Find("Directional Light");
+            if (lightGo == null)
+            {
+                lightGo = new GameObject("Directional Light");
+                lightGo.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+            }
 
-            GameObject lightGo = new GameObject("Directional Light");
-            lightGo.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
-            Light light = lightGo.AddComponent<Light>();
+            Light light = lightGo.GetComponent<Light>();
+            if (light == null) light = lightGo.AddComponent<Light>();
             light.type = LightType.Directional;
             light.intensity = 2f;
-            light.shadows = LightShadows.Soft;
+            // Direct request: disable every lighting-generated shadow across all levels (current
+            // and future - this single method is shared by every scene's setup) - NOT the
+            // separate PlayerShadow drop-shadow, which is a plain unlit mesh positioned by its
+            // own script, not a real-time shadow, and is completely unaffected by this.
+            light.shadows = LightShadows.None;
+            EditorUtility.SetDirty(light);
         }
 
         static void BuildGlobalVolume()
@@ -271,17 +493,31 @@ namespace KineticEnergy.EditorSetup
             if (profile != null) volume.sharedProfile = profile;
         }
 
+        // GameObject.Find deliberately skips inactive GameObjects (see its own docs) - found via
+        // direct evidence, not a guess: Level2.unity carried two leftover "SandboxPlatforms"
+        // containers that GameObject.Find("SandboxPlatforms") couldn't see at all (both had
+        // m_IsActive: 0 on disk), so DestroyIfExists silently did nothing to them every single
+        // run. Every caller of DestroyIfExists actually wants "gone, active or not" - searching
+        // inactive objects too is what makes that guarantee actually hold.
+        static GameObject FindByNameIncludingInactive(string name)
+        {
+            foreach (GameObject go in UnityEngine.Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (go.name == name) return go;
+            }
+            return null;
+        }
+
         static void DestroyIfExists(string name)
         {
-            // Loop, not a single Find+Destroy - GameObject.Find only ever returns ONE match,
-            // so if duplicates ever accumulate (as happened with the camera rig - 4 instances
-            // found in Level1.unity, while Player/PauseSystem/LevelGenerator each stayed at a
-            // correct 1), a single-shot destroy silently leaves the rest behind and the count
-            // never actually goes back to zero on a re-run. This converges to zero regardless
-            // of however many are actually present.
+            // Loop, not a single Find+Destroy - a single-shot destroy silently leaves any
+            // additional duplicates behind and the count never actually goes back to zero on a
+            // re-run (as happened with the camera rig - 4 instances found in Level1.unity, while
+            // Player/PauseSystem/LevelGenerator each stayed at a correct 1). This converges to
+            // zero regardless of however many are actually present.
             int destroyed = 0;
             GameObject go;
-            while ((go = GameObject.Find(name)) != null)
+            while ((go = FindByNameIncludingInactive(name)) != null)
             {
                 UnityEngine.Object.DestroyImmediate(go);
                 destroyed++;
@@ -324,7 +560,9 @@ namespace KineticEnergy.EditorSetup
             // see the field's own comment in KineticCubeController.cs.
             controller.stickAimDeadzone = 0.9f;
             // "Bullet time" while charging any launch - see the field's own comment.
-            controller.chargeTimeScale = 0.5f;
+            controller.chargeTimeScale = 0.75f;
+            // Shared 2-launches-per-flight cap, every scheme - see the field's own comment.
+            controller.maxLaunchesPerFlight = 2;
             // Moved here (was only set in BuildPlayerCube) so Level1's instance gets the same
             // explicit anti-staleness reassignment Sandbox Scene's prefab does - the exact same
             // reasoning this method already exists for. Negative tilts UP (see the field's own
@@ -350,7 +588,8 @@ namespace KineticEnergy.EditorSetup
             EditorBuildSettings.scenes = new[]
             {
                 new EditorBuildSettingsScene(ScenePath, true),
-                new EditorBuildSettingsScene(Level1ScenePath, true)
+                new EditorBuildSettingsScene(Level1ScenePath, true),
+                new EditorBuildSettingsScene(Level2ScenePath, true)
             };
         }
 
