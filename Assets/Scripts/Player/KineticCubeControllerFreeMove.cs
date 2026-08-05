@@ -234,6 +234,22 @@ namespace KineticEnergy.Player
             }
         }
 
+        // Called by KineticCubeController.OnCollisionEnter the instant a crash sticks the cube -
+        // direct request: "the cubes surface should align with the surface it just hit, so they
+        // are parallel". Aligning local up to the surface's own outward normal reproduces the
+        // IDENTICAL rotation the cube already has resting on ordinary flat ground (whose normal
+        // IS world up), so this is a no-op there and only visibly kicks in for walls/ceilings/
+        // ramps. Instant snap, not eased through the lean Slerp, same reasoning as
+        // FaceLaunchDirection above - and it needs no explicit reset: FixedUpdate returns early
+        // (skipping the Slerp entirely) for the whole time AllowGroundedMovement/
+        // AllowAirborneNudge are both false, which is exactly the isStuck window, so this holds
+        // untouched until the next launch calls FaceLaunchDirection and naturally overwrites it.
+        public void AlignVisualToSurface(Vector3 surfaceNormal)
+        {
+            if (visual == null) return;
+            visual.localRotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal);
+        }
+
         // Same BoxCast-across-the-footprint approach as KineticCubeController.FixedUpdate, and
         // for the same reason: a single center ray can miss when the cube is resting right at a
         // platform's edge.

@@ -558,11 +558,6 @@ namespace KineticEnergy.EditorSetup
             // comment in KineticCubeController.cs for the empirical verification.
             controller.minLaunchDamping = 2.8f;
             controller.maxLaunchDamping = 1.0f;
-            // Wall crashes fall slower instead of sticking - see each field's own comment in
-            // KineticCubeController.cs.
-            controller.wallNormalThreshold = 0.5f;
-            controller.wallCrashVelocityRetention = 0.4f;
-            controller.wallCrashFallDamping = 3f;
             // StickAim's charge (and Mixed's airborne charge) now uses this same
             // minLaunchForce/maxLaunchForce curve directly - see stickAimUpAngle etc. below for
             // the per-direction tilt angles, which are all that's still scheme-specific.
@@ -579,12 +574,10 @@ namespace KineticEnergy.EditorSetup
             controller.stickAimDeadzone = 0.9f;
             // "Bullet time" while charging any launch - see the field's own comment.
             controller.chargeTimeScale = 0.75f;
-            // Shared 2-launches-per-flight cap, every scheme - see the field's own comment.
-            controller.maxLaunchesPerFlight = 2;
 
             // Universal energy economy - see each field's own comment in KineticCubeController.cs.
             controller.startingEnergyFraction = 0.2f;
-            controller.energyCostPerFullCharge = 1f;
+            controller.energyCostPerFullCharge = 0.1f;
             controller.energyGainPerSpeed = 0.03f;
             controller.energyGainSpeedBonus = 0.01f;
             controller.chargeAccumulationRate = 0.3f;
@@ -703,6 +696,7 @@ namespace KineticEnergy.EditorSetup
             controller.fallResetY = -30f;
             controller.launchGraceDuration = 0.15f;
             controller.minLaunchClearDistance = 2f;
+            controller.flatGroundStickThreshold = 0.9f;
             controller.moveAction = moveRef;
             controller.launchAction = launchRef;
             controller.fireAction = fireRef;

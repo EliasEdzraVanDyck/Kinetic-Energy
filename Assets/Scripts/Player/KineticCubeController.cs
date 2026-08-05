@@ -37,11 +37,6 @@ namespace KineticEnergy.Player
         public float minLaunchForce = 45f;
         public float maxLaunchForce = 110f;
         public float maxChargeTime = 1.5f;
-        // Total launches allowed per flight (the first grounded/starting one plus however many
-        // more this allows), shared across every scheme - direct request: "2 launches since
-        // launching, no matter what sort of launching and no matter the control scheme". Resets
-        // alongside hasLaunched the moment the cube genuinely lands again.
-        public int maxLaunchesPerFlight = 2;
 
         [Header("Energy")]
         // "you start at say 20%" (direct request) - a fraction of a full energy tank, spent on
@@ -49,11 +44,14 @@ namespace KineticEnergy.Player
         // GainEnergyFromCrash). Shared across every scheme, not just Defy Gravity.
         [Range(0f, 1f)] public float startingEnergyFraction = 0.2f;
         // Exchange rate: a FULL charge (chargeFraction 1.0) costs this fraction of the entire
-        // energy tank. 1 means a full charge always empties the tank outright (unless you don't
-        // have that much stored, in which case AccumulateCharge caps the charge itself before it
-        // gets that far - see its own comment). Exposed as its own knob rather than hardcoded so
-        // the exchange rate can be tuned without touching the charge-accumulation code itself.
-        public float energyCostPerFullCharge = 1f;
+        // energy tank. Lowered from 1 (a full charge used to empty the tank outright) per direct
+        // request: "the energy build up used when charging should be muuuuch lower" - together
+        // with launches no longer being capped by count (see canStartNewAim/canLaunch, now purely
+        // energyFraction > 0f), a lower cost is what actually makes "unlimited launches, as long
+        // as you have energy left" mean something - at the old cost, a single full-power launch
+        // could empty the whole tank. Exposed as its own knob rather than hardcoded so the
+        // exchange rate can be tuned without touching the charge-accumulation code itself.
+        public float energyCostPerFullCharge = 0.1f;
         // Energy gained on crashing scales with impact speed, and the RATE itself increases with
         // speed too (not just a flat multiple) - direct request: "the faster your speed at crash
         // that factor at which you gain more energy should also increase". gainedFraction =
@@ -64,10 +62,13 @@ namespace KineticEnergy.Player
         public EnergyMeterController energyMeter;
         // Multiplies Time.deltaTime in AccumulateCharge, so a second of real holding doesn't turn
         // straight into a second of chargeTime - direct request: "even at the starting energy it
-        // should take say 1 second to charge up to 20%". At startingEnergyFraction (0.2) and
-        // energyCostPerFullCharge (1), the energy-imposed charge ceiling (see EnergyChargeCeiling)
-        // is 0.2 * maxChargeTime chargeTime-seconds; reaching that ceiling in 1 real second needs
-        // a rate of (0.2 * maxChargeTime) / 1s, which at the current maxChargeTime (1.5) is 0.3.
+        // should take say 1 second to charge up to 20%", derived against energyCostPerFullCharge's
+        // ORIGINAL value of 1 (a full charge cost the whole tank, so 20% energy bought exactly a
+        // 20% charge in one real second at this rate). energyCostPerFullCharge has since been
+        // lowered a lot (see its own comment) specifically so a given amount of energy now buys
+        // MORE charge-time than before - this rate is unchanged, so charging still starts out at
+        // the same felt speed, it just now keeps growing past the old 20% ceiling instead of
+        // being cut off there, since energy is no longer the tightest constraint at low charge.
         public float chargeAccumulationRate = 0.3f;
 
         [Header("Defy Gravity Scheme")]
@@ -106,24 +107,6 @@ namespace KineticEnergy.Player
         // half, at the identical exit speed either way.
         public float minLaunchDamping = 2.8f;
         public float maxLaunchDamping = 1.0f;
-
-        [Header("Wall Crash")]
-        // A wall crash (contact normal mostly horizontal, |normal.y| below this) doesn't stick
-        // like a floor/ceiling crash does - direct request: "when you launch against a wall,
-        // instead of not being affected at all, you just fall slower instead of not at all". See
-        // OnCollisionEnter for the floor/ceiling-vs-wall split itself.
-        [Range(0f, 1f)] public float wallNormalThreshold = 0.5f;
-        // What fraction of the velocity LEFT after removing the into-wall component (see
-        // Vector3.ProjectOnPlane in OnCollisionEnter) survives the hit - the rest of this section
-        // is what actually makes it keep falling afterward rather than sticking.
-        [Range(0f, 1f)] public float wallCrashVelocityRetention = 0.4f;
-        // Raises drag for the remainder of the fall after a wall hit, same lever
-        // minLaunchDamping/maxLaunchDamping already use to shape a whole trajectory rather than
-        // just its first instant - this is what makes "fall slower" describe the ENTIRE rest of
-        // the fall, not just a one-off speed chop at the moment of impact. Reset automatically the
-        // next time a launch actually fires (see FixedUpdate's launchQueued handling), so it never
-        // needs restoring by hand.
-        public float wallCrashFallDamping = 3f;
 
         [Header("Aiming")]
         [Range(0f, 1f)] public float aimDeadzone = 0.15f;
@@ -180,6 +163,17 @@ namespace KineticEnergy.Player
         // this far from where it launched, regardless of how much time has passed, before a
         // ground contact is allowed to count.
         public float minLaunchClearDistance = 2f;
+
+        [Header("Crash Stick")]
+        // How close a crash surface's normal has to be to world-up (Vector3.Dot with Vector3.up)
+        // to count as "flat ground" for the walk-away-without-launching exception (see isStuck's
+        // own comment) - direct request, fixing a bug the exception itself introduced: "when you
+        // crash into a surface that is at least not a flat plane like solid ground, you still
+        // don't stick, you fall immediately". The old check reused isGrounded (a plain downward
+        // BoxCast, true for anything with support below regardless of its angle), which wrongly
+        // treated ramps/near-walls as walkable ground and auto-cleared isStuck for them too. 0.9
+        // only accepts genuinely near-horizontal surfaces (~25 degrees off flat or less).
+        [Range(0f, 1f)] public float flatGroundStickThreshold = 0.9f;
 
         [Header("Input")]
         public InputActionReference moveAction;
@@ -279,6 +273,11 @@ namespace KineticEnergy.Player
         // stop all movement and stick to that location until you launch again" (direct request).
         // Any surface counts, not just ground - confirmed directly.
         bool isStuck;
+        // The contact normal from whichever crash set isStuck - checked against
+        // flatGroundStickThreshold in FixedUpdate (only a near-horizontal surface auto-clears
+        // isStuck without a fresh launch) and fed to freeMoveController.AlignVisualToSurface so
+        // the cube visually rests flush against whatever it stuck to, floor or wall alike.
+        Vector3 stuckSurfaceNormal;
         float chargeTime;
         float aimYaw;
         float aimPitch;
@@ -320,10 +319,12 @@ namespace KineticEnergy.Player
         // ground). Gated on the FULL flight (hasLaunched) AND isStuck, not just the grace window -
         // directly overwriting velocity is exactly what must never happen while a real launch is
         // still in progress, no matter how close to some surface the cube's own ground check
-        // thinks it is, and the whole point of isStuck is that free walking never resumes once
-        // the cube has crashed at least once - only another launch breaks it free (direct
-        // request). Also blocked while charging any of the three hold-to-charge systems, same
-        // reasoning as isAiming - the cube needs to stay put while charging, ground or air.
+        // thinks it is. isStuck itself now auto-clears the instant the cube is genuinely grounded
+        // again (see FixedUpdate's isGrounded check) - direct request: "you should still be able
+        // to move on the ground no matter how much energy you have got left" - so this only stays
+        // blocking for a wall-stuck cube (never satisfies isGrounded) until it launches free.
+        // Also blocked while charging any of the three hold-to-charge systems, same reasoning as
+        // isAiming - the cube needs to stay put while charging, ground or air.
         public bool AllowGroundedMovement => !isAiming && !hasLaunched && !isStuck
             && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None;
 
@@ -346,15 +347,6 @@ namespace KineticEnergy.Player
         float queuedDefyGravityDuration;
         float launchGraceTimer;
         Vector3 launchStartPosition;
-        // Every scheme's actual fire moment goes through QueueLaunch (see its own comment), which
-        // increments this - one single shared counter instead of five separate per-scheme/per-
-        // direction flags, so "2 launches since launching, no matter what sort of launching and no
-        // matter the control scheme" (direct request) is enforced identically everywhere rather
-        // than each scheme needing its own matching limit. Reset to 0 the instant a genuine crash
-        // is detected (see OnCollisionEnter) - still meaningfully caps chaining multiple launches
-        // together before ever touching anything, even though energy is now the OTHER (and
-        // usually tighter) limit on how much charging is possible at all.
-        int launchesUsedThisFlight;
         // Which of South/LT/RT the new hold-to-charge system (UpdateStickAimChargeScheme) is
         // currently charging, if any. None means "not currently charging" - checked instead of a
         // separate bool since exactly one of four states applies at a time.
@@ -408,6 +400,9 @@ namespace KineticEnergy.Player
             freeMoveController = GetComponent<KineticCubeControllerFreeMove>();
             ApplyGravity();
             energyFraction = startingEnergyFraction;
+            // Defensive - OnCollisionEnter turns this off while stuck; a scene saved mid-stuck (or
+            // any other stale serialized state) shouldn't start the game with gravity off.
+            rb.useGravity = true;
         }
 
         // OnValidate re-applies this the instant the Inspector value changes, including while
@@ -564,16 +559,16 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // Energy and the per-flight launch cap are now what gate starting a new aim - not
-            // isGrounded/hasLaunched. Both the original grounded start AND the mid-air
-            // "air-relaunch" (or, now, a charge started from a freshly-crashed isStuck position)
-            // go through this exact same check, "no matter what sort of launching and no matter
-            // the control scheme" (direct request, extended to cover energy). Only used to gate a
+            // Energy alone gates starting a new aim now - "you should be able to launch unlimited
+            // times, as long as you have energy left" (direct request, replacing the old per-
+            // flight launch-count cap entirely). Both the original grounded start AND the mid-air
+            // "air-relaunch" (or a charge started from a freshly-crashed isStuck position) go
+            // through this exact same check, no matter the control scheme. Only used to gate a
             // BRAND NEW aim session starting, never to decide whether an ALREADY-ACTIVE one should
             // keep going (see ltHeld just below) - re-deriving a live/proximity-based condition
             // every frame of an already-active charge could spuriously flip it and read as "LT let
             // go", firing prematurely. This exact class of bug has bitten this project before.
-            bool canStartNewAim = launchesUsedThisFlight < maxLaunchesPerFlight && energyFraction > 0f;
+            bool canStartNewAim = energyFraction > 0f;
             bool ltHeld = isAiming ? ltIsPressed : (ltIsPressed && canStartNewAim);
 
             if (ltHeld)
@@ -717,9 +712,9 @@ namespace KineticEnergy.Player
 
         // Grounded: exactly LaunchInstantly's aim/charge/fire flow (see UpdateChargeBasedScheme's
         // combined switch case). Airborne: StickAim's hold-to-charge system. Both draw from the
-        // same shared launchesUsedThisFlight/maxLaunchesPerFlight cap, so switching between the
-        // two mid-flight (grounded launch, then an airborne StickAim-style follow-up) still adds
-        // up to the same total every scheme gets. Once either system has an active charge in
+        // same shared energyFraction gate, so switching between the two mid-flight (grounded
+        // launch, then an airborne StickAim-style follow-up) is limited only by energy, the same
+        // as every other scheme. Once either system has an active charge in
         // progress, stick with it regardless of isGrounded's exact value that frame - re-deciding
         // by isGrounded alone every frame could otherwise switch systems mid-charge right at a
         // ledge edge.
@@ -762,6 +757,7 @@ namespace KineticEnergy.Player
             {
                 launchQueued = false;
                 isStuck = false; // breaking free of a crashed/stuck position, if it was set
+                rb.useGravity = true; // back on, undoing OnCollisionEnter's stick - direct request
                 rb.linearDamping = queuedDamping;
                 rb.AddForce(queuedDirection * queuedForce, ForceMode.Impulse);
                 launchGraceTimer = launchGraceDuration;
@@ -801,8 +797,8 @@ namespace KineticEnergy.Player
             // check each step has no such lag: it's simply true or false for exactly this instant.
             // Still needed for UpdateMixedScheme's grounded-vs-airborne branch selection even
             // though it's no longer used to gate launching itself (see canStartNewAim/canLaunch,
-            // now purely energy/launches-cap based) or to re-arm after a landing (see
-            // OnCollisionEnter below, now event-driven instead of debounced-velocity-driven).
+            // now purely energy-based) or to re-arm after a landing (see OnCollisionEnter below,
+            // now event-driven instead of debounced-velocity-driven).
             //
             // A single ray from the exact center used to do this, but a landing right at a
             // platform's edge can leave the cube's CENTER hanging just past the edge while a
@@ -815,38 +811,40 @@ namespace KineticEnergy.Player
                 ? new Vector3(boxCollider.bounds.extents.x * 0.9f, 0.05f, boxCollider.bounds.extents.z * 0.9f)
                 : new Vector3(0.4f, 0.05f, 0.4f);
             isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out _, transform.rotation, groundCheckDistance);
+
+            // Breaks a crashed/isStuck cube free automatically once it's genuinely resting on
+            // FLAT ground again, no fresh launch required - direct request: "you should still be
+            // able to move on the ground no matter how much energy you have got left". Without
+            // this, running out of energy right after a floor crash would leave the cube frozen
+            // forever (charging a new launch, the only other way isStuck clears, needs energy it
+            // doesn't have). Requires isGrounded AND a near-horizontal stuckSurfaceNormal
+            // (flatGroundStickThreshold) - isGrounded alone (just "something below me") isn't
+            // enough, since it doesn't know the surface's angle: a wall or ramp can easily have
+            // support within groundCheckDistance too, and wrongly auto-clearing THOSE was exactly
+            // the bug direct feedback caught: "when you crash into a surface that is at least not
+            // a flat plane like solid ground, you still don't stick, you fall immediately".
+            if (isStuck && isGrounded && Vector3.Dot(stuckSurfaceNormal, Vector3.up) >= flatGroundStickThreshold)
+            {
+                isStuck = false;
+                rb.useGravity = true;
+            }
         }
 
         void OnCollisionEnter(Collision collision)
         {
             // Only a genuine in-flight crash counts - not pre-launch walking (hasLaunched false),
             // and not an already-stuck body (frozen, shouldn't be generating fresh contacts at
-            // all, but defensive regardless).
+            // all, but defensive regardless). Any surface counts, walls included - direct
+            // request: "when you touch a wall after launching you should stick to it, no matter
+            // the control scheme" (this project briefly had walls fall instead of stick; that's
+            // reverted here - see isStuck's own comment for how walking away afterward still
+            // works without needing a fresh launch, on a floor/ceiling at least).
             if (!hasLaunched || isStuck) return;
             if (launchGraceTimer > 0f) return;
             // See minLaunchClearDistance's own comment - a second, independent guard alongside
             // the time-based one above, for a shallow shot that can still genuinely re-touch its
             // own launch platform after the grace window has already expired.
             if (Vector3.Distance(transform.position, launchStartPosition) < minLaunchClearDistance) return;
-
-            // Floor/ceiling (contact normal mostly vertical) sticks you in place, same as always.
-            // A wall (contact normal mostly horizontal) doesn't - direct request: "instead of not
-            // being affected at all, you just fall slower instead of not at all" - see
-            // wallNormalThreshold's own comment for why the split lives there instead of here.
-            Vector3 contactNormal = collision.GetContact(0).normal;
-            if (Mathf.Abs(contactNormal.y) < wallNormalThreshold)
-            {
-                // Removes only the into-wall component (ProjectOnPlane against the wall's own
-                // normal) so a shallow, glancing hit doesn't kill sideways/downward motion it
-                // never actually had, then scales whatever's left down and raises drag so the
-                // rest of the fall genuinely reads as "slower", not just a single speed chop.
-                // Deliberately does NOT touch hasLaunched/isStuck/launchesUsedThisFlight/energy -
-                // this is still the same flight, just a slower one, not a stick.
-                Vector3 remainingVelocity = Vector3.ProjectOnPlane(rb.linearVelocity, contactNormal);
-                rb.linearVelocity = remainingVelocity * wallCrashVelocityRetention;
-                rb.linearDamping = wallCrashFallDamping;
-                return;
-            }
 
             // TEMPORARY diagnostic: logs exactly how far off the prediction was the moment it's
             // possible to measure (right as the real landing is detected), including which axis
@@ -861,17 +859,27 @@ namespace KineticEnergy.Player
             }
 
             // "Whenever you crash onto an object, you stop all movement and stick to that
-            // location until you launch again" (direct request) - stop dead, freeze in place
-            // (see the FixedUpdate block above), and reset the per-flight launch count so the
-            // next charge (from wherever this crash left the cube) starts fresh.
+            // location until you launch again" (direct request) - stop dead, freeze in place, and
+            // turn gravity off outright (direct request, replacing reliance on the FixedUpdate
+            // freeze block's continuous velocity-zeroing alone) so there's no way for even a
+            // single tick's worth of gravity to sneak in a visible sag before the next zero.
+            // isStuck itself clears two ways: a fresh launch (as before, see FixedUpdate's
+            // launchQueued handling), or automatically once resting on genuinely FLAT ground - see
+            // flatGroundStickThreshold's own comment for why isGrounded alone wasn't enough.
             float crashSpeed = rb.linearVelocity.magnitude;
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
+            rb.useGravity = false;
 
             isStuck = true;
             hasLaunched = false;
-            launchesUsedThisFlight = 0;
             defyGravityFlightTimer = 0f; // interrupt an in-progress forced flight if the crash happens mid-flight
+
+            // Fed to flatGroundStickThreshold's check above and to AlignVisualToSurface below -
+            // direct request: "the cubes surface should align with the surface it just hit, so
+            // they are parallel".
+            stuckSurfaceNormal = collision.GetContact(0).normal;
+            freeMoveController?.AlignVisualToSurface(stuckSurfaceNormal);
 
             GainEnergyFromCrash(crashSpeed);
         }
@@ -932,12 +940,12 @@ namespace KineticEnergy.Player
                 : "";
             // Same crash-and-stick behavior on every scheme now, so this line is shared verbatim
             // rather than repeated with small variations per case.
-            const string stuckLine = "Crashing into floors/ceilings sticks you in place and refunds energy - walls just slow your fall\n";
+            const string stuckLine = "Crashing into anything sticks you in place and refunds energy - walk away freely on solid ground, or launch again to break free of a wall\n";
             const string stuckLinePanel =
-                "Crashing into a floor or ceiling stops you dead and sticks you there until\n" +
-                "  you launch again - it also refunds energy, more than the charge cost,\n" +
-                "  scaling up with how fast you were going. A wall doesn't stick you - it\n" +
-                "  just sheds some speed and lets you keep falling, slower than before.\n";
+                "Crashing into anything (any surface) stops you dead and sticks you there -\n" +
+                "  it also refunds energy, more than the charge cost, scaling up with how\n" +
+                "  fast you were going. On a floor or ceiling you can just walk away\n" +
+                "  whenever, energy or not; against a wall you stay stuck until you launch.\n";
 
             if (controlsHintLabel != null)
             {
@@ -1120,8 +1128,8 @@ namespace KineticEnergy.Player
         // held, over maxChargeTime), release to fire, Left Bumper cancels without firing. Shows
         // the same aim arrow + landing trail the charge-based schemes do while charging - "the
         // same sort of visual... that shows you your exact launch path" (direct request). All
-        // three directions share the single launchesUsedThisFlight/maxLaunchesPerFlight cap -
-        // same limit, same counter, for both standalone StickAim and Mixed's airborne phase.
+        // three directions share the single energyFraction gate - same limit, for both
+        // standalone StickAim and Mixed's airborne phase.
         void UpdateStickAimChargeScheme()
         {
             Vector2 stick = moveAction != null && moveAction.action != null
@@ -1208,7 +1216,7 @@ namespace KineticEnergy.Player
             }
             else
             {
-                bool canLaunch = launchesUsedThisFlight < maxLaunchesPerFlight && energyFraction > 0f;
+                bool canLaunch = energyFraction > 0f;
 
                 bool upPressed = canLaunch && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
                 bool ltPressed = canLaunch && launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
@@ -1342,7 +1350,7 @@ namespace KineticEnergy.Player
             }
             else
             {
-                bool canLaunch = launchesUsedThisFlight < maxLaunchesPerFlight && energyFraction > 0f;
+                bool canLaunch = energyFraction > 0f;
 
                 bool ltPressed = canLaunch && launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
                 bool southPressed = canLaunch && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
@@ -1393,11 +1401,6 @@ namespace KineticEnergy.Player
             // limit" (direct request) is what AccumulateCharge already enforces on the way up;
             // this is the other half, actually deducting it once the charge is spent for real.
             energyFraction = Mathf.Clamp01(energyFraction - ChargeFraction() * energyCostPerFullCharge);
-            // Every scheme's actual fire moment goes through here, so counting it centrally
-            // (rather than at each call site) is what makes the 2-launch cap apply identically
-            // "no matter what sort of launching and no matter the control scheme" - see
-            // launchesUsedThisFlight's own comment.
-            launchesUsedThisFlight++;
             // Armed here already (not just when FixedUpdate actually applies the impulse) so
             // AllowGroundedMovement/AllowAirborneNudge are already correct the instant firing is
             // decided - closes a script-execution-order edge case where
@@ -1611,15 +1614,9 @@ namespace KineticEnergy.Player
             // No Physics.IgnoreCollision needed anymore - a separate PhysicsScene means the
             // clone cannot physically collide with the real player's collider at all.
 
-            // Mirrors OnCollisionEnter's floor/ceiling-vs-wall split exactly, so the trail stays
-            // accurate now that a wall crash no longer stops the real cube outright (see
-            // PredictionCloneStopper's own comment) - copied once here rather than kept in sync
-            // every call, same as the collider size just above; these three rarely change at
-            // runtime and PredictLandingPoint already re-syncs the one that does (damping).
-            PredictionCloneStopper stopper = predictionClone.AddComponent<PredictionCloneStopper>();
-            stopper.wallNormalThreshold = wallNormalThreshold;
-            stopper.wallCrashVelocityRetention = wallCrashVelocityRetention;
-            stopper.wallCrashFallDamping = wallCrashFallDamping;
+            // Any-surface sticking (direct request) - PredictionCloneStopper just stops on the
+            // first contact, period, matching the real cube's OnCollisionEnter.
+            predictionClone.AddComponent<PredictionCloneStopper>();
 
             // Left permanently active rather than toggled per prediction call - reactivating a
             // GameObject and immediately reading its Rigidbody's state in the same call is

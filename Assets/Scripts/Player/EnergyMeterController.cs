@@ -20,11 +20,16 @@ namespace KineticEnergy.Player
             if (energyFillImage != null) energyFillImage.fillAmount = Mathf.Clamp01(fraction);
         }
 
+        // Floors the DISPLAYED fill at 5% the instant charging starts, rather than growing
+        // invisibly from literal zero - direct request: "it should start at a say 5 percent and
+        // the longer you press it should move further right". Purely cosmetic - only this display
+        // value is floored, not chargeFraction/energy math anywhere else, so the actual charge (and
+        // what gets spent on launch) is unaffected.
         public void SetCharge(float fraction, bool visible)
         {
             if (chargeFillImage == null) return;
             chargeFillImage.gameObject.SetActive(visible);
-            chargeFillImage.fillAmount = Mathf.Clamp01(fraction);
+            chargeFillImage.fillAmount = visible ? Mathf.Max(Mathf.Clamp01(fraction), 0.05f) : 0f;
         }
     }
 }
