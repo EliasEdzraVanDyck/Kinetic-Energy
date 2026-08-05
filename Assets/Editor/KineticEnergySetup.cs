@@ -76,6 +76,7 @@ namespace KineticEnergy.EditorSetup
             InputActionReference switchSchemeRef = FindActionReference("Player", "SwitchControlScheme");
             InputActionReference upLaunchRef = FindActionReference("Player", "LaunchUp");
             InputActionReference cancelChargeRef = FindActionReference("Player", "CancelCharge");
+            InputActionReference radialMenuRef = FindActionReference("Player", "RadialMenu");
 
             GameObject player = GameObject.Find("Player");
             if (player == null) throw new Exception("KineticEnergySetup: could not find 'Player' GameObject in scene.");
@@ -112,19 +113,23 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(freeMoveController);
             EditorUtility.SetDirty(orbitCam);
 
-            Text previewModeLabel = BuildPauseSystem(pauseRef, out Text controlsHint, out Text controlsBody);
+            Text previewModeLabel = BuildPauseSystem(pauseRef, radialMenuRef, out Text controlsHint, out Text controlsBody,
+                out EnergyMeterController energyMeter, out RadialMenuController radialMenu);
 
             // PauseSystem is its own prefab, saved inside BuildPauseSystem - same cross-hierarchy
             // rule applies, so this wiring happens on the scene instances, after both are saved.
             controller.landingPreview.modeLabel = previewModeLabel;
             controller.controlsHintLabel = controlsHint;
             controller.controlsPanelBody = controlsBody;
+            controller.energyMeter = energyMeter;
+            radialMenu.controller = controller;
             // Re-marked dirty here - the earlier SetDirty(controller) above ran BEFORE these two
             // fields were assigned, which silently left them out of the saved scene's prefab
             // instance overrides entirely (confirmed by comparing against SetupLevel1, which
             // marks its own controller dirty AFTER the equivalent assignments and saves fine).
             EditorUtility.SetDirty(controller);
             EditorUtility.SetDirty(controller.landingPreview);
+            EditorUtility.SetDirty(radialMenu);
 
             BuildPlayerShadow(player.transform);
             BuildSandboxSignText();
@@ -216,11 +221,15 @@ namespace KineticEnergy.EditorSetup
             controller.landingPreview.modeLabel = modeLabel;
             controller.controlsHintLabel = pauseGo.transform.Find("PauseCanvas/ControlsHintLabel")?.GetComponent<Text>();
             controller.controlsPanelBody = pauseGo.transform.Find("PauseCanvas/ControlsPanel/ControlsBody")?.GetComponent<Text>();
+            controller.energyMeter = pauseGo.transform.Find("EnergyMeter")?.GetComponent<EnergyMeterController>();
+            RadialMenuController radialMenu = pauseGo.transform.Find("RadialMenuController")?.GetComponent<RadialMenuController>();
+            if (radialMenu != null) radialMenu.controller = controller;
 
             EditorUtility.SetDirty(controller);
             EditorUtility.SetDirty(freeMoveController);
             EditorUtility.SetDirty(orbitCam);
             EditorUtility.SetDirty(controller.landingPreview);
+            if (radialMenu != null) EditorUtility.SetDirty(radialMenu);
 
             GameObject generatorGo = new GameObject("LevelGenerator");
             LevelGenerator generator = generatorGo.AddComponent<LevelGenerator>();
@@ -320,11 +329,15 @@ namespace KineticEnergy.EditorSetup
             controller.landingPreview.modeLabel = modeLabel;
             controller.controlsHintLabel = pauseGo.transform.Find("PauseCanvas/ControlsHintLabel")?.GetComponent<Text>();
             controller.controlsPanelBody = pauseGo.transform.Find("PauseCanvas/ControlsPanel/ControlsBody")?.GetComponent<Text>();
+            controller.energyMeter = pauseGo.transform.Find("EnergyMeter")?.GetComponent<EnergyMeterController>();
+            RadialMenuController radialMenu = pauseGo.transform.Find("RadialMenuController")?.GetComponent<RadialMenuController>();
+            if (radialMenu != null) radialMenu.controller = controller;
 
             EditorUtility.SetDirty(controller);
             EditorUtility.SetDirty(freeMoveController);
             EditorUtility.SetDirty(orbitCam);
             EditorUtility.SetDirty(controller.landingPreview);
+            if (radialMenu != null) EditorUtility.SetDirty(radialMenu);
 
             GameObject nextPlatform = BuildLevel2Segments(playerGo.transform);
             BuildCameraStartFacing(playerGo.transform, orbitCam, nextPlatform.transform);
@@ -563,6 +576,19 @@ namespace KineticEnergy.EditorSetup
             controller.chargeTimeScale = 0.75f;
             // Shared 2-launches-per-flight cap, every scheme - see the field's own comment.
             controller.maxLaunchesPerFlight = 2;
+
+            // Universal energy economy - see each field's own comment in KineticCubeController.cs.
+            controller.startingEnergyFraction = 0.2f;
+            controller.energyCostPerFullCharge = 1f;
+            controller.energyGainPerSpeed = 0.03f;
+            controller.energyGainSpeedBonus = 0.01f;
+
+            // Defy Gravity scheme tuning.
+            controller.minDefyGravityDuration = 0.4f;
+            controller.maxDefyGravityDuration = 1.5f;
+            controller.minDefyGravitySpeed = 10f;
+            controller.maxDefyGravitySpeed = 35f;
+            controller.defyGravityFallDamping = 0.2f;
             // Moved here (was only set in BuildPlayerCube) so Level1's instance gets the same
             // explicit anti-staleness reassignment Sandbox Scene's prefab does - the exact same
             // reasoning this method already exists for. Negative tilts UP (see the field's own
@@ -665,11 +691,8 @@ namespace KineticEnergy.EditorSetup
             controller.aimRotationSpeed = 90f;
             controller.minAimPitch = -80f;
             controller.maxAimPitch = 80f;
-            controller.groundNormalDot = 0.5f;
             controller.maxPredictionSteps = 3000;
             controller.previewLineHeight = 0.65f;
-            controller.restVelocityThreshold = 0.05f;
-            controller.restConfirmDuration = 0.1f;
             controller.groundCheckDistance = 0.6f;
             controller.fallResetY = -30f;
             controller.launchGraceDuration = 0.15f;
@@ -1098,7 +1121,8 @@ namespace KineticEnergy.EditorSetup
             return orbitCam;
         }
 
-        static Text BuildPauseSystem(InputActionReference pauseRef, out Text controlsHintOut, out Text controlsBodyOut)
+        static Text BuildPauseSystem(InputActionReference pauseRef, InputActionReference radialMenuRef, out Text controlsHintOut, out Text controlsBodyOut,
+            out EnergyMeterController energyMeterOut, out RadialMenuController radialMenuOut)
         {
             GameObject root = GameObject.Find("PauseSystem");
             if (root == null) root = new GameObject("PauseSystem");
@@ -1130,6 +1154,8 @@ namespace KineticEnergy.EditorSetup
             DestroyChildIfExists(canvasGo.transform, "ScenesPanel");
             DestroyChildIfExists(canvasGo.transform, "PreviewModeLabel");
             DestroyChildIfExists(canvasGo.transform, "ControlsHintLabel");
+            DestroyChildIfExists(canvasGo.transform, "EnergyMeter");
+            DestroyChildIfExists(canvasGo.transform, "RadialMenu");
 
             // Created before the panels below so it's an earlier sibling and renders BEHIND
             // them - otherwise this permanent corner label would poke through the pause backdrop.
@@ -1233,6 +1259,59 @@ namespace KineticEnergy.EditorSetup
                 WireSceneButton(sceneButtons[i], controller.LoadSceneByName, SceneMenuEntries[i].sceneName);
             }
 
+            // Yellow energy / blue charge-preview meter, top-right corner - direct request. Both
+            // fills are Image.Type.Filled/Horizontal over the SAME rect, blue layered on top (a
+            // later sibling) so it always reads as "this much of my energy is about to be spent".
+            GameObject energyContainer = new GameObject("EnergyMeter", typeof(RectTransform));
+            energyContainer.transform.SetParent(canvasGo.transform, false);
+            RectTransform energyRt = energyContainer.GetComponent<RectTransform>();
+            energyRt.anchorMin = new Vector2(1f, 1f);
+            energyRt.anchorMax = new Vector2(1f, 1f);
+            energyRt.pivot = new Vector2(1f, 1f);
+            energyRt.anchoredPosition = new Vector2(-24f, -24f);
+            energyRt.sizeDelta = new Vector2(320f, 36f);
+
+            CreatePanel("Backdrop", energyContainer.transform, new Color(0f, 0f, 0f, 0.5f));
+
+            Image energyFillImage = CreateFillBar("EnergyFill", energyContainer.transform, new Color(0.95f, 0.82f, 0.15f));
+            Image chargeFillImage = CreateFillBar("ChargeFill", energyContainer.transform, new Color(0.3f, 0.65f, 1f));
+            chargeFillImage.gameObject.SetActive(false);
+
+            GameObject energyMeterGo = FindOrCreateChild(root.transform, "EnergyMeter");
+            EnergyMeterController energyMeter = energyMeterGo.GetComponent<EnergyMeterController>();
+            if (energyMeter == null) energyMeter = energyMeterGo.AddComponent<EnergyMeterController>();
+            energyMeter.energyFillImage = energyFillImage;
+            energyMeter.chargeFillImage = chargeFillImage;
+
+            // Dpad-opened radial scheme-select menu, center screen, hidden until the Dpad is
+            // held - direct request. Mapping (documented in the controls text too): Up = Launch
+            // Instantly, Right = Stick Aim, Down = Mixed, Left = Defy Gravity.
+            GameObject radialRoot = new GameObject("RadialMenu", typeof(RectTransform));
+            radialRoot.transform.SetParent(canvasGo.transform, false);
+            RectTransform radialRt = radialRoot.GetComponent<RectTransform>();
+            radialRt.anchorMin = new Vector2(0.5f, 0.5f);
+            radialRt.anchorMax = new Vector2(0.5f, 0.5f);
+            radialRt.pivot = new Vector2(0.5f, 0.5f);
+            radialRt.anchoredPosition = Vector2.zero;
+            radialRt.sizeDelta = new Vector2(500f, 500f);
+
+            CreatePanel("Backdrop", radialRoot.transform, new Color(0f, 0f, 0f, 0.55f));
+            Text radialUp = CreateText("RadialUp", radialRoot.transform, "Launch Instantly", font, 28, new Vector2(0f, 160f), new Vector2(320f, 60f));
+            Text radialRight = CreateText("RadialRight", radialRoot.transform, "Stick Aim", font, 28, new Vector2(160f, 0f), new Vector2(280f, 60f));
+            Text radialDown = CreateText("RadialDown", radialRoot.transform, "Mixed", font, 28, new Vector2(0f, -160f), new Vector2(320f, 60f));
+            Text radialLeft = CreateText("RadialLeft", radialRoot.transform, "Defy Gravity", font, 28, new Vector2(-160f, 0f), new Vector2(280f, 60f));
+            radialRoot.SetActive(false);
+
+            GameObject radialMenuGo = FindOrCreateChild(root.transform, "RadialMenuController");
+            RadialMenuController radialMenu = radialMenuGo.GetComponent<RadialMenuController>();
+            if (radialMenu == null) radialMenu = radialMenuGo.AddComponent<RadialMenuController>();
+            radialMenu.radialMenuAction = radialMenuRef;
+            radialMenu.menuRoot = radialRoot;
+            radialMenu.upLabel = radialUp;
+            radialMenu.rightLabel = radialRight;
+            radialMenu.downLabel = radialDown;
+            radialMenu.leftLabel = radialLeft;
+
             if (!AssetDatabase.IsValidFolder(PrefabFolder))
             {
                 AssetDatabase.CreateFolder("Assets", "Prefabs");
@@ -1241,7 +1320,32 @@ namespace KineticEnergy.EditorSetup
 
             controlsHintOut = hintText;
             controlsBodyOut = controlsBody;
+            energyMeterOut = energyMeter;
+            radialMenuOut = radialMenu;
             return previewModeLabel;
+        }
+
+        // A plain solid-color fill bar - Image.Type.Filled/Horizontal stretched over the whole
+        // parent rect, so SetEnergy/SetCharge (EnergyMeterController) just move fillAmount.
+        static Image CreateFillBar(string name, Transform parent, Color color)
+        {
+            GameObject go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+
+            RectTransform rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+
+            Image image = go.AddComponent<Image>();
+            image.color = color;
+            image.type = Image.Type.Filled;
+            image.fillMethod = Image.FillMethod.Horizontal;
+            image.fillOrigin = (int)Image.OriginHorizontal.Left;
+            image.fillAmount = 1f;
+
+            return image;
         }
 
         static void WireButton(GameObject buttonGo, UnityEngine.Events.UnityAction call)

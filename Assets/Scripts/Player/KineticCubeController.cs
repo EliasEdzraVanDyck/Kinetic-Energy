@@ -13,10 +13,15 @@ namespace KineticEnergy.Player
         StickAim,        // RB cycles to/from this one - hold South/LT/RT to charge a launch in
                           // that direction (up/down/forward), release to fire - see
                           // UpdateStickAimChargeScheme.
-        Mixed            // RB cycles to/from this one - grounded behaves exactly like
-                          // LaunchInstantly, airborne behaves like StickAim but with a single
-                          // shared once-per-flight limit across all three directions instead of
-                          // one each - see UpdateMixedScheme.
+        Mixed,           // RB cycles to/from this one - grounded behaves exactly like
+                         // LaunchInstantly, airborne behaves like StickAim but with a single
+                         // shared once-per-flight limit across all three directions instead of
+                         // one each - see UpdateMixedScheme.
+        DefyGravity      // RB cycles to/from this one - hold Right Trigger/Left Trigger/South to
+                         // charge a straight-line Forward/Up/Down flight (duration AND speed both
+                         // grow with charge). Gravity is suspended for the whole charge AND the
+                         // charged flight duration, resuming only once that timer runs out - see
+                         // UpdateDefyGravityScheme.
     }
 
     [RequireComponent(typeof(Rigidbody))]
@@ -31,6 +36,39 @@ namespace KineticEnergy.Player
         // launching, no matter what sort of launching and no matter the control scheme". Resets
         // alongside hasLaunched the moment the cube genuinely lands again.
         public int maxLaunchesPerFlight = 2;
+
+        [Header("Energy")]
+        // "you start at say 20%" (direct request) - a fraction of a full energy tank, spent on
+        // charging (see AccumulateCharge) and refunded (with interest) on crashing (see
+        // GainEnergyFromCrash). Shared across every scheme, not just Defy Gravity.
+        [Range(0f, 1f)] public float startingEnergyFraction = 0.2f;
+        // Exchange rate: a FULL charge (chargeFraction 1.0) costs this fraction of the entire
+        // energy tank. 1 means a full charge always empties the tank outright (unless you don't
+        // have that much stored, in which case AccumulateCharge caps the charge itself before it
+        // gets that far - see its own comment). Exposed as its own knob rather than hardcoded so
+        // the exchange rate can be tuned without touching the charge-accumulation code itself.
+        public float energyCostPerFullCharge = 1f;
+        // Energy gained on crashing scales with impact speed, and the RATE itself increases with
+        // speed too (not just a flat multiple) - direct request: "the faster your speed at crash
+        // that factor at which you gain more energy should also increase". gainedFraction =
+        // crashSpeed * energyGainPerSpeed * (1 + crashSpeed * energyGainSpeedBonus).
+        public float energyGainPerSpeed = 0.03f;
+        public float energyGainSpeedBonus = 0.01f;
+        // Yellow energy / blue charge-preview meter, top-right corner - wired by KineticEnergySetup.
+        public EnergyMeterController energyMeter;
+
+        [Header("Defy Gravity Scheme")]
+        // Charging determines BOTH how long the straight-line flight lasts AND how fast it moves
+        // (direct request: "you charge the amount of time and speed you will launch"), the same
+        // chargeFraction interpolating both ranges together.
+        public float minDefyGravityDuration = 0.4f;
+        public float maxDefyGravityDuration = 1.5f;
+        public float minDefyGravitySpeed = 10f;
+        public float maxDefyGravitySpeed = 35f;
+        // Applied only AFTER the forced-flight timer runs out and gravity resumes ("you start
+        // falling again since gravity starts affecting you again") - low, like downLaunchDamping,
+        // so gravity is clearly the thing doing the falling rather than drag fighting it.
+        public float defyGravityFallDamping = 0.2f;
 
         // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
         // punchier-feeling launch, but a faster exit speed alone would also fly further - linear
@@ -76,27 +114,8 @@ namespace KineticEnergy.Player
         public AimArrowIndicator aimArrow;
 
         [Header("Landing")]
-        [Range(0f, 1f)] public float groundNormalDot = 0.5f;
         public int maxPredictionSteps = 3000;
         public float previewLineHeight = 0.65f;
-        public float restVelocityThreshold = 0.05f;
-        // Grounded+slow has to hold for this many consecutive seconds before a launch is
-        // considered actually landed, not just one single FixedUpdate tick. A vertical or
-        // steep shot's velocity crosses zero at its apex for barely more than a tick (gravity
-        // alone moves it back past restVelocityThreshold almost immediately), and the
-        // BoxCast-based isGrounded below is a PROXIMITY check (true within groundCheckDistance
-        // of a surface, not only while actually touching one) - a low apex can sit inside that
-        // proximity band too. Together a single-tick check could misread "still airborne, at
-        // the top of its arc" as "landed", which silently re-armed hasLaunched mid-flight and
-        // let the very next Update() tick's ltHeld (still requiring only !hasLaunched &&
-        // isGrounded) treat a still-held LT as starting a brand new aim - instantly zeroing
-        // velocity mid-air. That's what "cut off after an incredibly short time" actually was;
-        // it never touched OnCollisionEnter, which is why launchGraceDuration and
-        // minLaunchClearDistance had no effect no matter how they were tuned. A genuine landing
-        // stays slow and grounded continuously (friction/damping keep it there), so requiring
-        // the condition to hold this long costs no real responsiveness while completely
-        // filtering out the momentary apex dip.
-        public float restConfirmDuration = 0.1f;
         public float groundCheckDistance = 0.6f;
         public LandingPreviewController landingPreview;
 
@@ -222,10 +241,18 @@ namespace KineticEnergy.Player
         bool waitingForLtRelease;
         bool hasLaunched;
         bool isGrounded;
+        // True from the instant a genuine in-flight crash is detected (see OnCollisionEnter)
+        // until the next launch actually fires (see FixedUpdate's launchQueued handling) - "you
+        // stop all movement and stick to that location until you launch again" (direct request).
+        // Any surface counts, not just ground - confirmed directly.
+        bool isStuck;
         float chargeTime;
         float aimYaw;
         float aimPitch;
         ControlScheme controlScheme = ControlScheme.StickAim;
+        // 0-1 fraction of a full tank, shared by every scheme - see startingEnergyFraction's own
+        // comment for how it's spent/gained.
+        float energyFraction;
 
         // Read by KineticCubeControllerFreeMove to know whether it should instantly face
         // movement direction while walking (StickAim only - see its FixedUpdate).
@@ -257,40 +284,59 @@ namespace KineticEnergy.Player
         // surface, launch platform or not).
         //
         // AllowGroundedMovement: safe for FreeMove to directly SET velocity (walking on the
-        // ground). Gated on the FULL flight (hasLaunched), not just the grace window - directly
-        // overwriting velocity is exactly what must never happen while a real launch is still in
-        // progress, no matter how close to some surface the cube's own ground check thinks it is.
-        // Also blocked while charging the new hold-to-charge system (stickAimChargeType), same
+        // ground). Gated on the FULL flight (hasLaunched) AND isStuck, not just the grace window -
+        // directly overwriting velocity is exactly what must never happen while a real launch is
+        // still in progress, no matter how close to some surface the cube's own ground check
+        // thinks it is, and the whole point of isStuck is that free walking never resumes once
+        // the cube has crashed at least once - only another launch breaks it free (direct
+        // request). Also blocked while charging any of the three hold-to-charge systems, same
         // reasoning as isAiming - the cube needs to stay put while charging, ground or air.
-        public bool AllowGroundedMovement => !isAiming && !hasLaunched && stickAimChargeType == StickAimChargeType.None;
+        public bool AllowGroundedMovement => !isAiming && !hasLaunched && !isStuck
+            && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None;
 
         // AllowAirborneNudge: safe for FreeMove to apply a small, ADDITIVE force (air control,
         // leaning) while genuinely airborne. Only needs to wait out the brief post-launch grace
         // window, not the whole flight - an additive nudge can't stomp the launch the way
         // directly setting velocity can, so there's no reason to also suppress this for the
         // entire duration of every shot (which is what silently killed air-nudging for launched
-        // shots the last time this was "fixed").
-        public bool AllowAirborneNudge => !isAiming && launchGraceTimer <= 0f && stickAimChargeType == StickAimChargeType.None;
+        // shots the last time this was "fixed"). Also blocked while isStuck (frozen, not falling)
+        // and during Defy Gravity's forced-velocity flight window, where even a small additive
+        // nudge would spoil the straight line the charge promised.
+        public bool AllowAirborneNudge => !isAiming && !isStuck && defyGravityFlightTimer <= 0f && launchGraceTimer <= 0f
+            && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None;
 
         bool launchQueued;
         Vector3 queuedDirection;
         float queuedForce;
         float queuedDamping;
+        // >0 only for a Defy Gravity launch - see QueueLaunch's own comment.
+        float queuedDefyGravityDuration;
         float launchGraceTimer;
         Vector3 launchStartPosition;
-        float restTimer;
         // Every scheme's actual fire moment goes through QueueLaunch (see its own comment), which
         // increments this - one single shared counter instead of five separate per-scheme/per-
         // direction flags, so "2 launches since launching, no matter what sort of launching and no
         // matter the control scheme" (direct request) is enforced identically everywhere rather
-        // than each scheme needing its own matching limit. Reset to 0 alongside hasLaunched at the
-        // exact same "genuinely landed" moment (see FixedUpdate's re-arm block).
+        // than each scheme needing its own matching limit. Reset to 0 the instant a genuine crash
+        // is detected (see OnCollisionEnter) - still meaningfully caps chaining multiple launches
+        // together before ever touching anything, even though energy is now the OTHER (and
+        // usually tighter) limit on how much charging is possible at all.
         int launchesUsedThisFlight;
         // Which of South/LT/RT the new hold-to-charge system (UpdateStickAimChargeScheme) is
         // currently charging, if any. None means "not currently charging" - checked instead of a
         // separate bool since exactly one of four states applies at a time.
         enum StickAimChargeType { None, Up, Down, Forward }
         StickAimChargeType stickAimChargeType = StickAimChargeType.None;
+        // Same idea as StickAimChargeType, for the Defy Gravity scheme's own hold-to-charge
+        // system (UpdateDefyGravityScheme) - kept as a separate enum/field rather than reusing
+        // StickAimChargeType since the two schemes' charge systems are otherwise independent and
+        // can be active at different times depending on controlScheme.
+        enum DefyGravityFlightType { None, Forward, Up, Down }
+        DefyGravityFlightType defyGravityChargeType = DefyGravityFlightType.None;
+        // Counts down while a Defy Gravity flight is actively forcing a constant velocity (see
+        // FixedUpdate) - >0 means "still defying gravity", 0 means gravity has resumed.
+        float defyGravityFlightTimer;
+        Vector3 defyGravityFlightVelocity;
         // Forward-only: the last FLAT (horizontal) stick direction the stick was genuinely held
         // past stickAimDeadzone, remembered so a release can keep launching that same horizontal
         // direction while dropping to the shallow neutral angle (see the Forward case in
@@ -328,6 +374,7 @@ namespace KineticEnergy.Player
             // instantly face the launch direction the moment a launch fires (see FixedUpdate).
             freeMoveController = GetComponent<KineticCubeControllerFreeMove>();
             ApplyGravity();
+            energyFraction = startingEnergyFraction;
         }
 
         // OnValidate re-applies this the instant the Inspector value changes, including while
@@ -414,11 +461,21 @@ namespace KineticEnergy.Player
                 facingArrow.SetFacingYaw(freeMoveController != null ? freeMoveController.FacingYaw : 0f);
             }
 
-            // "Game speed 50% while charging, aiming speed unaffected" - applied every frame from
-            // whatever isAiming/stickAimChargeType currently are. A one-frame lag on the exact
-            // instant charging starts/stops (this runs before this frame's scheme update sets
-            // them) is imperceptible, well under 17ms.
+            // "Game speed 75% while charging, aiming speed unaffected" - applied every frame from
+            // whatever isAiming/stickAimChargeType/defyGravityChargeType currently are. A
+            // one-frame lag on the exact instant charging starts/stops (this runs before this
+            // frame's scheme update sets them) is imperceptible, well under 17ms.
             ApplyChargeTimeScale();
+
+            // Yellow energy / blue charge-preview meter - updated unconditionally every frame
+            // (not just inside whichever scheme branch is active) so it stays correct through
+            // scheme switches too.
+            if (energyMeter != null)
+            {
+                energyMeter.SetEnergy(energyFraction);
+                bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None;
+                energyMeter.SetCharge(ChargeFraction(), charging);
+            }
 
             switch (controlScheme)
             {
@@ -428,6 +485,9 @@ namespace KineticEnergy.Player
                 case ControlScheme.Mixed:
                     UpdateMixedScheme();
                     return;
+                case ControlScheme.DefyGravity:
+                    UpdateDefyGravityScheme();
+                    return;
             }
 
             UpdateChargeBasedScheme();
@@ -435,7 +495,7 @@ namespace KineticEnergy.Player
 
         void ApplyChargeTimeScale()
         {
-            bool charging = isAiming || stickAimChargeType != StickAimChargeType.None;
+            bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None;
             Time.timeScale = charging ? chargeTimeScale : 1f;
         }
 
@@ -471,17 +531,16 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // Grounded: fresh start of a flight. Airborne: allowed again as a mid-air aim+launch
-            // using this exact same flow, as many times as maxLaunchesPerFlight still allows -
-            // "2 launches since launching, no matter what sort of launching" (direct request).
-            // Only used to gate a BRAND NEW aim session starting, never to decide whether an
-            // ALREADY-ACTIVE one should keep going (see ltHeld just below) - isGrounded is a
-            // proximity check, not a touching check, and re-deriving this same condition every
-            // frame of an already-active air-relaunch charge could spuriously flip it false for a
-            // single tick near any surface and read as "LT let go", firing prematurely. This
-            // exact class of bug (a BoxCast proximity read misinterpreted as a real
-            // grounded/settled signal) has bitten this project before.
-            bool canStartNewAim = (isGrounded && !hasLaunched) || (!isGrounded && hasLaunched && launchesUsedThisFlight < maxLaunchesPerFlight);
+            // Energy and the per-flight launch cap are now what gate starting a new aim - not
+            // isGrounded/hasLaunched. Both the original grounded start AND the mid-air
+            // "air-relaunch" (or, now, a charge started from a freshly-crashed isStuck position)
+            // go through this exact same check, "no matter what sort of launching and no matter
+            // the control scheme" (direct request, extended to cover energy). Only used to gate a
+            // BRAND NEW aim session starting, never to decide whether an ALREADY-ACTIVE one should
+            // keep going (see ltHeld just below) - re-deriving a live/proximity-based condition
+            // every frame of an already-active charge could spuriously flip it and read as "LT let
+            // go", firing prematurely. This exact class of bug has bitten this project before.
+            bool canStartNewAim = launchesUsedThisFlight < maxLaunchesPerFlight && energyFraction > 0f;
             bool ltHeld = isAiming ? ltIsPressed : (ltIsPressed && canStartNewAim);
 
             if (ltHeld)
@@ -517,7 +576,7 @@ namespace KineticEnergy.Player
                         // The original system: LT alone both aims and charges over time for as
                         // long as it's held. RT is a single instant-fire press using whatever
                         // charge has built up so far. Mixed's grounded phase behaves identically.
-                        chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime);
+                        AccumulateCharge();
                         launchNow = rtPressed;
                         break;
 
@@ -528,8 +587,9 @@ namespace KineticEnergy.Player
                         // trigger pressure. The actual launch trigger for this scheme isn't RT at
                         // all anymore - it's releasing LT while RT is still held, handled below in
                         // the isAiming/LT-released branch, since that's the frame ltHeld itself
-                        // goes false and control never reaches this switch.
-                        chargeTime = Mathf.Clamp01(rtAnalogValue) * maxChargeTime;
+                        // goes false and control never reaches this switch. Still capped by
+                        // available energy, same as every other scheme's charge.
+                        chargeTime = Mathf.Min(Mathf.Clamp01(rtAnalogValue) * maxChargeTime, EnergyChargeCeiling());
                         launchNow = false;
                         break;
 
@@ -537,7 +597,7 @@ namespace KineticEnergy.Player
                         // LT only aims. RT is a separate hold-to-charge/release-to-launch
                         // trigger: charge builds over time only while RT is held, and firing
                         // happens on release, using whatever charge had accumulated by then.
-                        if (rtHeld) chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime);
+                        if (rtHeld) AccumulateCharge();
                         launchNow = rtReleased;
                         break;
                 }
@@ -608,7 +668,7 @@ namespace KineticEnergy.Player
                 if (analogLaunch)
                 {
                     float rtAnalogValue = fireAction.action.ReadValue<float>();
-                    chargeTime = Mathf.Clamp01(rtAnalogValue) * maxChargeTime;
+                    chargeTime = Mathf.Min(Mathf.Clamp01(rtAnalogValue) * maxChargeTime, EnergyChargeCeiling());
                     float chargeFraction = ChargeFraction();
 
                     QueueLaunch(AimDirection(), Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction), Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction));
@@ -655,9 +715,11 @@ namespace KineticEnergy.Player
             // Continuously (not just once at the instant aiming/charging starts) - gravity would
             // otherwise keep re-accelerating an airborne aim/charge session downward every tick,
             // which the old scheme never had to account for since it only ever aimed from solid
-            // ground. This is what actually keeps the air-relaunch and airborne StickAim/Mixed
-            // charges frozen in place for their whole duration, not just their opening frame.
-            if (isAiming || stickAimChargeType != StickAimChargeType.None)
+            // ground. This is what actually keeps the air-relaunch and airborne StickAim/Mixed/
+            // Defy Gravity charges frozen in place for their whole duration, not just their
+            // opening frame - and, now, also what keeps a crashed/isStuck cube pinned exactly
+            // where it crashed (direct request: "stop all movement and stick to that location").
+            if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || isStuck)
             {
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
@@ -666,11 +728,34 @@ namespace KineticEnergy.Player
             if (launchQueued)
             {
                 launchQueued = false;
+                isStuck = false; // breaking free of a crashed/stuck position, if it was set
                 rb.linearDamping = queuedDamping;
                 rb.AddForce(queuedDirection * queuedForce, ForceMode.Impulse);
                 launchGraceTimer = launchGraceDuration;
                 launchStartPosition = transform.position;
                 freeMoveController?.FaceLaunchDirection(queuedDirection);
+
+                // Defy Gravity only (queuedDefyGravityDuration is 0 for every other scheme) -
+                // arms the forced-velocity flight below, taking effect this same tick.
+                if (queuedDefyGravityDuration > 0f)
+                {
+                    defyGravityFlightTimer = queuedDefyGravityDuration;
+                    defyGravityFlightVelocity = queuedDirection * (queuedForce / rb.mass);
+                }
+            }
+
+            // "Gravity shouldn't affect you [during the charge], after that time is up you start
+            // falling again since gravity starts affecting you again" (direct request) - a
+            // continuous per-tick velocity override, same technique as the charge-freeze above
+            // (just a non-zero constant instead of zero), so gravity's single-tick contribution
+            // gets cancelled again next tick before it can compound into a curve. The instant the
+            // timer expires this block simply stops running and gravity/damping (set to
+            // defyGravityFallDamping when this was queued) take over normally.
+            if (defyGravityFlightTimer > 0f)
+            {
+                rb.linearVelocity = defyGravityFlightVelocity;
+                rb.angularVelocity = Vector3.zero;
+                defyGravityFlightTimer -= Time.fixedDeltaTime;
             }
 
             if (launchGraceTimer > 0f) launchGraceTimer -= Time.fixedDeltaTime;
@@ -681,52 +766,37 @@ namespace KineticEnergy.Player
             // cube has genuinely left the ground, which was letting hasLaunched clear near a lob
             // shot's apex (low velocity, stale "grounded") and allowing a mid-air relaunch. A fresh
             // check each step has no such lag: it's simply true or false for exactly this instant.
+            // Still needed for UpdateMixedScheme's grounded-vs-airborne branch selection even
+            // though it's no longer used to gate launching itself (see canStartNewAim/canLaunch,
+            // now purely energy/launches-cap based) or to re-arm after a landing (see
+            // OnCollisionEnter below, now event-driven instead of debounced-velocity-driven).
             //
             // A single ray from the exact center used to do this, but a landing right at a
             // platform's edge can leave the cube's CENTER hanging just past the edge while a
             // corner of its collider is still genuinely resting on the surface - the center ray
-            // then misses the platform entirely, isGrounded gets stuck false forever, and since
-            // both the aim-start gate and the hasLaunched re-arm above require isGrounded, this
-            // permanently locked out launching, matching "land on the border and can't launch
-            // anymore". A BoxCast across the cube's own footprint (slightly inset to avoid
-            // catching geometry the cube isn't actually resting on) reports grounded if ANY part
-            // of that footprint has support below, not just the exact center point.
+            // then misses the platform entirely. A BoxCast across the cube's own footprint
+            // (slightly inset to avoid catching geometry the cube isn't actually resting on)
+            // reports grounded if ANY part of that footprint has support below, not just the
+            // exact center point.
             Vector3 halfExtents = boxCollider != null
                 ? new Vector3(boxCollider.bounds.extents.x * 0.9f, 0.05f, boxCollider.bounds.extents.z * 0.9f)
                 : new Vector3(0.4f, 0.05f, 0.4f);
             isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out _, transform.rotation, groundCheckDistance);
-
-            // Re-arm the single launch once the cube has actually come to rest on the ground.
-            // Grounded alone isn't enough (a launch fired while already touching the floor never
-            // triggers a fresh OnCollisionEnter, since contact was never broken - it just slides
-            // to a stop via drag/friction), so this also waits for velocity to settle rather than
-            // relying only on the hard OnCollisionEnter stop below. Debounced over
-            // restConfirmDuration (see its own comment) rather than firing on a single qualifying
-            // tick - required to tell a genuine landing apart from a shot's apex momentarily
-            // reading the same as one.
-            if (hasLaunched && isGrounded && rb.linearVelocity.sqrMagnitude < restVelocityThreshold * restVelocityThreshold)
-            {
-                restTimer += Time.fixedDeltaTime;
-                if (restTimer >= restConfirmDuration)
-                {
-                    hasLaunched = false;
-                    launchesUsedThisFlight = 0;
-                }
-            }
-            else
-            {
-                restTimer = 0f;
-            }
         }
 
         void OnCollisionEnter(Collision collision)
         {
-            if (!IsGroundContact(collision)) return;
+            // Only a genuine in-flight crash counts - not pre-launch walking (hasLaunched false),
+            // and not an already-stuck body (frozen, shouldn't be generating fresh contacts at
+            // all, but defensive regardless). Any surface counts now, not just a roughly-upward
+            // contact normal (direct request, confirmed) - a wall or ceiling crash sticks you
+            // just as much as a floor one.
+            if (!hasLaunched || isStuck) return;
             if (launchGraceTimer > 0f) return;
             // See minLaunchClearDistance's own comment - a second, independent guard alongside
             // the time-based one above, for a shallow shot that can still genuinely re-touch its
             // own launch platform after the grace window has already expired.
-            if (hasLaunched && Vector3.Distance(transform.position, launchStartPosition) < minLaunchClearDistance) return;
+            if (Vector3.Distance(transform.position, launchStartPosition) < minLaunchClearDistance) return;
 
             // TEMPORARY diagnostic: logs exactly how far off the prediction was the moment it's
             // possible to measure (right as the real landing is detected), including which axis
@@ -740,19 +810,20 @@ namespace KineticEnergy.Player
                 hasPredictedLanding = false;
             }
 
-            // Stop dead the instant it lands - only on a roughly-upward contact normal, so this
-            // reads as "touched the ground" and not "bumped into a wall".
+            // "Whenever you crash onto an object, you stop all movement and stick to that
+            // location until you launch again" (direct request) - stop dead, freeze in place
+            // (see the FixedUpdate block above), and reset the per-flight launch count so the
+            // next charge (from wherever this crash left the cube) starts fresh.
+            float crashSpeed = rb.linearVelocity.magnitude;
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
-        }
 
-        bool IsGroundContact(Collision collision)
-        {
-            foreach (ContactPoint contact in collision.contacts)
-            {
-                if (Vector3.Dot(contact.normal, Vector3.up) > groundNormalDot) return true;
-            }
-            return false;
+            isStuck = true;
+            hasLaunched = false;
+            launchesUsedThisFlight = 0;
+            defyGravityFlightTimer = 0f; // interrupt an in-progress forced flight if the crash happens mid-flight
+
+            GainEnergyFromCrash(crashSpeed);
         }
 
         // West/North/East now pick the control scheme (see ControlScheme) rather than the
@@ -802,11 +873,21 @@ namespace KineticEnergy.Player
         // separate call sites to remember.
         void UpdateControlsText()
         {
-            // Only mention the Right Bumper cycle when it can actually do something - with
-            // schemeSwitchingEnabled false, telling the player about a button that does nothing
+            // Only mention scheme-switching when it can actually do something - with
+            // schemeSwitchingEnabled false, telling the player about buttons that do nothing
             // would just be inaccurate.
-            string switchLine = schemeSwitchingEnabled ? "Switch Scheme: Right Bumper\n" : "";
-            string switchLinePanel = schemeSwitchingEnabled ? "Right Bumper - Cycle to the next launch scheme\n" : "";
+            string switchLine = schemeSwitchingEnabled ? "Switch Scheme: Right Bumper or Dpad (hold)\n" : "";
+            string switchLinePanel = schemeSwitchingEnabled
+                ? "Right Bumper - Cycle to the next launch scheme\n" +
+                  "Dpad (hold) - Open a radial menu to pick a scheme directly\n"
+                : "";
+            // Same crash-and-stick behavior on every scheme now, so this line is shared verbatim
+            // rather than repeated with small variations per case.
+            const string stuckLine = "Crashing into anything sticks you in place and refunds energy - launch again to break free\n";
+            const string stuckLinePanel =
+                "Crashing into anything (any surface) stops you dead and sticks you there\n" +
+                "  until you launch again - it also refunds energy, more than the charge\n" +
+                "  cost, scaling up with how fast you were going.\n";
 
             if (controlsHintLabel != null)
             {
@@ -816,8 +897,9 @@ namespace KineticEnergy.Player
                         "Move (on the ground): Left Stick\n" +
                         "Nudge (in the air): Left Stick\n" +
                         "Hold South / Left Trigger / Right Trigger: charge Up / Down / Forward\n" +
-                        "Longer hold launches further, release to fire, Left Bumper cancels\n" +
-                        "2 launches total, any combination, until grounded again\n" +
+                        "Longer hold launches further and costs more energy, release to fire\n" +
+                        "Left Bumper cancels\n" +
+                        stuckLine +
                         "Camera: Right Stick\n" +
                         switchLine +
                         "Pause: Start / Options / Esc",
@@ -827,8 +909,18 @@ namespace KineticEnergy.Player
                         "  Trigger to launch\n" +
                         "Airborne: hold South / Left Trigger / Right Trigger to charge Up / Down /\n" +
                         "  Forward\n" +
-                        "2 launches total (grounded + air combined) until grounded again\n" +
                         "Left Bumper cancels either\n" +
+                        stuckLine +
+                        "Camera: Right Stick\n" +
+                        switchLine +
+                        "Pause: Start / Options / Esc",
+                    ControlScheme.DefyGravity =>
+                        "Move (on the ground): Left Stick\n" +
+                        "Hold Right Trigger / Left Trigger / South: charge a Forward / Up / Down\n" +
+                        "  flight - aim Forward with the Left Stick\n" +
+                        "Gravity is off while charging and during the flight, back on once it ends\n" +
+                        "Left Bumper cancels\n" +
+                        stuckLine +
                         "Camera: Right Stick\n" +
                         switchLine +
                         "Pause: Start / Options / Esc",
@@ -838,7 +930,7 @@ namespace KineticEnergy.Player
                         "Aim: Left Trigger (hold)\n" +
                         "Adjust Aim: Left Stick (while aiming)\n" +
                         "Launch: Right Trigger, Left Bumper cancels\n" +
-                        "2 launches total, same way, until grounded again\n" +
+                        stuckLine +
                         "Camera: Right Stick\n" +
                         switchLine +
                         "Pause: Start / Options / Esc",
@@ -858,11 +950,10 @@ namespace KineticEnergy.Player
                         "  tilted 60 degrees toward the stick. Release to fire.\n" +
                         "Right Trigger (hold) - Charge a Forward launch: tilted 5 degrees ahead if\n" +
                         "  centered, or 30 degrees toward the stick. Release to fire.\n" +
-                        "The longer any of the three is held, the further it launches (same range\n" +
-                        "  as the original scheme). Left Bumper cancels whichever is charging.\n" +
-                        "Each of the three works any time, in any order - 2 launches total per\n" +
-                        "  flight, any combination, resetting together the moment the cube\n" +
-                        "  genuinely lands again.\n" +
+                        "The longer any of the three is held, the further it launches - and the\n" +
+                        "  more energy it costs (see the yellow meter, top right). Left Bumper\n" +
+                        "  cancels whichever is charging.\n" +
+                        stuckLinePanel +
                         "Right Stick - Camera\n" +
                         switchLinePanel +
                         "Start / Options / Esc - Pause",
@@ -873,10 +964,22 @@ namespace KineticEnergy.Player
                         "  aim, Right Trigger to launch (exactly like the original scheme).\n" +
                         "Airborne - hold South / Left Trigger / Right Trigger to charge an Up /\n" +
                         "  Down / Forward launch (exactly like the Stick Aim scheme).\n" +
-                        "2 launches total per flight (the grounded one plus this) - whichever\n" +
-                        "  airborne direction fires first, the others become unavailable too\n" +
-                        "  until the cube lands and it resets.\n" +
                         "Left Bumper - Cancel whichever is currently charging, grounded or air.\n" +
+                        stuckLinePanel +
+                        "Right Stick - Camera\n" +
+                        switchLinePanel +
+                        "Start / Options / Esc - Pause",
+                    ControlScheme.DefyGravity =>
+                        "Left Stick - Move (on the ground)\n" +
+                        "Right Trigger (hold) - Charge a Forward flight - aim it with the Left\n" +
+                        "  Stick, or leave the stick centered to fly the way you're facing.\n" +
+                        "Left Trigger (hold) - Charge an Up flight, always straight up.\n" +
+                        "South (hold) - Charge a Down flight, always straight down.\n" +
+                        "Charging grows both the flight's speed AND how long it lasts, up to the\n" +
+                        "  energy you have stored. Gravity is suspended for the whole charge and\n" +
+                        "  the flight itself - release to fire, then gravity resumes once the\n" +
+                        "  flight's time runs out. Left Bumper cancels the current charge.\n" +
+                        stuckLinePanel +
                         "Right Stick - Camera\n" +
                         switchLinePanel +
                         "Start / Options / Esc - Pause",
@@ -887,8 +990,7 @@ namespace KineticEnergy.Player
                         "Left Stick (while aiming) - Adjust aim direction\n" +
                         "Right Trigger - Launch\n" +
                         "Left Bumper - Cancel the current aim/charge without firing\n" +
-                        "2 launches total per flight - grounded, then once more mid-air the same\n" +
-                        "  way - resetting the moment the cube genuinely lands again.\n" +
+                        stuckLinePanel +
                         "South - Show/hide the landing preview\n" +
                         "Right Stick - Camera\n" +
                         switchLinePanel +
@@ -898,7 +1000,7 @@ namespace KineticEnergy.Player
             }
         }
 
-        // RB always cycles through exactly these three schemes, regardless of which one is
+        // RB always cycles through exactly these four schemes, regardless of which one is
         // currently active or of alternateSchemesEnabled (that flag only governs whether
         // West/North/East can reach Hold-Release/Analog - it has no bearing on this cycle).
         void HandleSchemeSwitch()
@@ -906,18 +1008,35 @@ namespace KineticEnergy.Player
             if (!schemeSwitchingEnabled) return;
             if (switchSchemeAction == null || switchSchemeAction.action == null || !switchSchemeAction.action.WasPressedThisFrame()) return;
 
-            // Cycles through exactly the three reachable schemes - Hold-Release/Analog stay
+            // Cycles through exactly the four reachable schemes - Hold-Release/Analog stay
             // reachable only via West/North/East + alternateSchemesEnabled, unrelated to this.
-            controlScheme = controlScheme switch
+            ControlScheme next = controlScheme switch
             {
                 ControlScheme.LaunchInstantly => ControlScheme.StickAim,
                 ControlScheme.StickAim => ControlScheme.Mixed,
-                _ => ControlScheme.LaunchInstantly, // Mixed (or Hold-Release/Analog, if reached some other way) wraps back to the start
+                ControlScheme.Mixed => ControlScheme.DefyGravity,
+                _ => ControlScheme.LaunchInstantly, // DefyGravity (or Hold-Release/Analog, if reached some other way) wraps back to the start
             };
+            SwitchToScheme(next);
+        }
 
-            // Cancel whichever charge system was active, cleanly, regardless of which one it
-            // was - once the scheme switches, neither Update() branch that would otherwise
-            // notice a release/cancel is guaranteed to run for it again.
+        // The Dpad radial menu's entry point (see RadialMenuController) - same underlying switch
+        // as the Right Bumper cycle, just letting the player jump straight to a specific scheme
+        // instead of cycling through it. Respects schemeSwitchingEnabled the same way
+        // HandleSchemeSwitch does - RadialMenuController checks this before ever calling in.
+        public void SetControlSchemeFromMenu(ControlScheme scheme)
+        {
+            SwitchToScheme(scheme);
+        }
+
+        // Shared by both ways of switching schemes (RB cycle and the Dpad radial menu) - cancels
+        // whichever of the three charge systems was active, cleanly, regardless of which one it
+        // was, since once the scheme switches, none of the three Update() branches that would
+        // otherwise notice a release/cancel is guaranteed to run for it again.
+        void SwitchToScheme(ControlScheme scheme)
+        {
+            controlScheme = scheme;
+
             if (isAiming)
             {
                 isAiming = false;
@@ -928,6 +1047,13 @@ namespace KineticEnergy.Player
             if (stickAimChargeType != StickAimChargeType.None)
             {
                 stickAimChargeType = StickAimChargeType.None;
+                chargeTime = 0f;
+                aimArrow?.SetVisible(false);
+                landingPreview?.SetVisible(false);
+            }
+            if (defyGravityChargeType != DefyGravityFlightType.None)
+            {
+                defyGravityChargeType = DefyGravityFlightType.None;
                 chargeTime = 0f;
                 aimArrow?.SetVisible(false);
                 landingPreview?.SetVisible(false);
@@ -968,7 +1094,7 @@ namespace KineticEnergy.Player
                     _ => fireAction != null && fireAction.action != null && fireAction.action.WasReleasedThisFrame(),
                 };
 
-                chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime);
+                AccumulateCharge();
                 Vector3 dir;
                 if (stickHeld)
                 {
@@ -1029,7 +1155,7 @@ namespace KineticEnergy.Player
             }
             else
             {
-                bool canLaunch = launchesUsedThisFlight < maxLaunchesPerFlight;
+                bool canLaunch = launchesUsedThisFlight < maxLaunchesPerFlight && energyFraction > 0f;
 
                 bool upPressed = canLaunch && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
                 bool ltPressed = canLaunch && launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
@@ -1085,17 +1211,135 @@ namespace KineticEnergy.Player
             }
         }
 
+        // Hold Right Trigger/Left Trigger/South to charge a straight-line Forward/Up/Down flight
+        // - direct request's button mapping ("right trigger, left trigger and button south
+        // respectively" -> "forward, upward, downwards respectively"), deliberately DIFFERENT
+        // from StickAim's South=Up/LT=Down (only RT=Forward matches between the two schemes).
+        // Charging grows BOTH the flight's duration and its speed together (same chargeFraction
+        // interpolating both ranges) - release to fire, Left Bumper cancels. Forward can be
+        // steered with the left stick, same "held past stickAimDeadzone or fall back to current
+        // facing" convention as StickAim's own Forward - but always perfectly flat (no tilt
+        // angle), matching "straight forward" literally. Up/Down never take stick input at all.
+        void UpdateDefyGravityScheme()
+        {
+            Vector2 stick = moveAction != null && moveAction.action != null
+                ? moveAction.action.ReadValue<Vector2>()
+                : Vector2.zero;
+            bool stickHeld = stick.sqrMagnitude > stickAimDeadzone * stickAimDeadzone;
+            Vector3 stickDirection = stickHeld ? StickWorldDirection(stick) : Vector3.zero;
+
+            bool cancelPressed = cancelChargeAction != null && cancelChargeAction.action != null && cancelChargeAction.action.WasPressedThisFrame();
+
+            if (defyGravityChargeType != DefyGravityFlightType.None)
+            {
+                if (cancelPressed)
+                {
+                    CancelDefyGravityCharge();
+                    return;
+                }
+
+                bool releasedNow = defyGravityChargeType switch
+                {
+                    DefyGravityFlightType.Up => launchAction != null && launchAction.action != null && launchAction.action.WasReleasedThisFrame(),
+                    DefyGravityFlightType.Down => upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasReleasedThisFrame(),
+                    _ => fireAction != null && fireAction.action != null && fireAction.action.WasReleasedThisFrame(),
+                };
+
+                AccumulateCharge();
+
+                Vector3 dir = defyGravityChargeType switch
+                {
+                    DefyGravityFlightType.Up => Vector3.up,
+                    DefyGravityFlightType.Down => Vector3.down,
+                    _ => stickHeld ? stickDirection : FacingFlatDirection(),
+                };
+
+                float chargeFraction = ChargeFraction();
+                aimArrow?.SetAim(dir, chargeFraction);
+
+                float flightSpeed = Mathf.Lerp(minDefyGravitySpeed, maxDefyGravitySpeed, chargeFraction);
+                float flightDuration = Mathf.Lerp(minDefyGravityDuration, maxDefyGravityDuration, chargeFraction);
+
+                // rb.linearVelocity is held at zero for the whole charge (see FixedUpdate), so
+                // the preview's initial velocity is just the flight speed itself.
+                Vector3 initialVelocity = dir * flightSpeed;
+                Vector3 lineStart = transform.position + Vector3.up * previewLineHeight;
+                Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, defyGravityFallDamping, out int stepCount, out bool didLand, flightDuration);
+                lastPredictedLanding = landingPoint;
+                hasPredictedLanding = true;
+
+                if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
+                {
+                    landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand);
+                }
+
+                if (releasedNow)
+                {
+                    // Force = speed here (mass is 1, and QueueLaunch's impulse divides by mass) -
+                    // matches how the forced-flight velocity gets rebuilt in FixedUpdate
+                    // (queuedDirection * queuedForce / rb.mass).
+                    QueueLaunch(dir, flightSpeed * rb.mass, defyGravityFallDamping, flightDuration);
+                    RecenterCameraForStickAimLaunch(dir);
+
+                    defyGravityChargeType = DefyGravityFlightType.None;
+                    chargeTime = 0f;
+                    aimArrow?.SetVisible(false);
+                    landingPreview?.SetVisible(false);
+                }
+            }
+            else
+            {
+                bool canLaunch = launchesUsedThisFlight < maxLaunchesPerFlight && energyFraction > 0f;
+
+                bool ltPressed = canLaunch && launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
+                bool southPressed = canLaunch && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
+                bool rtPressed = canLaunch && fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
+
+                if (ltPressed) StartDefyGravityCharge(DefyGravityFlightType.Up);
+                else if (southPressed) StartDefyGravityCharge(DefyGravityFlightType.Down);
+                else if (rtPressed) StartDefyGravityCharge(DefyGravityFlightType.Forward);
+            }
+        }
+
+        void StartDefyGravityCharge(DefyGravityFlightType type)
+        {
+            defyGravityChargeType = type;
+            chargeTime = 0f;
+            // Instant stop, same reasoning as every other charge-start - FixedUpdate keeps
+            // re-applying this for the whole charge, not just this one frame, so an airborne
+            // charge doesn't slowly start falling again from gravity.
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            aimArrow?.SetVisible(true);
+            landingPreview?.SetVisible(true);
+        }
+
+        void CancelDefyGravityCharge()
+        {
+            defyGravityChargeType = DefyGravityFlightType.None;
+            chargeTime = 0f;
+            aimArrow?.SetVisible(false);
+            landingPreview?.SetVisible(false);
+        }
+
         // Shared by every scheme's actual firing moment - just the physics-impulse queuing
         // (FixedUpdate applies it next tick) plus arming hasLaunched/launchGraceTimer. Doesn't
         // zero velocity itself: the charge-based flows already hold it at zero continuously for
         // the whole charge (see FixedUpdate), so by the time this runs it's already correct.
-        void QueueLaunch(Vector3 direction, float force, float damping)
+        // defyGravityDuration is >0 only for a Defy Gravity launch - see its own field comment.
+        void QueueLaunch(Vector3 direction, float force, float damping, float defyGravityDuration = 0f)
         {
             queuedDirection = direction;
             queuedForce = force;
             queuedDamping = damping;
+            queuedDefyGravityDuration = defyGravityDuration;
             launchQueued = true;
             hasLaunched = true;
+            // Every launch spends the charge fraction it took to build, straight out of the
+            // shared energy tank - "no more time/energy/speed can be added... when you reach the
+            // limit" (direct request) is what AccumulateCharge already enforces on the way up;
+            // this is the other half, actually deducting it once the charge is spent for real.
+            energyFraction = Mathf.Clamp01(energyFraction - ChargeFraction() * energyCostPerFullCharge);
             // Every scheme's actual fire moment goes through here, so counting it centrally
             // (rather than at each call site) is what makes the 2-launch cap apply identically
             // "no matter what sort of launching and no matter the control scheme" - see
@@ -1181,7 +1425,15 @@ namespace KineticEnergy.Player
         // exact internal drag/integration formula wasn't converging. Using the real engine for
         // both is accurate by construction: there's no formula to get subtly wrong, since it's
         // the same code path that will actually move the cube.
-        Vector3 PredictLandingPoint(Vector3 startPos, Vector3 initialVelocity, float damping, out int stepCount, out bool didLand)
+        // gravityFreeDuration: Defy Gravity only (every other caller passes 0, unaffected) - the
+        // real cube forces its velocity to stay constant for this many SIMULATED seconds after
+        // firing (see FixedUpdate's defyGravityFlightTimer block), so the preview has to do the
+        // exact same thing or the trail would show a normal gravity-curved arc for a launch that
+        // actually flies dead straight until the timer runs out. This project already found and
+        // fixed one real trail-accuracy bug from the prediction clone drifting from what the real
+        // cube does (see the 0.15f start-offset comment below) - matching the real per-tick
+        // override technique exactly, not approximating it, is what keeps this one accurate too.
+        Vector3 PredictLandingPoint(Vector3 startPos, Vector3 initialVelocity, float damping, out int stepCount, out bool didLand, float gravityFreeDuration = 0f)
         {
             EnsurePredictionClone();
 
@@ -1226,6 +1478,16 @@ namespace KineticEnergy.Player
 
             for (int i = 0; i < maxPredictionSteps; i++)
             {
+                // Same continuous per-tick override the real cube uses while a Defy Gravity
+                // flight is still forcing its velocity (see FixedUpdate) - applied BEFORE this
+                // step's Simulate() so it actually governs this step's motion, exactly mirroring
+                // the real cube's script-then-physics execution order.
+                if (i * dt < gravityFreeDuration)
+                {
+                    predictionRb.linearVelocity = initialVelocity;
+                    predictionRb.angularVelocity = Vector3.zero;
+                }
+
                 predictionPhysicsScene.Simulate(dt);
 
                 Vector3 pos = predictionClone.transform.position;
@@ -1296,8 +1558,9 @@ namespace KineticEnergy.Player
             // No Physics.IgnoreCollision needed anymore - a separate PhysicsScene means the
             // clone cannot physically collide with the real player's collider at all.
 
-            PredictionCloneStopper stopper = predictionClone.AddComponent<PredictionCloneStopper>();
-            stopper.groundNormalDot = groundNormalDot;
+            // Any-surface sticking now (direct request) - PredictionCloneStopper no longer needs
+            // a ground-normal restriction, it just stops on the first contact, period.
+            predictionClone.AddComponent<PredictionCloneStopper>();
 
             // Left permanently active rather than toggled per prediction call - reactivating a
             // GameObject and immediately reading its Rigidbody's state in the same call is
@@ -1354,6 +1617,35 @@ namespace KineticEnergy.Player
         float ChargeFraction()
         {
             return maxChargeTime > 0f ? Mathf.Clamp01(chargeTime / maxChargeTime) : 1f;
+        }
+
+        // Shared by every scheme's charge-accumulation step (see each Update*Scheme method) -
+        // chargeTime is capped by BOTH maxChargeTime (the existing per-shot limit) AND however
+        // much energy is actually left, expressed as an equivalent charge-time ceiling. This one
+        // change is what makes the blue charge-preview bar automatically "never bigger than the
+        // amount of energy in the bar" and makes charging stop growing "when you reach the limit
+        // of the energy you have stored" (direct request) - both fall out of chargeFraction being
+        // bounded by construction, no separate clamping needed anywhere else.
+        void AccumulateCharge()
+        {
+            chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime, EnergyChargeCeiling());
+        }
+
+        float EnergyChargeCeiling()
+        {
+            return energyCostPerFullCharge > 0f ? (energyFraction / energyCostPerFullCharge) * maxChargeTime : maxChargeTime;
+        }
+
+        // "You gain energy depending on the speed you used to crash onto it, it should be more
+        // than what you put in it, with the faster your speed at crash that factor at which you
+        // gain more energy should also increase" (direct request) - the energyGainSpeedBonus term
+        // is what makes the RATE increase with speed too, not just the raw amount: a crash at
+        // twice the speed doesn't just gain twice the base energy, it gains MORE than twice, since
+        // the multiplier itself grows with speed.
+        void GainEnergyFromCrash(float crashSpeed)
+        {
+            float gained = crashSpeed * energyGainPerSpeed * (1f + crashSpeed * energyGainSpeedBonus);
+            energyFraction = Mathf.Clamp01(energyFraction + gained);
         }
 
         Vector3 AimDirection()
