@@ -28,8 +28,14 @@ namespace KineticEnergy.Player
     public class KineticCubeController : MonoBehaviour
     {
         [Header("Launch Force")]
-        public float minLaunchForce = 16f;
-        public float maxLaunchForce = 70f;
+        // Raised again (16->45 / 70->110) per direct request: "the strength of your launches
+        // should be much higher from the start" - minLaunchForce especially, since with charge
+        // accumulation now much slower (see AccumulateCharge/chargeAccumulationRate) even a brief
+        // tap needs to feel powerful rather than barely moving the cube. Damping (below)
+        // deliberately left untouched - a faster exit speed at the same damping also flies
+        // further, which is consistent with "much higher", not just "much faster".
+        public float minLaunchForce = 45f;
+        public float maxLaunchForce = 110f;
         public float maxChargeTime = 1.5f;
         // Total launches allowed per flight (the first grounded/starting one plus however many
         // more this allows), shared across every scheme - direct request: "2 launches since
@@ -56,6 +62,13 @@ namespace KineticEnergy.Player
         public float energyGainSpeedBonus = 0.01f;
         // Yellow energy / blue charge-preview meter, top-right corner - wired by KineticEnergySetup.
         public EnergyMeterController energyMeter;
+        // Multiplies Time.deltaTime in AccumulateCharge, so a second of real holding doesn't turn
+        // straight into a second of chargeTime - direct request: "even at the starting energy it
+        // should take say 1 second to charge up to 20%". At startingEnergyFraction (0.2) and
+        // energyCostPerFullCharge (1), the energy-imposed charge ceiling (see EnergyChargeCeiling)
+        // is 0.2 * maxChargeTime chargeTime-seconds; reaching that ceiling in 1 real second needs
+        // a rate of (0.2 * maxChargeTime) / 1s, which at the current maxChargeTime (1.5) is 0.3.
+        public float chargeAccumulationRate = 0.3f;
 
         [Header("Defy Gravity Scheme")]
         // Charging determines BOTH how long the straight-line flight lasts AND how fast it moves
@@ -93,6 +106,24 @@ namespace KineticEnergy.Player
         // half, at the identical exit speed either way.
         public float minLaunchDamping = 2.8f;
         public float maxLaunchDamping = 1.0f;
+
+        [Header("Wall Crash")]
+        // A wall crash (contact normal mostly horizontal, |normal.y| below this) doesn't stick
+        // like a floor/ceiling crash does - direct request: "when you launch against a wall,
+        // instead of not being affected at all, you just fall slower instead of not at all". See
+        // OnCollisionEnter for the floor/ceiling-vs-wall split itself.
+        [Range(0f, 1f)] public float wallNormalThreshold = 0.5f;
+        // What fraction of the velocity LEFT after removing the into-wall component (see
+        // Vector3.ProjectOnPlane in OnCollisionEnter) survives the hit - the rest of this section
+        // is what actually makes it keep falling afterward rather than sticking.
+        [Range(0f, 1f)] public float wallCrashVelocityRetention = 0.4f;
+        // Raises drag for the remainder of the fall after a wall hit, same lever
+        // minLaunchDamping/maxLaunchDamping already use to shape a whole trajectory rather than
+        // just its first instant - this is what makes "fall slower" describe the ENTIRE rest of
+        // the fall, not just a one-off speed chop at the moment of impact. Reset automatically the
+        // next time a launch actually fires (see FixedUpdate's launchQueued handling), so it never
+        // needs restoring by hand.
+        public float wallCrashFallDamping = 3f;
 
         [Header("Aiming")]
         [Range(0f, 1f)] public float aimDeadzone = 0.15f;
@@ -169,8 +200,8 @@ namespace KineticEnergy.Player
         // Instantly is reachable while this is false. Matches the same disable-without-deleting
         // pattern as LandingPreviewController.ghostAndCrosshairEnabled.
         public bool alternateSchemesEnabled = false;
-        // StickAim is now the only reachable scheme by default - this blocks BOTH the RB toggle
-        // (HandleSchemeSwitch) and West's unconditional "back to Launch Instantly" (
+        // StickAim is now the only reachable scheme by default - this blocks BOTH the Dpad radial
+        // menu (SetControlSchemeFromMenu) and West's unconditional "back to Launch Instantly" (
         // HandlePreviewModeSwitch) from ever leaving StickAim, without deleting either scheme's
         // logic. Flip true to get the old switching behavior back for testing.
         public bool schemeSwitchingEnabled = false;
@@ -189,9 +220,11 @@ namespace KineticEnergy.Player
         public float chargeTimeScale = 0.75f;
 
         [Header("Stick Aim Scheme")]
-        // RB cycles through LaunchInstantly -> StickAim -> Mixed -> back - always reachable
-        // regardless of alternateSchemesEnabled above (that flag only gates Hold-Release/Analog).
-        public InputActionReference switchSchemeAction;
+        // Right Bumper - shows/hides the landing-preview trail, for every scheme, and does NOT
+        // switch the control scheme anymore (direct request - see HandleTrailToggle and
+        // SetControlSchemeFromMenu/the Dpad radial menu, now the only way to switch schemes).
+        // Renamed from switchSchemeAction now that its role has changed.
+        public InputActionReference trailToggleAction;
         // South: the up ("jump") charge/launch. LT: down ("slam"). RT: forward. All three hold-
         // to-charge, release-to-fire - see UpdateStickAimChargeScheme.
         public InputActionReference upLaunchAction;
@@ -259,7 +292,7 @@ namespace KineticEnergy.Player
         public ControlScheme CurrentScheme => controlScheme;
 
         // Editor-script-only setter (controlScheme itself stays private/encapsulated, only ever
-        // changed internally by HandleSchemeSwitch/HandlePreviewModeSwitch at runtime) - needed
+        // changed internally by SwitchToScheme/HandlePreviewModeSwitch at runtime) - needed
         // so KineticEnergySetup can explicitly (re)assign the default scheme on every run, the
         // same anti-staleness reasoning as every other tunable it sets: a serialized value from
         // before this default changed would otherwise keep loading as Launch Instantly forever.
@@ -410,7 +443,7 @@ namespace KineticEnergy.Player
             selectHoldReleaseSchemeAction?.action?.Enable();
             selectAnalogSchemeAction?.action?.Enable();
             selectNoneAction?.action?.Enable();
-            switchSchemeAction?.action?.Enable();
+            trailToggleAction?.action?.Enable();
             upLaunchAction?.action?.Enable();
         }
 
@@ -423,7 +456,7 @@ namespace KineticEnergy.Player
             selectHoldReleaseSchemeAction?.action?.Disable();
             selectAnalogSchemeAction?.action?.Disable();
             selectNoneAction?.action?.Disable();
-            switchSchemeAction?.action?.Disable();
+            trailToggleAction?.action?.Disable();
             upLaunchAction?.action?.Disable();
         }
 
@@ -446,7 +479,7 @@ namespace KineticEnergy.Player
             // doing two unrelated things (it's also pointless there, since neither ever shows a
             // trail/ghost/crosshair preview to toggle via this specific mechanism).
             if (controlScheme != ControlScheme.StickAim && controlScheme != ControlScheme.Mixed) HandlePreviewModeSwitch();
-            HandleSchemeSwitch();
+            HandleTrailToggle();
 
             // Kept outside any scheme-specific branch below (and updated unconditionally every
             // frame) so it also correctly hides itself the instant the player switches to a
@@ -788,15 +821,32 @@ namespace KineticEnergy.Player
         {
             // Only a genuine in-flight crash counts - not pre-launch walking (hasLaunched false),
             // and not an already-stuck body (frozen, shouldn't be generating fresh contacts at
-            // all, but defensive regardless). Any surface counts now, not just a roughly-upward
-            // contact normal (direct request, confirmed) - a wall or ceiling crash sticks you
-            // just as much as a floor one.
+            // all, but defensive regardless).
             if (!hasLaunched || isStuck) return;
             if (launchGraceTimer > 0f) return;
             // See minLaunchClearDistance's own comment - a second, independent guard alongside
             // the time-based one above, for a shallow shot that can still genuinely re-touch its
             // own launch platform after the grace window has already expired.
             if (Vector3.Distance(transform.position, launchStartPosition) < minLaunchClearDistance) return;
+
+            // Floor/ceiling (contact normal mostly vertical) sticks you in place, same as always.
+            // A wall (contact normal mostly horizontal) doesn't - direct request: "instead of not
+            // being affected at all, you just fall slower instead of not at all" - see
+            // wallNormalThreshold's own comment for why the split lives there instead of here.
+            Vector3 contactNormal = collision.GetContact(0).normal;
+            if (Mathf.Abs(contactNormal.y) < wallNormalThreshold)
+            {
+                // Removes only the into-wall component (ProjectOnPlane against the wall's own
+                // normal) so a shallow, glancing hit doesn't kill sideways/downward motion it
+                // never actually had, then scales whatever's left down and raises drag so the
+                // rest of the fall genuinely reads as "slower", not just a single speed chop.
+                // Deliberately does NOT touch hasLaunched/isStuck/launchesUsedThisFlight/energy -
+                // this is still the same flight, just a slower one, not a stick.
+                Vector3 remainingVelocity = Vector3.ProjectOnPlane(rb.linearVelocity, contactNormal);
+                rb.linearVelocity = remainingVelocity * wallCrashVelocityRetention;
+                rb.linearDamping = wallCrashFallDamping;
+                return;
+            }
 
             // TEMPORARY diagnostic: logs exactly how far off the prediction was the moment it's
             // possible to measure (right as the real landing is detected), including which axis
@@ -826,12 +876,12 @@ namespace KineticEnergy.Player
             GainEnergyFromCrash(crashSpeed);
         }
 
-        // West/North/East now pick the control scheme (see ControlScheme) rather than the
-        // visual preview mode - Ghost/Crosshair preview modes are disabled anyway (see
+        // West/North/East pick the control scheme (see ControlScheme) rather than the visual
+        // preview mode - Ghost/Crosshair preview modes are disabled anyway (see
         // LandingPreviewController.ghostAndCrosshairEnabled), so those buttons were free to
-        // repurpose. South still works the way it always did: toggle the trail preview on/off,
-        // just switching between Trail and None now instead of being a one-way hide, since
-        // nothing else is left to bring it back otherwise.
+        // repurpose. The trail on/off toggle used to live on South here too, but South is also
+        // StickAim's Up-charge AND DefyGravity's Down-charge button - see HandleTrailToggle's own
+        // comment for why it moved to Right Bumper instead, which no scheme's charge buttons use.
         void HandlePreviewModeSwitch()
         {
             if (schemeSwitchingEnabled && selectClassicSchemeAction != null && selectClassicSchemeAction.action != null && selectClassicSchemeAction.action.WasPressedThisFrame())
@@ -848,10 +898,6 @@ namespace KineticEnergy.Player
             {
                 controlScheme = ControlScheme.AnalogPressure;
                 UpdateSchemeLabel();
-            }
-            else if (selectNoneAction != null && selectNoneAction.action != null && selectNoneAction.action.WasPressedThisFrame() && landingPreview != null)
-            {
-                landingPreview.SetMode(landingPreview.CurrentMode == PredictionMode.None ? PredictionMode.Trail : PredictionMode.None);
             }
         }
 
@@ -873,21 +919,25 @@ namespace KineticEnergy.Player
         // separate call sites to remember.
         void UpdateControlsText()
         {
+            // Right Bumper toggles the landing-preview trail for every scheme, regardless of
+            // schemeSwitchingEnabled - it no longer switches schemes at all (see HandleTrailToggle).
+            const string trailToggleLine = "Show/Hide Trail: Right Bumper\n";
+            const string trailToggleLinePanel = "Right Bumper - Show/hide the landing-preview trail\n";
             // Only mention scheme-switching when it can actually do something - with
-            // schemeSwitchingEnabled false, telling the player about buttons that do nothing
+            // schemeSwitchingEnabled false, telling the player about a button that does nothing
             // would just be inaccurate.
-            string switchLine = schemeSwitchingEnabled ? "Switch Scheme: Right Bumper or Dpad (hold)\n" : "";
+            string switchLine = schemeSwitchingEnabled ? "Switch Scheme: Dpad (hold)\n" : "";
             string switchLinePanel = schemeSwitchingEnabled
-                ? "Right Bumper - Cycle to the next launch scheme\n" +
-                  "Dpad (hold) - Open a radial menu to pick a scheme directly\n"
+                ? "Dpad (hold) - Open a radial menu to pick a scheme directly\n"
                 : "";
             // Same crash-and-stick behavior on every scheme now, so this line is shared verbatim
             // rather than repeated with small variations per case.
-            const string stuckLine = "Crashing into anything sticks you in place and refunds energy - launch again to break free\n";
+            const string stuckLine = "Crashing into floors/ceilings sticks you in place and refunds energy - walls just slow your fall\n";
             const string stuckLinePanel =
-                "Crashing into anything (any surface) stops you dead and sticks you there\n" +
-                "  until you launch again - it also refunds energy, more than the charge\n" +
-                "  cost, scaling up with how fast you were going.\n";
+                "Crashing into a floor or ceiling stops you dead and sticks you there until\n" +
+                "  you launch again - it also refunds energy, more than the charge cost,\n" +
+                "  scaling up with how fast you were going. A wall doesn't stick you - it\n" +
+                "  just sheds some speed and lets you keep falling, slower than before.\n";
 
             if (controlsHintLabel != null)
             {
@@ -901,6 +951,7 @@ namespace KineticEnergy.Player
                         "Left Bumper cancels\n" +
                         stuckLine +
                         "Camera: Right Stick\n" +
+                        trailToggleLine +
                         switchLine +
                         "Pause: Start / Options / Esc",
                     ControlScheme.Mixed =>
@@ -912,6 +963,7 @@ namespace KineticEnergy.Player
                         "Left Bumper cancels either\n" +
                         stuckLine +
                         "Camera: Right Stick\n" +
+                        trailToggleLine +
                         switchLine +
                         "Pause: Start / Options / Esc",
                     ControlScheme.DefyGravity =>
@@ -922,6 +974,7 @@ namespace KineticEnergy.Player
                         "Left Bumper cancels\n" +
                         stuckLine +
                         "Camera: Right Stick\n" +
+                        trailToggleLine +
                         switchLine +
                         "Pause: Start / Options / Esc",
                     _ =>
@@ -932,6 +985,7 @@ namespace KineticEnergy.Player
                         "Launch: Right Trigger, Left Bumper cancels\n" +
                         stuckLine +
                         "Camera: Right Stick\n" +
+                        trailToggleLine +
                         switchLine +
                         "Pause: Start / Options / Esc",
                 };
@@ -955,6 +1009,7 @@ namespace KineticEnergy.Player
                         "  cancels whichever is charging.\n" +
                         stuckLinePanel +
                         "Right Stick - Camera\n" +
+                        trailToggleLinePanel +
                         switchLinePanel +
                         "Start / Options / Esc - Pause",
                     ControlScheme.Mixed =>
@@ -967,6 +1022,7 @@ namespace KineticEnergy.Player
                         "Left Bumper - Cancel whichever is currently charging, grounded or air.\n" +
                         stuckLinePanel +
                         "Right Stick - Camera\n" +
+                        trailToggleLinePanel +
                         switchLinePanel +
                         "Start / Options / Esc - Pause",
                     ControlScheme.DefyGravity =>
@@ -981,6 +1037,7 @@ namespace KineticEnergy.Player
                         "  flight's time runs out. Left Bumper cancels the current charge.\n" +
                         stuckLinePanel +
                         "Right Stick - Camera\n" +
+                        trailToggleLinePanel +
                         switchLinePanel +
                         "Start / Options / Esc - Pause",
                     _ =>
@@ -991,8 +1048,8 @@ namespace KineticEnergy.Player
                         "Right Trigger - Launch\n" +
                         "Left Bumper - Cancel the current aim/charge without firing\n" +
                         stuckLinePanel +
-                        "South - Show/hide the landing preview\n" +
                         "Right Stick - Camera\n" +
+                        trailToggleLinePanel +
                         switchLinePanel +
                         "Start / Options / Esc - Pause" +
                         (alternateSchemesEnabled ? "" : "\n\n(Hold-Release and Analog launch schemes are still in the project, just disabled)"),
@@ -1000,39 +1057,35 @@ namespace KineticEnergy.Player
             }
         }
 
-        // RB always cycles through exactly these four schemes, regardless of which one is
-        // currently active or of alternateSchemesEnabled (that flag only governs whether
-        // West/North/East can reach Hold-Release/Analog - it has no bearing on this cycle).
-        void HandleSchemeSwitch()
+        // Right Bumper universally shows/hides the landing-preview trail, for EVERY scheme, and
+        // no longer switches the control scheme at all (direct request: "right bumper shouldn't
+        // change the current control scheme" - see SetControlSchemeFromMenu/the Dpad radial menu
+        // for the only remaining way to switch). Moved here (was on South, selectNoneAction)
+        // specifically because South is StickAim's Up-charge AND DefyGravity's Down-charge
+        // button - a single South press used to fire both the toggle AND a charge-start on the
+        // same frame. Right Bumper isn't used as a charge button by any scheme, so it's free.
+        // Unconditional, not gated by schemeSwitchingEnabled - that flag is specifically about
+        // whether OTHER schemes are reachable, unrelated to a visual on/off toggle.
+        void HandleTrailToggle()
         {
-            if (!schemeSwitchingEnabled) return;
-            if (switchSchemeAction == null || switchSchemeAction.action == null || !switchSchemeAction.action.WasPressedThisFrame()) return;
+            if (trailToggleAction == null || trailToggleAction.action == null || !trailToggleAction.action.WasPressedThisFrame()) return;
+            if (landingPreview == null) return;
 
-            // Cycles through exactly the four reachable schemes - Hold-Release/Analog stay
-            // reachable only via West/North/East + alternateSchemesEnabled, unrelated to this.
-            ControlScheme next = controlScheme switch
-            {
-                ControlScheme.LaunchInstantly => ControlScheme.StickAim,
-                ControlScheme.StickAim => ControlScheme.Mixed,
-                ControlScheme.Mixed => ControlScheme.DefyGravity,
-                _ => ControlScheme.LaunchInstantly, // DefyGravity (or Hold-Release/Analog, if reached some other way) wraps back to the start
-            };
-            SwitchToScheme(next);
+            landingPreview.SetMode(landingPreview.CurrentMode == PredictionMode.None ? PredictionMode.Trail : PredictionMode.None);
         }
 
-        // The Dpad radial menu's entry point (see RadialMenuController) - same underlying switch
-        // as the Right Bumper cycle, just letting the player jump straight to a specific scheme
-        // instead of cycling through it. Respects schemeSwitchingEnabled the same way
-        // HandleSchemeSwitch does - RadialMenuController checks this before ever calling in.
+        // The Dpad radial menu's entry point (see RadialMenuController) - now the ONLY way to
+        // switch control schemes (direct request - Right Bumper no longer does this, see
+        // HandleTrailToggle). Respects schemeSwitchingEnabled - RadialMenuController checks this
+        // before ever calling in.
         public void SetControlSchemeFromMenu(ControlScheme scheme)
         {
             SwitchToScheme(scheme);
         }
 
-        // Shared by both ways of switching schemes (RB cycle and the Dpad radial menu) - cancels
-        // whichever of the three charge systems was active, cleanly, regardless of which one it
-        // was, since once the scheme switches, none of the three Update() branches that would
-        // otherwise notice a release/cancel is guaranteed to run for it again.
+        // Cancels whichever of the three charge systems was active, cleanly, regardless of which
+        // one it was, since once the scheme switches, none of the three Update() branches that
+        // would otherwise notice a release/cancel is guaranteed to run for it again.
         void SwitchToScheme(ControlScheme scheme)
         {
             controlScheme = scheme;
@@ -1558,9 +1611,15 @@ namespace KineticEnergy.Player
             // No Physics.IgnoreCollision needed anymore - a separate PhysicsScene means the
             // clone cannot physically collide with the real player's collider at all.
 
-            // Any-surface sticking now (direct request) - PredictionCloneStopper no longer needs
-            // a ground-normal restriction, it just stops on the first contact, period.
-            predictionClone.AddComponent<PredictionCloneStopper>();
+            // Mirrors OnCollisionEnter's floor/ceiling-vs-wall split exactly, so the trail stays
+            // accurate now that a wall crash no longer stops the real cube outright (see
+            // PredictionCloneStopper's own comment) - copied once here rather than kept in sync
+            // every call, same as the collider size just above; these three rarely change at
+            // runtime and PredictLandingPoint already re-syncs the one that does (damping).
+            PredictionCloneStopper stopper = predictionClone.AddComponent<PredictionCloneStopper>();
+            stopper.wallNormalThreshold = wallNormalThreshold;
+            stopper.wallCrashVelocityRetention = wallCrashVelocityRetention;
+            stopper.wallCrashFallDamping = wallCrashFallDamping;
 
             // Left permanently active rather than toggled per prediction call - reactivating a
             // GameObject and immediately reading its Rigidbody's state in the same call is
@@ -1628,7 +1687,7 @@ namespace KineticEnergy.Player
         // bounded by construction, no separate clamping needed anywhere else.
         void AccumulateCharge()
         {
-            chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime, EnergyChargeCeiling());
+            chargeTime = Mathf.Min(chargeTime + Time.deltaTime * chargeAccumulationRate, maxChargeTime, EnergyChargeCeiling());
         }
 
         float EnergyChargeCeiling()

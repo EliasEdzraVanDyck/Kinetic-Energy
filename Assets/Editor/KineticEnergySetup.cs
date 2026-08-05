@@ -552,12 +552,17 @@ namespace KineticEnergy.EditorSetup
         // same risk the next time any of them changes.
         static void ApplyLaunchTuning(KineticCubeController controller)
         {
-            controller.minLaunchForce = 16f;
-            controller.maxLaunchForce = 70f;
+            controller.minLaunchForce = 45f;
+            controller.maxLaunchForce = 110f;
             // Halves distance vs the previous (1.3, 0.4) at the same force - see the field's own
             // comment in KineticCubeController.cs for the empirical verification.
             controller.minLaunchDamping = 2.8f;
             controller.maxLaunchDamping = 1.0f;
+            // Wall crashes fall slower instead of sticking - see each field's own comment in
+            // KineticCubeController.cs.
+            controller.wallNormalThreshold = 0.5f;
+            controller.wallCrashVelocityRetention = 0.4f;
+            controller.wallCrashFallDamping = 3f;
             // StickAim's charge (and Mixed's airborne charge) now uses this same
             // minLaunchForce/maxLaunchForce curve directly - see stickAimUpAngle etc. below for
             // the per-direction tilt angles, which are all that's still scheme-specific.
@@ -582,6 +587,7 @@ namespace KineticEnergy.EditorSetup
             controller.energyCostPerFullCharge = 1f;
             controller.energyGainPerSpeed = 0.03f;
             controller.energyGainSpeedBonus = 0.01f;
+            controller.chargeAccumulationRate = 0.3f;
 
             // Defy Gravity scheme tuning.
             controller.minDefyGravityDuration = 0.4f;
@@ -704,7 +710,7 @@ namespace KineticEnergy.EditorSetup
             controller.selectHoldReleaseSchemeAction = selectTrailRef;
             controller.selectAnalogSchemeAction = selectCrosshairRef;
             controller.selectNoneAction = selectNoneRef;
-            controller.switchSchemeAction = switchSchemeRef;
+            controller.trailToggleAction = switchSchemeRef;
             controller.upLaunchAction = upLaunchRef;
             controller.cancelChargeAction = cancelChargeRef;
             controller.aimArrow = BuildAimArrow(player.transform);
@@ -900,7 +906,13 @@ namespace KineticEnergy.EditorSetup
             rt.anchorMin = new Vector2(1f, 1f);
             rt.anchorMax = new Vector2(1f, 1f);
             rt.pivot = new Vector2(1f, 1f);
-            rt.anchoredPosition = new Vector2(-24f, -24f);
+            // Directly beneath the energy meter (PauseSystem's EnergyMeter container: top-right,
+            // anchoredPosition -24/-24, sizeDelta 320x36 - see BuildPauseSystem) with a 16px gap:
+            // 24 (meter's own top offset) + 36 (meter height) + 16 (gap) = 76 - direct request:
+            // "the Parkour Hint should appear underneath the energy meter". This is a separate
+            // Canvas from the meter's (see this method's own comment on why), so the two can only
+            // be kept aligned by hand like this rather than by actual layout parenting.
+            rt.anchoredPosition = new Vector2(-24f, -76f);
             rt.sizeDelta = new Vector2(460f, 140f);
 
             Text text = textGo.AddComponent<Text>();
@@ -1262,6 +1274,10 @@ namespace KineticEnergy.EditorSetup
             // Yellow energy / blue charge-preview meter, top-right corner - direct request. Both
             // fills are Image.Type.Filled/Horizontal over the SAME rect, blue layered on top (a
             // later sibling) so it always reads as "this much of my energy is about to be spent".
+            // Goes up to 100% and starts filled at 20% "for free" - Image.fillAmount is already a
+            // 0-1 (0-100%) range, and EnergyMeterController.SetEnergy is fed energyFraction, which
+            // KineticCubeController.Awake initializes from startingEnergyFraction (0.2) - direct
+            // request, no separate change needed here beyond the outline below.
             GameObject energyContainer = new GameObject("EnergyMeter", typeof(RectTransform));
             energyContainer.transform.SetParent(canvasGo.transform, false);
             RectTransform energyRt = energyContainer.GetComponent<RectTransform>();
@@ -1271,10 +1287,16 @@ namespace KineticEnergy.EditorSetup
             energyRt.anchoredPosition = new Vector2(-24f, -24f);
             energyRt.sizeDelta = new Vector2(320f, 36f);
 
-            CreatePanel("Backdrop", energyContainer.transform, new Color(0f, 0f, 0f, 0.5f));
+            // Outline: a solid white panel filling the WHOLE container, sitting behind everything
+            // else - Backdrop and both fill bars are inset by meterOutlineThickness so a border of
+            // it always shows around the outside, reading as an outline of the entire meter
+            // regardless of current fill (direct request: "show an outline of the entire meter").
+            const float meterOutlineThickness = 3f;
+            CreatePanel("Outline", energyContainer.transform, new Color(1f, 1f, 1f, 0.9f));
+            InsetRect(CreatePanel("Backdrop", energyContainer.transform, new Color(0f, 0f, 0f, 0.5f)), meterOutlineThickness);
 
-            Image energyFillImage = CreateFillBar("EnergyFill", energyContainer.transform, new Color(0.95f, 0.82f, 0.15f));
-            Image chargeFillImage = CreateFillBar("ChargeFill", energyContainer.transform, new Color(0.3f, 0.65f, 1f));
+            Image energyFillImage = CreateFillBar("EnergyFill", energyContainer.transform, new Color(0.95f, 0.82f, 0.15f), meterOutlineThickness);
+            Image chargeFillImage = CreateFillBar("ChargeFill", energyContainer.transform, new Color(0.3f, 0.65f, 1f), meterOutlineThickness);
             chargeFillImage.gameObject.SetActive(false);
 
             GameObject energyMeterGo = FindOrCreateChild(root.transform, "EnergyMeter");
@@ -1326,8 +1348,9 @@ namespace KineticEnergy.EditorSetup
         }
 
         // A plain solid-color fill bar - Image.Type.Filled/Horizontal stretched over the whole
-        // parent rect, so SetEnergy/SetCharge (EnergyMeterController) just move fillAmount.
-        static Image CreateFillBar(string name, Transform parent, Color color)
+        // parent rect (minus inset, if any), so SetEnergy/SetCharge (EnergyMeterController) just
+        // move fillAmount. inset lets a bar sit inside a border panel instead of covering it.
+        static Image CreateFillBar(string name, Transform parent, Color color, float inset = 0f)
         {
             GameObject go = new GameObject(name, typeof(RectTransform));
             go.transform.SetParent(parent, false);
@@ -1335,8 +1358,8 @@ namespace KineticEnergy.EditorSetup
             RectTransform rt = go.GetComponent<RectTransform>();
             rt.anchorMin = Vector2.zero;
             rt.anchorMax = Vector2.one;
-            rt.offsetMin = Vector2.zero;
-            rt.offsetMax = Vector2.zero;
+            rt.offsetMin = new Vector2(inset, inset);
+            rt.offsetMax = new Vector2(-inset, -inset);
 
             Image image = go.AddComponent<Image>();
             image.color = color;
@@ -1346,6 +1369,17 @@ namespace KineticEnergy.EditorSetup
             image.fillAmount = 1f;
 
             return image;
+        }
+
+        // Shrinks a full-stretch RectTransform (as CreatePanel produces) inward by inset on all
+        // four sides - used to keep a background panel from fully covering a border panel behind
+        // it. Returns the same GameObject so call sites can wrap a CreatePanel call directly.
+        static GameObject InsetRect(GameObject go, float inset)
+        {
+            RectTransform rt = go.GetComponent<RectTransform>();
+            rt.offsetMin = new Vector2(inset, inset);
+            rt.offsetMax = new Vector2(-inset, -inset);
+            return go;
         }
 
         static void WireButton(GameObject buttonGo, UnityEngine.Events.UnityAction call)
