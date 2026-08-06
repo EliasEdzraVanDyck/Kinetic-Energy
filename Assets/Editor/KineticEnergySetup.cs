@@ -2580,7 +2580,7 @@ namespace KineticEnergy.EditorSetup
                         bool sticky = isBack;
                         bool checker = SlowPacedChecker(i + layer + k);
                         Material mat = sticky ? (checker ? stickyA : stickyB) : (checker ? wallA : wallB);
-                        CreatePbBlock(group, $"Wall_x{i}_y{layer}_z{k}", SlowPacedBlockCenter(i, layer, k), mat, sticky);
+                        CreatePbBlock(group, $"Wall_x{i}_y{layer}_z{k}", SlowPacedBlockCenter(i, layer, k), mat);
                     }
                 }
             }
@@ -2614,8 +2614,8 @@ namespace KineticEnergy.EditorSetup
                     bool checkerRight = SlowPacedChecker(hallWallX + layer + k);
                     Material matLeft = voidRow ? (checkerLeft ? stickyA : stickyB) : (checkerLeft ? wallA : wallB);
                     Material matRight = voidRow ? (checkerRight ? stickyA : stickyB) : (checkerRight ? wallA : wallB);
-                    CreatePbBlock(hallWallLeft, $"HallwayWallLeft_y{layer}_z{k}", SlowPacedBlockCenter(-hallWallX, layer, k), matLeft, voidRow);
-                    CreatePbBlock(hallWallRight, $"HallwayWallRight_y{layer}_z{k}", SlowPacedBlockCenter(hallWallX, layer, k), matRight, voidRow);
+                    CreatePbBlock(hallWallLeft, $"HallwayWallLeft_y{layer}_z{k}", SlowPacedBlockCenter(-hallWallX, layer, k), matLeft);
+                    CreatePbBlock(hallWallRight, $"HallwayWallRight_y{layer}_z{k}", SlowPacedBlockCenter(hallWallX, layer, k), matRight);
                 }
 
                 for (int i = -hallWallX; i <= hallWallX; i++)
@@ -2678,6 +2678,8 @@ namespace KineticEnergy.EditorSetup
             FinishLineWin finishWin = trigger.AddComponent<FinishLineWin>();
             finishWin.pauseController = pauseController;
 
+            BuildSlowPacedColliders(room.transform);
+
             // Player starts at the room's center; the boot camera faces the opening.
             player.position = new Vector3(0f, 0.5f, 0f);
 
@@ -2706,10 +2708,13 @@ namespace KineticEnergy.EditorSetup
         }
 
         // One environment block: a ProBuilder cube (direct request - "use ProBuilder to make all
-        // environments out of blocks so I can easily adjust things"), with a MeshCollider so it
-        // both blocks the player and gets cloned into the landing-prediction physics scene
-        // (BuildPredictionGeometryProxies already handles MeshColliders).
-        static GameObject CreatePbBlock(Transform parent, string name, Vector3 center, Material material, bool sticky = false)
+        // environments out of blocks so I can easily adjust things"). VISUAL ONLY - deliberately
+        // no collider per block: hundreds of side-by-side colliders create internal seam edges
+        // that PhysX reports as real contacts, which caught the cube while walking, registered
+        // phantom crashes mid-launch, and spawned crack decals from merely standing (direct bug
+        // report). Collision comes from a few merged, invisible box slabs instead - see
+        // BuildSlowPacedColliders.
+        static GameObject CreatePbBlock(Transform parent, string name, Vector3 center, Material material)
         {
             ProBuilderMesh pbMesh = ShapeGenerator.GenerateCube(PivotLocation.Center, Vector3.one * SlowPacedBlockSize);
             GameObject go = pbMesh.gameObject;
@@ -2719,10 +2724,99 @@ namespace KineticEnergy.EditorSetup
             go.GetComponent<MeshRenderer>().sharedMaterial = material;
             pbMesh.ToMesh();
             pbMesh.Refresh();
-            MeshCollider collider = go.AddComponent<MeshCollider>();
-            if (collider.sharedMesh == null) collider.sharedMesh = go.GetComponent<MeshFilter>().sharedMesh;
+            return go;
+        }
+
+        // The scene's actual physics: one seam-free box collider per flat surface region, sized
+        // to exactly match the block visuals' outer faces. StickySurface lives HERE (the
+        // controller reads the collider it crashed into via GetComponentInParent), so a whole
+        // slab is sticky or not - the green block tint is the matching visual. If blocks get
+        // rearranged in the editor, these slabs are what needs resizing to match.
+        static GameObject CreateRoomCollider(Transform parent, string name, Vector3 center, Vector3 size, bool sticky = false)
+        {
+            GameObject go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.position = center;
+            BoxCollider box = go.AddComponent<BoxCollider>();
+            box.size = size;
             if (sticky) go.AddComponent<StickySurface>().sticky = true;
             return go;
+        }
+
+        static void BuildSlowPacedColliders(Transform room)
+        {
+            float b = SlowPacedBlockSize;
+            int ring = SlowPacedHalfInterior + 1;
+            int hallWallX = SlowPacedHallHalfWidth + 1;
+
+            float outerHalf = (ring + 0.5f) * b;              // room's outer extent from center (11.25)
+            float outerSpan = outerHalf * 2f;                 // full outer width (22.5)
+            float roomHeight = SlowPacedWallLayers * b;       // interior height (10.5)
+            float wallCenterY = roomHeight * 0.5f;
+            float wallZ = ring * b;                           // wall blocks' center plane (10.5)
+            float hallHeight = SlowPacedHallLayers * b;       // 4.5
+            float hallInnerWidth = (SlowPacedHallHalfWidth * 2 + 1) * b; // 4.5
+            float hallOuterWidth = (hallWallX * 2 + 1) * b;   // 7.5
+            float hallWallXPos = hallWallX * b;               // 3
+
+            Transform colliders = NewGroup(room, "Colliders");
+
+            // Room shell.
+            CreateRoomCollider(colliders, "FloorCollider", new Vector3(0f, -b * 0.5f, 0f), new Vector3(outerSpan, b, outerSpan));
+            CreateRoomCollider(colliders, "CeilingCollider", new Vector3(0f, roomHeight + b * 0.5f, 0f), new Vector3(outerSpan, b, outerSpan));
+            CreateRoomCollider(colliders, "WallBackCollider", new Vector3(0f, wallCenterY, -wallZ), new Vector3(outerSpan, roomHeight, b), true);
+            CreateRoomCollider(colliders, "WallLeftCollider", new Vector3(-wallZ, wallCenterY, 0f), new Vector3(b, roomHeight, outerSpan));
+            CreateRoomCollider(colliders, "WallRightCollider", new Vector3(wallZ, wallCenterY, 0f), new Vector3(b, roomHeight, outerSpan));
+
+            // Front wall in three pieces around the opening (3 wide, hallHeight tall, centered).
+            float openingHalf = hallInnerWidth * 0.5f;                 // 2.25
+            float sideWidth = outerHalf - openingHalf;                 // 9
+            float sideCenterX = openingHalf + sideWidth * 0.5f;        // 6.75
+            CreateRoomCollider(colliders, "WallFrontLeftCollider", new Vector3(-sideCenterX, wallCenterY, wallZ), new Vector3(sideWidth, roomHeight, b));
+            CreateRoomCollider(colliders, "WallFrontRightCollider", new Vector3(sideCenterX, wallCenterY, wallZ), new Vector3(sideWidth, roomHeight, b));
+            float aboveHeight = roomHeight - hallHeight;               // 6
+            CreateRoomCollider(colliders, "WallFrontAboveOpeningCollider", new Vector3(0f, hallHeight + aboveHeight * 0.5f, wallZ), new Vector3(hallInnerWidth, aboveHeight, b));
+
+            // Hallway. Row k's blocks span (k*b - b/2)..(k*b + b/2).
+            float entryMinZ = SlowPacedHallStartK * b - b * 0.5f;
+            // The entry FLOOR alone starts two blocks early (under the doorway, overlapping the
+            // room floor with both tops flush at y=0) so walking through the opening crosses
+            // solid overlap instead of a collider-to-collider seam edge - the exact catch this
+            // merged-collider layout exists to remove. Floor only: extending the ceiling/wall
+            // segments the same way would poke invisible collider stubs into the room itself.
+            float entryFloorMinZ = entryMinZ - 2f * b;
+            float entryMaxZ = (SlowPacedVoidStartK - 1) * b + b * 0.5f;
+            float voidMaxZ = SlowPacedVoidEndK * b + b * 0.5f;
+            float hallMaxZ = SlowPacedHallEndK * b + b * 0.5f;
+
+            CreateRoomCollider(colliders, "HallwayEntryFloorCollider",
+                new Vector3(0f, -b * 0.5f, (entryFloorMinZ + entryMaxZ) * 0.5f), new Vector3(hallOuterWidth, b, entryMaxZ - entryFloorMinZ));
+            CreateRoomCollider(colliders, "FinishFloorCollider",
+                new Vector3(0f, -b * 0.5f, (voidMaxZ + hallMaxZ) * 0.5f), new Vector3(hallOuterWidth, b, hallMaxZ - voidMaxZ));
+            CreateRoomCollider(colliders, "HallwayCeilingCollider",
+                new Vector3(0f, hallHeight + b * 0.5f, (entryMinZ + hallMaxZ) * 0.5f), new Vector3(hallOuterWidth, b, hallMaxZ - entryMinZ));
+
+            // Side walls in three segments each: only the stretch flanking the void is sticky,
+            // matching the green blocks.
+            float hallWallCenterY = hallHeight * 0.5f;
+            (float minZ, float maxZ, bool sticky, string label)[] wallSegments =
+            {
+                (entryMinZ, entryMaxZ, false, "Entry"),
+                (entryMaxZ, voidMaxZ, true, "VoidSticky"),
+                (voidMaxZ, hallMaxZ, false, "Finish"),
+            };
+            foreach ((float minZ, float maxZ, bool sticky, string label) in wallSegments)
+            {
+                Vector3 size = new Vector3(b, hallHeight, maxZ - minZ);
+                float centerZ = (minZ + maxZ) * 0.5f;
+                CreateRoomCollider(colliders, $"HallwayWallLeft{label}Collider", new Vector3(-hallWallXPos, hallWallCenterY, centerZ), size, sticky);
+                CreateRoomCollider(colliders, $"HallwayWallRight{label}Collider", new Vector3(hallWallXPos, hallWallCenterY, centerZ), size, sticky);
+            }
+
+            // End cap sealing the hallway (walls + ceiling row tall).
+            float endCapZ = (SlowPacedHallEndK + 1) * b;
+            float endCapHeight = hallHeight + b;
+            CreateRoomCollider(colliders, "HallwayEndCapCollider", new Vector3(0f, endCapHeight * 0.5f, endCapZ), new Vector3(hallOuterWidth, endCapHeight, b));
         }
 
         static Transform NewGroup(Transform parent, string name)

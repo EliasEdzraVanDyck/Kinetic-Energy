@@ -14,10 +14,11 @@ namespace KineticEnergy.Player
         StickAim,        // RB cycles to/from this one - hold South/LT/RT to charge a launch in
                           // that direction (up/down/forward), release to fire - see
                           // UpdateStickAimChargeScheme.
-        Mixed,           // RB cycles to/from this one - grounded behaves exactly like
-                         // LaunchInstantly, airborne behaves like StickAim but with a single
-                         // shared once-per-flight limit across all three directions instead of
-                         // one each - see UpdateMixedScheme.
+        Mixed,           // Grounded behaves exactly like LaunchInstantly (LT aims+charges, RT
+                         // fires). Airborne: LT opens that SAME aim-and-confirm flow mid-air,
+                         // while RT/South/West are StickAim-style hold-to-charge Forward/Up/Down
+                         // (release fires, stick tilts the angle) - Down deliberately sits on
+                         // West here, not LT - see UpdateMixedScheme.
         DefyGravity,     // RB cycles to/from this one - hold Right Trigger/Left Trigger/South to
                          // charge a straight-line Forward/Up/Down flight (duration AND speed both
                          // grow with charge). Gravity is suspended for the whole charge AND the
@@ -910,12 +911,38 @@ namespace KineticEnergy.Player
             }
             else if (isGrounded)
             {
+                // South's Up hold-to-charge also works straight from the ground (direct
+                // request) - routing this frame's press into the stick-aim system starts the
+                // charge; every following frame reaches it through the stickAimChargeType
+                // branch above. Everything else grounded stays the LT-aim/RT-confirm flow.
+                bool upPressed = energyFraction > 0f && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
+                if (upPressed) UpdateStickAimChargeScheme();
+                else UpdateChargeBasedScheme();
+            }
+            else if (launchAction != null && launchAction.action != null && launchAction.action.IsPressed())
+            {
+                // Airborne LT now opens the exact same aim-and-confirm flow as on the ground
+                // (direct request: "while in the air left trigger should also start aiming") -
+                // UpdateChargeBasedScheme's existing air-relaunch path already freezes the cube
+                // and runs the full stick-adjusted aim, RT to confirm. This also covers the
+                // waitingForLtRelease case after a fire, which that method handles internally.
+                // The three directional hold-to-charges moved off LT entirely: RT = Forward,
+                // South = Up, West = Down - see UpdateStickAimChargeScheme's Mixed remap.
                 UpdateChargeBasedScheme();
             }
             else
             {
                 UpdateStickAimChargeScheme();
             }
+        }
+
+        // Mixed-air remap (direct request): the Down charge sits on West there, since Left
+        // Trigger in Mixed's air phase opens the full aim-and-confirm flow instead. Standalone
+        // StickAim keeps its original LT = Down. West is free in Mixed - HandlePreviewModeSwitch
+        // (its only other reader) is skipped for StickAim/Mixed in Update().
+        InputActionReference DownChargeActionForCurrentScheme()
+        {
+            return controlScheme == ControlScheme.Mixed ? selectClassicSchemeAction : launchAction;
         }
 
         void FixedUpdate()
@@ -1283,10 +1310,11 @@ namespace KineticEnergy.Player
                         "Pause: Start / Options / Esc",
                     ControlScheme.Mixed =>
                         "Move (on the ground): Left Stick\n" +
-                        "Grounded: Left Trigger to aim+charge (as the original scheme), Right\n" +
-                        "  Trigger to launch\n" +
-                        "Airborne: hold South / Left Trigger / Right Trigger to charge Up / Down /\n" +
-                        "  Forward\n" +
+                        "Grounded: Left Trigger to aim+charge, Right Trigger to launch - or hold\n" +
+                        "  South to charge an Up launch (release to fire)\n" +
+                        "Airborne: Left Trigger aims just like grounded (Right Trigger confirms),\n" +
+                        "  or hold Right Trigger / South / West to charge Forward / Up / Down -\n" +
+                        "  release to fire, tilt the Left Stick to angle it (centered = straight)\n" +
                         "Left Bumper cancels either\n" +
                         stuckLine +
                         "Camera: Right Stick\n" +
@@ -1354,8 +1382,12 @@ namespace KineticEnergy.Player
                         "Left Stick (in the air) - Nudge distance / drift sideways\n" +
                         "Grounded - Left Trigger (hold) to aim and charge, Left Stick to adjust\n" +
                         "  aim, Right Trigger to launch (exactly like the original scheme).\n" +
-                        "Airborne - hold South / Left Trigger / Right Trigger to charge an Up /\n" +
-                        "  Down / Forward launch (exactly like the Stick Aim scheme).\n" +
+                        "  South (hold) also works from the ground: charge an Up launch, release\n" +
+                        "  to fire - tilted toward the Left Stick, straight up when centered.\n" +
+                        "Airborne - Left Trigger (hold) opens that same aim-and-confirm flow in\n" +
+                        "  the air. Or hold Right Trigger / South / West to charge a Forward /\n" +
+                        "  Up / Down launch - release to fire, tilted toward the Left Stick when\n" +
+                        "  it's held past the deadzone, straight when centered.\n" +
                         "Left Bumper - Cancel whichever is currently charging, grounded or air.\n" +
                         stuckLinePanel +
                         "Right Stick - Camera\n" +
@@ -1504,10 +1536,11 @@ namespace KineticEnergy.Player
                     return;
                 }
 
+                InputActionReference downAction = DownChargeActionForCurrentScheme();
                 bool releasedNow = stickAimChargeType switch
                 {
                     StickAimChargeType.Up => upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasReleasedThisFrame(),
-                    StickAimChargeType.Down => launchAction != null && launchAction.action != null && launchAction.action.WasReleasedThisFrame(),
+                    StickAimChargeType.Down => downAction != null && downAction.action != null && downAction.action.WasReleasedThisFrame(),
                     _ => fireAction != null && fireAction.action != null && fireAction.action.WasReleasedThisFrame(),
                 };
 
@@ -1574,12 +1607,13 @@ namespace KineticEnergy.Player
             {
                 bool canLaunch = energyFraction > 0f;
 
+                InputActionReference downAction = DownChargeActionForCurrentScheme();
                 bool upPressed = canLaunch && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
-                bool ltPressed = canLaunch && launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
+                bool downPressed = canLaunch && downAction != null && downAction.action != null && downAction.action.WasPressedThisFrame();
                 bool rtPressed = canLaunch && fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
 
                 if (upPressed) StartStickAimCharge(StickAimChargeType.Up);
-                else if (ltPressed) StartStickAimCharge(StickAimChargeType.Down);
+                else if (downPressed) StartStickAimCharge(StickAimChargeType.Down);
                 else if (rtPressed) StartStickAimCharge(StickAimChargeType.Forward);
             }
         }
