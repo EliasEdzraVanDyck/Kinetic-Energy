@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEditor.Events;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.ProBuilder;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.UI;
@@ -24,6 +26,12 @@ namespace KineticEnergy.EditorSetup
         const string Level2ScenePath = "Assets/Scenes/Level2.unity";
         const string Level3ScenePath = "Assets/Scenes/Level3.unity";
         const string FastPacedLevelScenePath = "Assets/Scenes/FastPacedLevel.unity";
+        const string SlowPacedLevelScenePath = "Assets/Scenes/SlowPacedLevel.unity";
+        // The crack decal pipeline: SOURCE is the raw 3x3 sheet (procedurally generated if
+        // missing; overwrite it with real art any time), PROCESSED is what the decal material
+        // actually uses - ProcessCrackSheet keys the source's light background out into alpha.
+        const string CrackSourcePath = "Assets/Textures/CrackDecalSheetSource.png";
+        const string CrackProcessedPath = "Assets/Textures/CrackDecalSheet.png";
         const string VolumeProfilePath = "Assets/Settings/SampleSceneProfile.asset";
         const string ActionsPath = "Assets/InputSystem_Actions.inputactions";
         const string PrefabFolder = "Assets/Prefabs";
@@ -38,6 +46,7 @@ namespace KineticEnergy.EditorSetup
             ("Level 2", "Level2"),
             ("Level 3", "Level3"),
             ("Fast Paced", "FastPacedLevel"),
+            ("Slow Paced", "SlowPacedLevel"),
         };
 
         public static void SetupAll()
@@ -48,6 +57,7 @@ namespace KineticEnergy.EditorSetup
             SetupLevel2();
             SetupLevel3();
             SetupFastPacedLevel();
+            SetupSlowPacedLevel();
             UpdateBuildSettings();
 
             Debug.Log("KineticEnergySetup: SetupAll complete OK");
@@ -1316,7 +1326,8 @@ namespace KineticEnergy.EditorSetup
                 new EditorBuildSettingsScene(Level1ScenePath, true),
                 new EditorBuildSettingsScene(Level2ScenePath, true),
                 new EditorBuildSettingsScene(Level3ScenePath, true),
-                new EditorBuildSettingsScene(FastPacedLevelScenePath, true)
+                new EditorBuildSettingsScene(FastPacedLevelScenePath, true),
+                new EditorBuildSettingsScene(SlowPacedLevelScenePath, true)
             };
         }
 
@@ -2353,6 +2364,569 @@ namespace KineticEnergy.EditorSetup
             }
 
             throw new Exception($"KineticEnergySetup: could not find InputActionReference for {mapName}/{actionName}.");
+        }
+
+        // ==================== SlowPacedLevel ====================
+
+        // Every environment piece in this scene is a ProBuilder cube of this exact size - direct
+        // request: "1 Block should be 50% bigger than the player" (the player is a 1x1x1 cube).
+        const float SlowPacedBlockSize = 1.5f;
+        // Interior footprint is (2*this+1) = 13x13 blocks - deliberately ODD, so a 3-block-wide
+        // opening can sit exactly centered on a wall without straddling the grid.
+        const int SlowPacedHalfInterior = 6;
+        const int SlowPacedWallLayers = 7;    // interior room height in blocks (10.5m)
+        const int SlowPacedHallStartK = 8;    // first hallway grid row past the wall ring (k=7)
+        const int SlowPacedHallEndK = 23;     // last hallway row; the end cap sits one past this
+        const int SlowPacedVoidStartK = 12;   // hallway rows with NO floor at all - the void
+        const int SlowPacedVoidEndK = 19;     // (8 blocks = 12m of gap, well inside launch range)
+        const int SlowPacedFinishStartK = 20; // rows carrying the Finish platform floor
+        const int SlowPacedHallHalfWidth = 1; // interior hallway columns: i in [-1..1] (3 wide)
+        const int SlowPacedHallLayers = 3;    // hallway interior height in blocks (= opening height)
+
+        // "A new scene that's called SlowPacedLevel" (direct request): a big open cube-shaped
+        // room (floor, walls, ceiling) built entirely from ProBuilder blocks, one opening
+        // centered in the +Z wall leading into an enclosed hallway with a void gap, and a
+        // platform called Finish at the far end. Mixed is the only reachable control scheme.
+        // Only walls carrying StickySurface (the back wall and the hallway walls along the void,
+        // tinted green) hold a crash until the next launch - everything else clings for 0.3s and
+        // then drops the cube back into gravity (KineticCubeController.stickyWallsOnly). Any
+        // impact stamps a random crack decal from the 3x3 sheet (ImpactCrackDecals).
+        // A standalone entry point (also under Tools) rather than only part of SetupAll, so it
+        // can be (re)built without touching any other scene's saved state.
+        [MenuItem("Tools/Kinetic Energy/Setup SlowPacedLevel")]
+        public static void SetupSlowPacedLevel()
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(SlowPacedLevelScenePath) == null)
+            {
+                // Same reasoning as every other level - copying Sandbox Scene guarantees
+                // identical RenderSettings/skybox/ambient instead of replicating them by hand.
+                if (!AssetDatabase.CopyAsset(ScenePath, SlowPacedLevelScenePath))
+                {
+                    throw new Exception("KineticEnergySetup: failed to copy Sandbox Scene to create SlowPacedLevel.");
+                }
+            }
+
+            EditorSceneManager.OpenScene(SlowPacedLevelScenePath, OpenSceneMode.Single);
+
+            BuildDirectionalLight();
+            BuildGlobalVolume();
+
+            Material crackMaterial = EnsureCrackDecalAssets();
+
+            GameObject playerAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/Player.prefab");
+            GameObject cameraAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/ThirdPersonCameraRig.prefab");
+            GameObject pauseAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PauseSystem.prefab");
+            if (playerAsset == null || cameraAsset == null || pauseAsset == null)
+            {
+                throw new Exception("KineticEnergySetup: SlowPacedLevel needs Player/ThirdPersonCameraRig/PauseSystem prefabs - run Setup() (part of SetupAll) first.");
+            }
+
+            // Same duplicate-camera-name trap as every other level scene - both names destroyed
+            // deliberately, see SetupLevel1's own comment for why.
+            DestroyIfExists("Player");
+            DestroyIfExists("Main Camera");
+            DestroyIfExists("ThirdPersonCameraRig");
+            DestroyIfExists("PauseSystem");
+            DestroyIfExists("LevelGenerator");
+            DestroyIfExists("Plane");
+            // Copied in from Sandbox Scene - the room supplies its own floor and layout, and the
+            // "head to the Parkour level" hint only makes sense in Sandbox Scene itself.
+            DestroyIfExists("SandboxPlatforms");
+            DestroyIfExists("ParkourHint");
+            DestroyIfExists("SlowPacedRoom");
+            DestroyIfExists("OpeningLookTarget");
+
+            GameObject playerGo = (GameObject)PrefabUtility.InstantiatePrefab(playerAsset);
+            GameObject camGo = (GameObject)PrefabUtility.InstantiatePrefab(cameraAsset);
+            GameObject pauseGo = (GameObject)PrefabUtility.InstantiatePrefab(pauseAsset);
+
+            KineticCubeController controller = playerGo.GetComponent<KineticCubeController>();
+            KineticCubeControllerFreeMove freeMoveController = playerGo.GetComponent<KineticCubeControllerFreeMove>();
+            ThirdPersonOrbitCamera orbitCam = camGo.GetComponent<ThirdPersonOrbitCamera>();
+
+            controller.cameraTransform = camGo.transform;
+            controller.cameraOrbit = orbitCam;
+            freeMoveController.cameraTransform = camGo.transform;
+            orbitCam.target = playerGo.transform;
+
+            // Same single-source-of-truth reasoning as every other level - this is a plain
+            // instance of Player.prefab, not rebuilt from scratch here.
+            ApplyLaunchTuning(controller);
+
+            // SlowPaced-only overrides, scoped to just this scene's Player instance - direct
+            // request: "the only control scheme that should be active in that scene should be
+            // Mixed", and the sticky-walls rule ("only walls that have the property sticky you
+            // should be able to stick onto until launching again... if this isn't the case, the
+            // player should temporarily stick to it for say 0.3 seconds and then fall down").
+            controller.SetControlScheme(ControlScheme.Mixed);
+            controller.schemeSwitchingEnabled = false;
+            controller.stickyWallsOnly = true;
+            controller.nonStickyWallStickDuration = 0.3f;
+
+            // Crack-on-impact decals - an added component on THIS scene's Player instance only
+            // (a per-instance override), so Player.prefab and every other scene stay untouched.
+            ImpactCrackDecals crackDecals = playerGo.GetComponent<ImpactCrackDecals>();
+            if (crackDecals == null) crackDecals = playerGo.AddComponent<ImpactCrackDecals>();
+            crackDecals.decalMaterial = crackMaterial;
+            crackDecals.sheetColumns = 3;
+            crackDecals.sheetRows = 3;
+            crackDecals.decalSize = 1.2f;
+            crackDecals.surfaceOffset = 0.02f;
+            crackDecals.holdSeconds = 3f;
+            crackDecals.fadeSeconds = 1f;
+            crackDecals.maxDecals = 60;
+            crackDecals.minImpactSpeed = 1.5f;
+            crackDecals.minSpawnInterval = 0.05f;
+
+            Text modeLabel = pauseGo.transform.Find("PauseCanvas/PreviewModeLabel")?.GetComponent<Text>();
+            controller.landingPreview.modeLabel = modeLabel;
+            controller.controlsHintLabel = pauseGo.transform.Find("PauseCanvas/ControlsHintLabel")?.GetComponent<Text>();
+            controller.controlsPanelBody = pauseGo.transform.Find("PauseCanvas/ControlsPanel/ControlsBody")?.GetComponent<Text>();
+            controller.energyMeter = pauseGo.transform.Find("EnergyMeter")?.GetComponent<EnergyMeterController>();
+            RadialMenuController radialMenu = pauseGo.transform.Find("RadialMenuController")?.GetComponent<RadialMenuController>();
+            if (radialMenu != null) radialMenu.controller = controller;
+
+            PauseController pauseController = pauseGo.transform.Find("PauseController")?.GetComponent<PauseController>();
+
+            EditorUtility.SetDirty(controller);
+            EditorUtility.SetDirty(freeMoveController);
+            EditorUtility.SetDirty(orbitCam);
+            EditorUtility.SetDirty(controller.landingPreview);
+            EditorUtility.SetDirty(crackDecals);
+            if (radialMenu != null) EditorUtility.SetDirty(radialMenu);
+
+            GameObject lookTarget = BuildSlowPacedRoom(playerGo.transform, camGo.transform, pauseController);
+            BuildCameraStartFacing(playerGo.transform, orbitCam, lookTarget.transform);
+            BuildPlayerShadow(playerGo.transform);
+
+            // Appended (not UpdateBuildSettings, which rewrites the whole list) so running just
+            // this entry point can't clobber whatever the build list currently holds - restart
+            // and the pause menu's LoadSceneByName both need the scene present here.
+            AddSceneToBuildSettings(SlowPacedLevelScenePath);
+
+            Scene slowPacedScene = EditorSceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(slowPacedScene);
+            EditorSceneManager.SaveScene(slowPacedScene);
+            AssetDatabase.SaveAssets();
+
+            Debug.Log("KineticEnergySetup: SlowPacedLevel setup complete OK");
+        }
+
+        // The whole environment, block by block. Returns the empty the boot camera should face
+        // (the opening into the hallway).
+        static GameObject BuildSlowPacedRoom(Transform player, Transform cameraTransform, PauseController pauseController)
+        {
+            GameObject room = new GameObject("SlowPacedRoom");
+
+            float b = SlowPacedBlockSize;
+            int ring = SlowPacedHalfInterior + 1;
+            int hallWallX = SlowPacedHallHalfWidth + 1;
+
+            // Two shades per surface type, checkerboarded per block - with the project's unlit
+            // flat-color look, alternating shades is what keeps individual blocks readable
+            // (and grabbable) instead of walls rendering as one featureless plane. Green = sticky,
+            // deliberately loud so the rule is learnable at a glance.
+            Material floorA = MakeSlowPacedMaterial("SlowPacedFloorA", new Color(0.62f, 0.64f, 0.70f));
+            Material floorB = MakeSlowPacedMaterial("SlowPacedFloorB", new Color(0.52f, 0.54f, 0.60f));
+            Material wallA = MakeSlowPacedMaterial("SlowPacedWallA", new Color(0.42f, 0.46f, 0.56f));
+            Material wallB = MakeSlowPacedMaterial("SlowPacedWallB", new Color(0.36f, 0.40f, 0.50f));
+            Material ceilingA = MakeSlowPacedMaterial("SlowPacedCeilingA", new Color(0.30f, 0.32f, 0.40f));
+            Material ceilingB = MakeSlowPacedMaterial("SlowPacedCeilingB", new Color(0.26f, 0.28f, 0.35f));
+            Material stickyA = MakeSlowPacedMaterial("SlowPacedStickyA", new Color(0.25f, 0.85f, 0.45f));
+            Material stickyB = MakeSlowPacedMaterial("SlowPacedStickyB", new Color(0.20f, 0.72f, 0.38f));
+            Material finishMat = MakeSlowPacedMaterial("SlowPacedFinishBlockMaterial", new Color(0.95f, 0.75f, 0.15f));
+
+            Transform floorGroup = NewGroup(room.transform, "Floor");
+            Transform ceilingGroup = NewGroup(room.transform, "Ceiling");
+            Transform frontWall = NewGroup(room.transform, "WallFront");
+            Transform backWall = NewGroup(room.transform, "WallBackSticky");
+            Transform leftWall = NewGroup(room.transform, "WallLeft");
+            Transform rightWall = NewGroup(room.transform, "WallRight");
+            Transform hallway = NewGroup(room.transform, "Hallway");
+            Transform hallFloor = NewGroup(hallway, "HallwayFloor");
+            Transform hallWallLeft = NewGroup(hallway, "HallwayWallLeft");
+            Transform hallWallRight = NewGroup(hallway, "HallwayWallRight");
+            Transform hallCeiling = NewGroup(hallway, "HallwayCeiling");
+            Transform hallEndCap = NewGroup(hallway, "HallwayEndCap");
+            Transform finishGroup = NewGroup(room.transform, "Finish");
+
+            // Room floor + ceiling - covering the wall ring's footprint too, so the walls stand
+            // ON floor rather than beside it.
+            for (int i = -ring; i <= ring; i++)
+            {
+                for (int k = -ring; k <= ring; k++)
+                {
+                    CreatePbBlock(floorGroup, $"Floor_x{i}_z{k}", SlowPacedFloorCenter(i, k), SlowPacedChecker(i + k) ? floorA : floorB);
+                    CreatePbBlock(ceilingGroup, $"Ceiling_x{i}_z{k}", SlowPacedBlockCenter(i, SlowPacedWallLayers, k), SlowPacedChecker(i + k) ? ceilingA : ceilingB);
+                }
+            }
+
+            // Wall ring. The back (-Z) wall is the room's sticky practice target; the front (+Z)
+            // wall carries the opening into the hallway, centered at floor level and sized to
+            // the hallway's own interior (3 wide, 3 high).
+            for (int layer = 0; layer < SlowPacedWallLayers; layer++)
+            {
+                for (int i = -ring; i <= ring; i++)
+                {
+                    for (int k = -ring; k <= ring; k++)
+                    {
+                        if (Mathf.Max(Mathf.Abs(i), Mathf.Abs(k)) != ring) continue;
+
+                        bool isFront = k == ring;
+                        bool isBack = k == -ring;
+                        if (isFront && Mathf.Abs(i) <= SlowPacedHallHalfWidth && layer < SlowPacedHallLayers) continue; // the opening
+
+                        Transform group = isFront ? frontWall : isBack ? backWall : i > 0 ? rightWall : leftWall;
+                        bool sticky = isBack;
+                        bool checker = SlowPacedChecker(i + layer + k);
+                        Material mat = sticky ? (checker ? stickyA : stickyB) : (checker ? wallA : wallB);
+                        CreatePbBlock(group, $"Wall_x{i}_y{layer}_z{k}", SlowPacedBlockCenter(i, layer, k), mat, sticky);
+                    }
+                }
+            }
+
+            // Hallway: an enclosed corridor off the opening - solid entry floor, then the void
+            // (no floor at all; falling past fallResetY reloads the scene), then the Finish
+            // platform. The side walls along the void stretch are sticky - the intended way
+            // across for anything short of a full-gap shot: launch in, stick, launch again.
+            for (int k = SlowPacedHallStartK; k <= SlowPacedHallEndK; k++)
+            {
+                bool voidRow = k >= SlowPacedVoidStartK && k <= SlowPacedVoidEndK;
+                bool finishRow = k >= SlowPacedFinishStartK;
+
+                if (!voidRow)
+                {
+                    // Floor spans under the side walls too (i covers the walls' columns), so the
+                    // corridor reads as a solid slab from outside rather than walls on stilts.
+                    for (int i = -hallWallX; i <= hallWallX; i++)
+                    {
+                        bool finishBlock = finishRow && Mathf.Abs(i) <= SlowPacedHallHalfWidth;
+                        Transform parent = finishBlock ? finishGroup : hallFloor;
+                        Material mat = finishBlock ? finishMat : (SlowPacedChecker(i + k) ? floorA : floorB);
+                        string name = finishBlock ? $"Finish_x{i}_z{k}" : $"HallwayFloor_x{i}_z{k}";
+                        CreatePbBlock(parent, name, SlowPacedFloorCenter(i, k), mat);
+                    }
+                }
+
+                for (int layer = 0; layer < SlowPacedHallLayers; layer++)
+                {
+                    bool checkerLeft = SlowPacedChecker(-hallWallX + layer + k);
+                    bool checkerRight = SlowPacedChecker(hallWallX + layer + k);
+                    Material matLeft = voidRow ? (checkerLeft ? stickyA : stickyB) : (checkerLeft ? wallA : wallB);
+                    Material matRight = voidRow ? (checkerRight ? stickyA : stickyB) : (checkerRight ? wallA : wallB);
+                    CreatePbBlock(hallWallLeft, $"HallwayWallLeft_y{layer}_z{k}", SlowPacedBlockCenter(-hallWallX, layer, k), matLeft, voidRow);
+                    CreatePbBlock(hallWallRight, $"HallwayWallRight_y{layer}_z{k}", SlowPacedBlockCenter(hallWallX, layer, k), matRight, voidRow);
+                }
+
+                for (int i = -hallWallX; i <= hallWallX; i++)
+                {
+                    CreatePbBlock(hallCeiling, $"HallwayCeiling_x{i}_z{k}", SlowPacedBlockCenter(i, SlowPacedHallLayers, k), SlowPacedChecker(i + k) ? ceilingA : ceilingB);
+                }
+            }
+
+            // End cap sealing the hallway just past the Finish platform (one layer taller than
+            // the walls so it also closes the ceiling row).
+            for (int layer = 0; layer <= SlowPacedHallLayers; layer++)
+            {
+                for (int i = -hallWallX; i <= hallWallX; i++)
+                {
+                    CreatePbBlock(hallEndCap, $"HallwayEndCap_x{i}_y{layer}", SlowPacedBlockCenter(i, layer, SlowPacedHallEndK + 1), SlowPacedChecker(i + layer) ? wallA : wallB);
+                }
+            }
+
+            // Finish extras: the translucent pad, the billboard label, and the win trigger -
+            // same visual language and FinishLineWin flow as FastPacedLevel's finish.
+            float finishCenterZ = (SlowPacedFinishStartK + SlowPacedHallEndK) * 0.5f * b;
+            Vector3 finishCenter = new Vector3(0f, 0f, finishCenterZ);
+            float finishWidth = (SlowPacedHallHalfWidth * 2 + 1) * b;
+            float finishLength = (SlowPacedHallEndK - SlowPacedFinishStartK + 1) * b;
+
+            GameObject pad = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            pad.name = "FinishPad";
+            pad.transform.SetParent(finishGroup, true);
+            UnityEngine.Object.DestroyImmediate(pad.GetComponent<Collider>());
+            const float padHeight = 0.05f;
+            const float zFightGap = 0.03f;
+            pad.transform.position = finishCenter + new Vector3(0f, zFightGap + padHeight * 0.5f, 0f);
+            pad.transform.localScale = new Vector3(finishWidth, padHeight, finishLength);
+            Color padColor = new Color(0.2f, 1f, 0.5f, 0.45f);
+            Material padMat = new Material(FindBestShader());
+            padMat.color = padColor;
+            MakeTransparent(padMat, padColor.a);
+            padMat = SaveMaterialAsset(padMat, "SlowPacedFinishPadMaterial");
+            pad.GetComponent<Renderer>().sharedMaterial = padMat;
+
+            GameObject textGo = new GameObject("FinishText");
+            textGo.transform.SetParent(finishGroup, true);
+            textGo.transform.position = finishCenter + new Vector3(0f, 2.4f, 0f);
+            TextMesh textMesh = textGo.AddComponent<TextMesh>();
+            textMesh.text = "Finish";
+            textMesh.color = new Color(0.15f, 0.45f, 1f);
+            textMesh.fontSize = 48;
+            textMesh.characterSize = 0.2f;
+            textMesh.anchor = TextAnchor.MiddleCenter;
+            textMesh.alignment = TextAlignment.Center;
+            Billboard billboard = textGo.AddComponent<Billboard>();
+            billboard.target = cameraTransform;
+
+            GameObject trigger = new GameObject("FinishTrigger");
+            trigger.transform.SetParent(finishGroup, true);
+            trigger.transform.position = finishCenter + new Vector3(0f, 1f, 0f);
+            BoxCollider triggerCollider = trigger.AddComponent<BoxCollider>();
+            triggerCollider.isTrigger = true;
+            triggerCollider.size = new Vector3(finishWidth, 2f, finishLength);
+            FinishLineWin finishWin = trigger.AddComponent<FinishLineWin>();
+            finishWin.pauseController = pauseController;
+
+            // Player starts at the room's center; the boot camera faces the opening.
+            player.position = new Vector3(0f, 0.5f, 0f);
+
+            GameObject lookTarget = new GameObject("OpeningLookTarget");
+            lookTarget.transform.position = new Vector3(0f, SlowPacedHallLayers * 0.5f * b, (SlowPacedHalfInterior + 0.5f) * b);
+            return lookTarget;
+        }
+
+        // Grid-to-world: wall/ceiling blocks stack in layers starting at the floor's TOP surface
+        // (y=0); the floor itself is the layer below that.
+        static Vector3 SlowPacedBlockCenter(int i, int layer, int k)
+        {
+            float b = SlowPacedBlockSize;
+            return new Vector3(i * b, (layer + 0.5f) * b, k * b);
+        }
+
+        static Vector3 SlowPacedFloorCenter(int i, int k)
+        {
+            float b = SlowPacedBlockSize;
+            return new Vector3(i * b, -0.5f * b, k * b);
+        }
+
+        static bool SlowPacedChecker(int value)
+        {
+            return ((value % 2) + 2) % 2 == 0;
+        }
+
+        // One environment block: a ProBuilder cube (direct request - "use ProBuilder to make all
+        // environments out of blocks so I can easily adjust things"), with a MeshCollider so it
+        // both blocks the player and gets cloned into the landing-prediction physics scene
+        // (BuildPredictionGeometryProxies already handles MeshColliders).
+        static GameObject CreatePbBlock(Transform parent, string name, Vector3 center, Material material, bool sticky = false)
+        {
+            ProBuilderMesh pbMesh = ShapeGenerator.GenerateCube(PivotLocation.Center, Vector3.one * SlowPacedBlockSize);
+            GameObject go = pbMesh.gameObject;
+            go.name = name;
+            go.transform.SetParent(parent, true);
+            go.transform.position = center;
+            go.GetComponent<MeshRenderer>().sharedMaterial = material;
+            pbMesh.ToMesh();
+            pbMesh.Refresh();
+            MeshCollider collider = go.AddComponent<MeshCollider>();
+            if (collider.sharedMesh == null) collider.sharedMesh = go.GetComponent<MeshFilter>().sharedMesh;
+            if (sticky) go.AddComponent<StickySurface>().sticky = true;
+            return go;
+        }
+
+        static Transform NewGroup(Transform parent, string name)
+        {
+            GameObject go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            return go.transform;
+        }
+
+        static Material MakeSlowPacedMaterial(string name, Color color)
+        {
+            Material mat = new Material(FindBestShader());
+            mat.color = color;
+            return SaveMaterialAsset(mat, name);
+        }
+
+        static void AddSceneToBuildSettings(string scenePath)
+        {
+            List<EditorBuildSettingsScene> scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
+            if (scenes.Exists(s => s.path == scenePath)) return;
+            scenes.Add(new EditorBuildSettingsScene(scenePath, true));
+            EditorBuildSettings.scenes = scenes.ToArray();
+        }
+
+        // ==================== Crack decal sheet ====================
+
+        // Re-runnable from the menu on its own so swapping in real art is one step: overwrite
+        // CrackDecalSheetSource.png with any 3x3 crack sheet (white background or transparent,
+        // both fine), run this, done - the material keeps pointing at the reprocessed texture.
+        [MenuItem("Tools/Kinetic Energy/Rebuild Crack Decal Texture")]
+        public static void RebuildCrackDecalTexture()
+        {
+            EnsureCrackDecalAssets();
+            Debug.Log("KineticEnergySetup: crack decal texture rebuilt OK");
+        }
+
+        static Material EnsureCrackDecalAssets()
+        {
+            if (!AssetDatabase.IsValidFolder("Assets/Textures"))
+            {
+                AssetDatabase.CreateFolder("Assets", "Textures");
+            }
+
+            if (AssetDatabase.LoadAssetAtPath<Texture2D>(CrackSourcePath) == null)
+            {
+                GenerateProceduralCrackSheet();
+            }
+            ProcessCrackSheet();
+
+            Texture2D processed = AssetDatabase.LoadAssetAtPath<Texture2D>(CrackProcessedPath);
+            Material mat = new Material(FindBestShader());
+            mat.color = Color.white;
+            MakeTransparent(mat, 1f);
+            // Double-sided - a flat decal quad must never be culled away by its winding relative
+            // to the surface it was stamped on.
+            mat.SetFloat("_Cull", 0f);
+            mat.SetTexture("_BaseMap", processed);
+            return SaveMaterialAsset(mat, "CrackDecalMaterial");
+        }
+
+        // Only used when no source sheet exists yet: draws a 3x3 sheet of angular gray cracks
+        // (dark jagged branches radiating from a center, in the reference art's style) straight
+        // into pixel data. ProcessCrackSheet treats this exactly like a user-supplied PNG.
+        static void GenerateProceduralCrackSheet()
+        {
+            const int cellSize = 300;
+            const int sheetSize = cellSize * 3;
+            Color32[] pixels = new Color32[sheetSize * sheetSize]; // starts fully transparent
+
+            // Seeded, same idempotency reasoning as the FastPaced spiral - re-running produces
+            // the identical sheet instead of churning the texture on every rebuild.
+            System.Random rng = new System.Random(20260806);
+            for (int cellY = 0; cellY < 3; cellY++)
+            {
+                for (int cellX = 0; cellX < 3; cellX++)
+                {
+                    DrawCrackCell(pixels, sheetSize, cellX * cellSize, cellY * cellSize, cellSize, rng);
+                }
+            }
+
+            Texture2D sheet = new Texture2D(sheetSize, sheetSize, TextureFormat.RGBA32, false);
+            sheet.SetPixels32(pixels);
+            sheet.Apply();
+            File.WriteAllBytes(CrackSourcePath, sheet.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(sheet);
+            AssetDatabase.ImportAsset(CrackSourcePath);
+        }
+
+        static void DrawCrackCell(Color32[] pixels, int sheetSize, int originX, int originY, int cellSize, System.Random rng)
+        {
+            float centerX = originX + cellSize * (0.5f + RandomSpread(rng, 0.08f));
+            float centerY = originY + cellSize * (0.5f + RandomSpread(rng, 0.08f));
+
+            int branchCount = 4 + rng.Next(3);
+            float baseAngle = (float)(rng.NextDouble() * Mathf.PI * 2.0);
+            for (int branch = 0; branch < branchCount; branch++)
+            {
+                float angle = baseAngle + branch * (Mathf.PI * 2f / branchCount) + RandomSpread(rng, 0.5f);
+                float width = cellSize * (0.055f + (float)rng.NextDouble() * 0.03f);
+                DrawCrackBranch(pixels, sheetSize, originX, originY, cellSize, centerX, centerY, angle, width, 3 + rng.Next(2), rng, true);
+            }
+        }
+
+        static void DrawCrackBranch(Color32[] pixels, int sheetSize, int originX, int originY, int cellSize,
+            float x, float y, float angle, float width, int segments, System.Random rng, bool allowSubBranches)
+        {
+            Color32 fill = new Color32(86, 90, 95, 255);
+            Color32 core = new Color32(58, 61, 66, 255);
+
+            for (int segment = 0; segment < segments; segment++)
+            {
+                float length = cellSize * (0.09f + (float)rng.NextDouble() * 0.08f);
+                float endX = x + Mathf.Cos(angle) * length;
+                float endY = y + Mathf.Sin(angle) * length;
+                float endWidth = Mathf.Max(width * 0.62f, 2f);
+
+                StampCrackLine(pixels, sheetSize, originX, originY, cellSize, x, y, endX, endY, width, endWidth, fill);
+                StampCrackLine(pixels, sheetSize, originX, originY, cellSize, x, y, endX, endY, width * 0.45f, endWidth * 0.45f, core);
+
+                if (allowSubBranches && segment > 0 && rng.NextDouble() < 0.55)
+                {
+                    float subAngle = angle + (rng.Next(2) == 0 ? 1f : -1f) * (0.6f + (float)rng.NextDouble() * 0.5f);
+                    DrawCrackBranch(pixels, sheetSize, originX, originY, cellSize, x, y, subAngle, width * 0.55f, 2, rng, false);
+                }
+
+                x = endX;
+                y = endY;
+                angle += RandomSpread(rng, 0.7f);
+                width = endWidth;
+            }
+        }
+
+        static void StampCrackLine(Color32[] pixels, int sheetSize, int originX, int originY, int cellSize,
+            float x0, float y0, float x1, float y1, float startWidth, float endWidth, Color32 color)
+        {
+            const int margin = 6; // keep every crack safely inside its own cell of the atlas
+            float length = Mathf.Max(Vector2.Distance(new Vector2(x0, y0), new Vector2(x1, y1)), 1f);
+            int steps = Mathf.CeilToInt(length);
+            for (int step = 0; step <= steps; step++)
+            {
+                float t = step / (float)steps;
+                float px = Mathf.Lerp(x0, x1, t);
+                float py = Mathf.Lerp(y0, y1, t);
+                float radius = Mathf.Lerp(startWidth, endWidth, t) * 0.5f;
+                int r = Mathf.Max(Mathf.CeilToInt(radius), 1);
+                for (int dy = -r; dy <= r; dy++)
+                {
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        if (dx * dx + dy * dy > radius * radius) continue;
+                        int fx = Mathf.RoundToInt(px) + dx;
+                        int fy = Mathf.RoundToInt(py) + dy;
+                        if (fx < originX + margin || fx >= originX + cellSize - margin) continue;
+                        if (fy < originY + margin || fy >= originY + cellSize - margin) continue;
+                        pixels[fy * sheetSize + fx] = color;
+                    }
+                }
+            }
+        }
+
+        static float RandomSpread(System.Random rng, float range)
+        {
+            return ((float)rng.NextDouble() * 2f - 1f) * range;
+        }
+
+        // Turns whatever sheet sits at CrackSourcePath into the decal-ready texture: alpha is
+        // keyed off luminance (dark pixels stay, light pixels turn transparent), which handles
+        // BOTH a white-background reference PNG (background and pale watermarking key out) and
+        // an already-transparent sheet (its own alpha is preserved, scaled by the same key).
+        static void ProcessCrackSheet()
+        {
+            byte[] bytes = File.ReadAllBytes(Path.GetFullPath(CrackSourcePath));
+            Texture2D source = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            if (!source.LoadImage(bytes))
+            {
+                throw new Exception("KineticEnergySetup: could not decode " + CrackSourcePath);
+            }
+
+            Color32[] pixels = source.GetPixels32();
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                Color32 pixel = pixels[i];
+                float luminance = (pixel.r + pixel.g + pixel.b) / (3f * 255f);
+                float key = Mathf.Clamp01((0.75f - luminance) / 0.15f);
+                pixels[i].a = (byte)Mathf.RoundToInt(pixel.a * key);
+            }
+
+            Texture2D processed = new Texture2D(source.width, source.height, TextureFormat.RGBA32, false);
+            processed.SetPixels32(pixels);
+            processed.Apply();
+            File.WriteAllBytes(CrackProcessedPath, processed.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(source);
+            UnityEngine.Object.DestroyImmediate(processed);
+
+            AssetDatabase.ImportAsset(CrackProcessedPath);
+            TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(CrackProcessedPath);
+            importer.textureType = TextureImporterType.Default;
+            importer.alphaIsTransparency = true;
+            // Mip levels would average neighboring cells of the 3x3 atlas into each other at a
+            // distance; decals are viewed close up, so no mips is both correct and artifact-free.
+            importer.mipmapEnabled = false;
+            importer.wrapMode = TextureWrapMode.Clamp;
+            importer.textureCompression = TextureImporterCompression.Uncompressed;
+            importer.SaveAndReimport();
         }
     }
 }

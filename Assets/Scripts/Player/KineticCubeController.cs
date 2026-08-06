@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using KineticEnergy.Level;
 
 namespace KineticEnergy.Player
 {
@@ -257,6 +258,18 @@ namespace KineticEnergy.Player
         // quickly (0.2s at the default 50Hz fixed timestep).
         public int stuckOnGroundTickThreshold = 10;
 
+        [Header("Sticky Walls")]
+        // SlowPacedLevel only (every other scene's instance leaves this false, keeping the
+        // universal any-surface stick): when true, only a wall carrying a StickySurface
+        // component (with sticky enabled) holds the cube until the next launch. Crashing into
+        // any OTHER non-flat surface still stops the cube dead and refunds energy exactly like
+        // a normal crash, but only for nonStickyWallStickDuration seconds - then it lets go and
+        // falls under gravity (with downLaunchDamping's low drag, so gravity is visibly the
+        // thing doing the falling). Near-flat ground (flatGroundStickThreshold) is exempt
+        // either way - floors keep the walk-away-freely behavior in every scene.
+        public bool stickyWallsOnly = false;
+        public float nonStickyWallStickDuration = 0.3f;
+
         [Header("Input")]
         public InputActionReference moveAction;
         public InputActionReference launchAction;
@@ -377,6 +390,10 @@ namespace KineticEnergy.Player
         // isStuck without a fresh launch) and fed to freeMoveController.AlignVisualToSurface so
         // the cube visually rests flush against whatever it stuck to, floor or wall alike.
         Vector3 stuckSurfaceNormal;
+        // >0 only while stuck to a NON-sticky wall in a stickyWallsOnly scene - counts down in
+        // FixedUpdate and releases the stick (gravity back on) when it runs out. See
+        // nonStickyWallStickDuration's own comment.
+        float nonStickyReleaseTimer;
         float chargeTime;
         float aimYaw;
         float aimPitch;
@@ -923,6 +940,7 @@ namespace KineticEnergy.Player
             {
                 launchQueued = false;
                 isStuck = false; // breaking free of a crashed/stuck position, if it was set
+                nonStickyReleaseTimer = 0f; // launching supersedes a pending timed release
                 rb.useGravity = true; // back on, undoing OnCollisionEnter's stick - direct request
                 rb.linearDamping = queuedDamping;
                 rb.AddForce(queuedDirection * queuedForce, ForceMode.Impulse);
@@ -999,7 +1017,7 @@ namespace KineticEnergy.Player
             // got to carry it anywhere.
             if (slamJustFired && isGrounded)
             {
-                RegisterCrash(groundHit.normal, slamForce);
+                RegisterCrash(groundHit.normal, slamForce, groundHit.collider);
             }
 
             // Backstop for every OTHER direction that can end up with the exact same "never
@@ -1016,7 +1034,7 @@ namespace KineticEnergy.Player
                 groundedTicksSinceLaunch++;
                 if (groundedTicksSinceLaunch >= stuckOnGroundTickThreshold && !isStuck)
                 {
-                    RegisterCrash(groundHit.normal, rb.linearVelocity.magnitude);
+                    RegisterCrash(groundHit.normal, rb.linearVelocity.magnitude, groundHit.collider);
                 }
             }
             else
@@ -1038,7 +1056,27 @@ namespace KineticEnergy.Player
             if (isStuck && isGrounded && Vector3.Dot(stuckSurfaceNormal, Vector3.up) >= flatGroundStickThreshold)
             {
                 isStuck = false;
+                nonStickyReleaseTimer = 0f;
                 rb.useGravity = true;
+            }
+
+            // Timed release from a NON-sticky wall (stickyWallsOnly scenes only - see
+            // nonStickyWallStickDuration): the cling holds exactly like a normal stick for its
+            // brief duration, then lets go and gravity takes over. downLaunchDamping (the low,
+            // gravity-stays-in-charge drag the down-launch already uses) replaces whatever
+            // damping the crashed flight left behind, so the drop reads as a clean fall rather
+            // than sinking through high launch drag. Deliberately keeps ticking while a charge
+            // is in progress - the charge freeze owns the cube then anyway, and firing clears
+            // this timer via the launchQueued block above.
+            if (isStuck && nonStickyReleaseTimer > 0f)
+            {
+                nonStickyReleaseTimer -= Time.fixedDeltaTime;
+                if (nonStickyReleaseTimer <= 0f)
+                {
+                    isStuck = false;
+                    rb.useGravity = true;
+                    rb.linearDamping = downLaunchDamping;
+                }
             }
 
             // Captured LAST, after everything above (including a fresh launchQueued impulse this
@@ -1096,7 +1134,7 @@ namespace KineticEnergy.Player
                 hasPredictedLanding = false;
             }
 
-            RegisterCrash(collision.GetContact(0).normal, velocityBeforePhysicsStep.magnitude);
+            RegisterCrash(collision.GetContact(0).normal, velocityBeforePhysicsStep.magnitude, collision.collider);
         }
 
         // "Whenever you crash onto an object, you stop all movement and stick to that location
@@ -1111,7 +1149,7 @@ namespace KineticEnergy.Player
         // (see slamAbsorbedByGround's own comment) - a slam fired from ZERO clearance never gets a
         // fresh OnCollisionEnter to react to at all, since the cube never actually leaves the
         // surface it's already touching.
-        void RegisterCrash(Vector3 contactNormal, float crashSpeed)
+        void RegisterCrash(Vector3 contactNormal, float crashSpeed, Collider surface)
         {
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
@@ -1126,6 +1164,21 @@ namespace KineticEnergy.Player
             // they are parallel".
             stuckSurfaceNormal = contactNormal;
             freeMoveController?.AlignVisualToSurface(stuckSurfaceNormal);
+
+            // Sticky-walls-only mode (see the field's own comment): a wall crash only holds
+            // permanently if the surface actually carries the sticky property - otherwise arm
+            // the brief cling timer that FixedUpdate releases into a gravity fall. Near-flat
+            // ground stays exempt (dot >= flatGroundStickThreshold), matching the auto-clear
+            // that already lets the cube walk away from floors.
+            nonStickyReleaseTimer = 0f;
+            if (stickyWallsOnly && Vector3.Dot(contactNormal, Vector3.up) < flatGroundStickThreshold)
+            {
+                StickySurface stickySurface = surface != null ? surface.GetComponentInParent<StickySurface>() : null;
+                if (stickySurface == null || !stickySurface.sticky)
+                {
+                    nonStickyReleaseTimer = nonStickyWallStickDuration;
+                }
+            }
 
             // FastPaced only - re-bases the whole camera orbit (and first-person aim) around the
             // crashed platform's surface normal, so "up" on screen matches the platform's own up
@@ -1196,13 +1249,22 @@ namespace KineticEnergy.Player
                 ? "Dpad (hold) - Open a radial menu to pick a scheme directly\n"
                 : "";
             // Same crash-and-stick behavior on every scheme now, so this line is shared verbatim
-            // rather than repeated with small variations per case.
-            const string stuckLine = "Crashing into anything sticks you in place and refunds energy - walk away freely on solid ground, or launch again to break free of a wall\n";
-            const string stuckLinePanel =
-                "Crashing into anything (any surface) stops you dead and sticks you there -\n" +
-                "  it also refunds energy, more than the charge cost, scaling up with how\n" +
-                "  fast you were going. On a floor or ceiling you can just walk away\n" +
-                "  whenever, energy or not; against a wall you stay stuck until you launch.\n";
+            // rather than repeated with small variations per case. stickyWallsOnly scenes
+            // (SlowPacedLevel) get their own wording, since "stuck until you launch" is only
+            // true of the marked sticky walls there.
+            string stuckLine = stickyWallsOnly
+                ? "Crashing refunds energy - green STICKY walls hold you until you launch, anything else drops you after a moment\n"
+                : "Crashing into anything sticks you in place and refunds energy - walk away freely on solid ground, or launch again to break free of a wall\n";
+            string stuckLinePanel = stickyWallsOnly
+                ? "Crashing into anything stops you dead and refunds energy, more than the\n" +
+                  "  charge cost, scaling up with how fast you were going. Only the green\n" +
+                  "  STICKY walls hold you there until you launch again - any other wall or\n" +
+                  "  ceiling lets go after a brief moment and drops you back into gravity.\n" +
+                  "  On flat ground you can always just walk away.\n"
+                : "Crashing into anything (any surface) stops you dead and sticks you there -\n" +
+                  "  it also refunds energy, more than the charge cost, scaling up with how\n" +
+                  "  fast you were going. On a floor or ceiling you can just walk away\n" +
+                  "  whenever, energy or not; against a wall you stay stuck until you launch.\n";
 
             if (controlsHintLabel != null)
             {
