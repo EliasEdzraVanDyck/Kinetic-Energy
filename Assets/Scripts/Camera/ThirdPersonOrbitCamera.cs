@@ -48,6 +48,20 @@ namespace KineticEnergy.Camera
         [Header("Input")]
         public InputActionReference lookAction;
 
+        [Header("Fine Aim")]
+        // "Slow down the speed of aiming if you make fine adjustments with your mouse or stick,
+        // if you make wider less fine movements, the speed should be the same as now" (direct
+        // request) - rotation speed scales with how hard the input is being pushed, from
+        // fineAimMinFactor at a barely-moving input up to full speed at/beyond the reference
+        // magnitude. The reference is per-device because the two input types live on completely
+        // different scales: a stick deflection maxes out around 1.0, while a mouse delta is
+        // pixels-per-frame and routinely reads 10+ during a fast sweep - a single shared
+        // threshold would either make the stick never reach full speed or make every mouse
+        // movement count as "wide".
+        [Range(0f, 1f)] public float fineAimMinFactor = 0.3f;
+        public float fineAimStickReference = 0.9f;
+        public float fineAimMouseReference = 8f;
+
         [Header("First Person Aim")]
         // FastPaced scheme only (see KineticCubeController.UpdateFastPacedScheme) -
         // SetFirstPersonMode collapses the orbit to sit exactly at the focus point instead of
@@ -191,8 +205,13 @@ namespace KineticEnergy.Camera
             // Unscaled, not Time.deltaTime - Time.deltaTime already shrinks 1:1 with
             // Time.timeScale, which would otherwise make the camera merely ride along with
             // whatever fraction chargeTimeScale happens to be. Direct request is a flat half
-            // speed specifically WHENEVER the game isn't at full speed, not a proportional
-            // slowdown that tracks the exact charge-time-scale value.
+            // speed specifically whenever the game is running SLOW, not a proportional slowdown
+            // that tracks the exact charge-time-scale value. Strictly < 1, not != 1 - the
+            // FastPaced scheme now SPEEDS the game up to 150% during a flight (see
+            // KineticCubeController.fastPacedFlightTimeScale), and the direct request there is
+            // that camera/aiming be UNAFFECTED by the speed-up, which unscaled time already
+            // gives for free; the != 1 form would have wrongly halved camera speed for the whole
+            // flight.
             //
             // The frame right after a scene reload (Restart, or the new fall-reset) can have an
             // abnormally large deltaTime - loading everything (Player/Camera/PauseSystem, plus
@@ -201,8 +220,24 @@ namespace KineticEnergy.Camera
             // (plausible right after falling or hitting Restart) could snap yaw/pitch to a
             // garbage value in one frame, making the camera look broken/unresponsive afterward -
             // still a risk with unscaled time, so the clamp stays.
-            bool gameSpeedNotNormal = !Mathf.Approximately(Time.timeScale, 1f);
-            float dt = Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime) * (gameSpeedNotNormal ? 0.5f : 1f);
+            bool gameRunningSlow = Time.timeScale < 1f;
+            float dt = Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime) * (gameRunningSlow ? 0.5f : 1f);
+
+            // Fine-aim scaling (see the Fine Aim header comment): a gentle input rotates at
+            // fineAimMinFactor of normal speed, ramping linearly up to full speed at the active
+            // device's reference magnitude. The device is read from whichever control is
+            // actually driving the action THIS frame, so switching between mouse and gamepad
+            // mid-session picks the right scale automatically.
+            float fineAimScale = 1f;
+            if (look.sqrMagnitude > 0.0001f)
+            {
+                bool mouseDriven = lookAction != null && lookAction.action != null
+                    && lookAction.action.activeControl != null
+                    && lookAction.action.activeControl.device is Mouse;
+                float reference = mouseDriven ? fineAimMouseReference : fineAimStickReference;
+                float t = reference > 0.0001f ? Mathf.Clamp01(look.magnitude / reference) : 1f;
+                fineAimScale = Mathf.Lerp(fineAimMinFactor, 1f, t);
+            }
 
             // Manual input always wins outright, the instant there is any - recentering only
             // ever happens while the player isn't already telling the camera what to do.
@@ -215,9 +250,9 @@ namespace KineticEnergy.Camera
             }
             else
             {
-                yaw += look.x * rotationSpeed * dt;
+                yaw += look.x * rotationSpeed * fineAimScale * dt;
             }
-            float pitchDelta = (invertY ? look.y : -look.y) * rotationSpeed * dt;
+            float pitchDelta = (invertY ? look.y : -look.y) * rotationSpeed * fineAimScale * dt;
             pitch = Mathf.Clamp(pitch + pitchDelta, minPitch, maxPitch);
 
             // Glide the reference-frame up toward wherever the last crash re-based it (see

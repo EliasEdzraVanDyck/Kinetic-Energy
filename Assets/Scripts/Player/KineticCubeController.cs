@@ -125,6 +125,20 @@ namespace KineticEnergy.Player
         // (Mathf.Lerp by ChargeFraction()) as every other scheme's damping curve.
         public float fastPacedMinDamping = 2.8f;
         public float fastPacedMaxDamping = 1.0f;
+        // FastPaced-only energy economy (direct request): the crash refund is EXACTLY the energy
+        // the launch itself spent, times this - "take the exact amount of energy you put in to
+        // launch, remember it and multiply by 1.2" - replacing the speed-based
+        // energyGainPerSpeed/energyGainSpeedBonus formula the other schemes keep using. See
+        // lastLaunchEnergySpent/GainEnergyFromCrash.
+        public float fastPacedRefundMultiplier = 1.2f;
+        // Global Time.timeScale while a FastPaced launch is in flight (direct request: "when
+        // launching increase gamespeed to 150%, reset after") - the counterpart to
+        // chargeTimeScale's slow-down, applied by the same ApplyChargeTimeScale. Deliberately
+        // does NOT speed up camera/aiming (ThirdPersonOrbitCamera runs on unscaled time and only
+        // halves itself when the game runs SLOW) or airborne nudging
+        // (KineticCubeControllerFreeMove divides its nudge acceleration back out by timeScale
+        // when >1) - both direct requests.
+        public float fastPacedFlightTimeScale = 1.5f;
         public InputActionReference fastPacedAimAction;
         public InputActionReference fastPacedLaunchAction;
 
@@ -378,6 +392,11 @@ namespace KineticEnergy.Player
         // 0-1 fraction of a full tank, shared by every scheme - see startingEnergyFraction's own
         // comment for how it's spent/gained.
         float energyFraction;
+        // What the most recent launch actually deducted from energyFraction - the ACTUAL amount
+        // (clamped by what was available), not the theoretical ChargeFraction cost, so the
+        // FastPaced refund can never fabricate energy a nearly-empty tank didn't really spend.
+        // See fastPacedRefundMultiplier.
+        float lastLaunchEnergySpent;
 
         // Read by KineticCubeControllerFreeMove to know whether it should instantly face
         // movement direction while walking (StickAim only - see its FixedUpdate).
@@ -662,7 +681,13 @@ namespace KineticEnergy.Player
         void ApplyChargeTimeScale()
         {
             bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || fastPacedCharging;
-            Time.timeScale = charging ? chargeTimeScale : 1f;
+            // Charging's bullet-time wins over the flight speed-up - starting a mid-air charge
+            // freezes the cube anyway (the "flight" is suspended), so the slow-down is the state
+            // that matches what's on screen. hasLaunched clears on crash (RegisterCrash), which
+            // is the "reset after" the request asks for; the fall-reset and pause system already
+            // manage timeScale themselves on their own paths.
+            bool fastPacedInFlight = controlScheme == ControlScheme.FastPaced && hasLaunched;
+            Time.timeScale = charging ? chargeTimeScale : (fastPacedInFlight ? fastPacedFlightTimeScale : 1f);
         }
 
         // Shared by LaunchInstantly/HoldRelease/AnalogPressure (standalone) and Mixed's grounded
@@ -1218,10 +1243,10 @@ namespace KineticEnergy.Player
                         switchLine +
                         "Pause: Start / Options / Esc",
                     ControlScheme.FastPaced =>
-                        "Move/Nudge: WASD (or equivalent)\n" +
-                        "Look / Camera: Mouse\n" +
-                        "Aim (first person): Right Mouse (hold)\n" +
-                        "Hold Left Mouse to charge, release to launch where you're looking\n" +
+                        "Move/Nudge: WASD (or equivalent) / Left Stick\n" +
+                        "Look / Camera: Mouse / Right Stick\n" +
+                        "Aim (first person): Right Mouse / Left Trigger (hold)\n" +
+                        "Hold Left Mouse / Right Trigger to charge, release to launch where you're looking\n" +
                         "Longer charge = further shot, and the camera zooms in to help you judge it\n" +
                         "Release Right Mouse to return to 3rd person\n" +
                         "Gravity is off in this level\n" +
@@ -1291,12 +1316,12 @@ namespace KineticEnergy.Player
                         switchLinePanel +
                         "Start / Options / Esc - Pause",
                     ControlScheme.FastPaced =>
-                        "WASD (or equivalent) - Move / Nudge in the air\n" +
-                        "Mouse - Look around (full 3rd person camera by default)\n" +
-                        "Right Mouse (hold) - Aim: switches to a first-person view with a\n" +
-                        "  trail-and-reticle landing preview\n" +
-                        "Left Mouse (hold, while aiming) - Charge a launch straight along the\n" +
-                        "  camera's current look direction. Release to fire.\n" +
+                        "WASD (or equivalent) / Left Stick - Move / Nudge in the air\n" +
+                        "Mouse / Right Stick - Look around (full 3rd person camera by default)\n" +
+                        "Right Mouse / Left Trigger (hold) - Aim: switches to a first-person view\n" +
+                        "  with a trail-and-reticle landing preview\n" +
+                        "Left Mouse / Right Trigger (hold, while aiming) - Charge a launch straight\n" +
+                        "  along the camera's current look direction. Release to fire.\n" +
                         "The longer the charge, the further the launch travels and the more the\n" +
                         "  camera zooms in on the predicted landing spot, so it stays readable.\n" +
                         "Release Right Mouse at any time to cancel and return to 3rd person.\n" +
@@ -1761,7 +1786,11 @@ namespace KineticEnergy.Player
             // shared energy tank - "no more time/energy/speed can be added... when you reach the
             // limit" (direct request) is what AccumulateCharge already enforces on the way up;
             // this is the other half, actually deducting it once the charge is spent for real.
-            energyFraction = Mathf.Clamp01(energyFraction - ChargeFraction() * energyCostPerFullCharge);
+            // Remembered as the amount ACTUALLY deducted (the Min with what's available), not the
+            // raw ChargeFraction cost - feeds the FastPaced crash refund, see
+            // fastPacedRefundMultiplier's own comment.
+            lastLaunchEnergySpent = Mathf.Min(energyFraction, ChargeFraction() * energyCostPerFullCharge);
+            energyFraction = Mathf.Clamp01(energyFraction - lastLaunchEnergySpent);
             // Armed here already (not just when FixedUpdate actually applies the impulse) so
             // AllowGroundedMovement/AllowAirborneNudge are already correct the instant firing is
             // decided - closes a script-execution-order edge case where
@@ -2072,7 +2101,14 @@ namespace KineticEnergy.Player
         // the multiplier itself grows with speed.
         void GainEnergyFromCrash(float crashSpeed)
         {
-            float gained = crashSpeed * energyGainPerSpeed * (1f + crashSpeed * energyGainSpeedBonus);
+            // FastPaced replaces the speed-based formula outright: refund exactly what the launch
+            // spent, times fastPacedRefundMultiplier (direct request - see the field's own
+            // comment). The minEnergyGainPerCrash floor (itself a direct request from earlier)
+            // still applies to both paths - without it, a tap-charge FastPaced shot could refund
+            // near zero and soft-lock a nearly-empty tank mid-air.
+            float gained = controlScheme == ControlScheme.FastPaced
+                ? lastLaunchEnergySpent * fastPacedRefundMultiplier
+                : crashSpeed * energyGainPerSpeed * (1f + crashSpeed * energyGainSpeedBonus);
             gained = Mathf.Max(gained, minEnergyGainPerCrash);
             energyFraction = Mathf.Clamp01(energyFraction + gained);
         }

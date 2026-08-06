@@ -190,7 +190,16 @@ namespace KineticEnergy.Player
                     // Force, not velocity - this ADDS to whatever the fall's existing velocity
                     // already is (from gravity, and from however the cube left the ground) rather
                     // than overriding it, so it always reads as "steering an existing fall".
-                    Vector3 correction = (forward * stick.y + right * stick.x) * airControlAcceleration;
+                    //
+                    // Divided back out by timeScale when the game is running FAST (FastPaced's
+                    // 150% in-flight speed-up - see KineticCubeController.fastPacedFlightTimeScale):
+                    // at timeScale 1.5 the physics steps 1.5x as much game-time per real second,
+                    // so an unadjusted acceleration would integrate into 1.5x the nudge per real
+                    // second of stick-holding - direct request is that nudging NOT be affected by
+                    // the speed-up. Slow-motion (charging) is deliberately left uncompensated:
+                    // nothing is in flight to nudge during a charge anyway.
+                    float speedUpCompensation = Time.timeScale > 1f ? 1f / Time.timeScale : 1f;
+                    Vector3 correction = (forward * stick.y + right * stick.x) * (airControlAcceleration * speedUpCompensation);
                     rb.AddForce(correction, ForceMode.Acceleration);
                 }
 

@@ -898,14 +898,27 @@ namespace KineticEnergy.EditorSetup
             // respawns even at -1000" bug reported after the first fix).
             controller.fallResetY = -1000f;
             freeMoveController.fallResetY = -1000f;
-            controller.minLaunchForce = 90f;
-            controller.maxLaunchForce = 220f;
-            // Anti-staleness reassignment like every other tunable here, even though these
-            // currently match the field's own default - keeps a future re-tune (see the
-            // empirical zero-gravity distance measurement this level still needs) actually taking
-            // effect on a re-run instead of silently keeping whatever this instance last serialized.
-            controller.fastPacedMinDamping = 2.8f;
+            // Tuned so every jump is makeable with >=20% distance margin USING ONLY THE ENERGY
+            // ACTUALLY AVAILABLE at that point (direct request) - the constraint that matters is
+            // the energy ECONOMY, not max charge: spending the whole tank every launch and
+            // crash-refunding 1.2x, energy at launch k is 0.2 * 1.2^(k-1) (20%, 24%, 28.8%, ...,
+            // 100% only by the last jump), and charge is capped by stored energy. The previous
+            // curve (90-220 force over a 2.8->1.0 damping ramp) failed this from launch 3 on -
+            // its distance grew too slowly at low charge fractions. CONSTANT damping makes
+            // distance linear in charge (zero gravity: distance ~ 0.98 * force / damping,
+            // empirically 215.6m measured vs 220 predicted at damping 1.0), so force = 25 + 225c
+            // at damping 1.0 gives every launch k a reach of ~0.98*(25 + 225 * energy_k) against
+            // its actual gap - worst case ratio 1.27 (final jump: ~245m reach vs 192m gap), best
+            // ~2.3 (opening jumps), all comfortably past the required 1.2.
+            controller.minLaunchForce = 25f;
+            controller.maxLaunchForce = 250f;
+            controller.fastPacedMinDamping = 1.0f;
             controller.fastPacedMaxDamping = 1.0f;
+            // Crash refund = exactly 1.2x the energy the launch spent, replacing the speed-based
+            // gain formula for this scheme only - see the field's own comment.
+            controller.fastPacedRefundMultiplier = 1.2f;
+            // 150% game speed while a FastPaced launch is in flight - see the field's own comment.
+            controller.fastPacedFlightTimeScale = 1.5f;
             controller.fastPacedAimAction = FindActionReference("Player", "FastPacedAim");
             controller.fastPacedLaunchAction = FindActionReference("Player", "FastPacedLaunch");
 
@@ -1000,19 +1013,34 @@ namespace KineticEnergy.EditorSetup
             player.position = new Vector3(0f, startSize.y * 0.5f + 0.5f, 0f);
 
             const int platformCount = 10;
-            // Comfortably past the "atleast a 55 degrees difference" requirement - also a clean
-            // 6-platforms-per-revolution, so the spiral completes a full turn every 6 steps while
-            // still advancing outward/forward each time (it never retraces the same ring).
-            const float angleStepDeg = 60f;
-            // Empirically measured (temporary Play-mode diagnostic, since this project's own
-            // PredictLandingPoint comment explicitly distrusts hand-derived drag-formula guesses
-            // in favor of the real physics engine) how far a zero-gravity FastPaced shot actually
-            // travels before drag stops it: ~30m at minimum charge, ~78m at 50% charge, ~216m at
-            // max charge - a much bigger and more nonlinear range than a gravity-arc shot, and far
-            // more than an initial linear-extrapolation guess suggested. These constants are tuned
-            // against those real numbers so consecutive gaps climb from just under min-charge range
-            // (an easy opening jump) up to a bit past mid-charge range by the last platform (a real
-            // but not maximum-charge demand), rather than either trivially close or unreachable.
+            // Randomized placement along the circumference (direct request, replacing the
+            // original perfectly-regular 60-degrees-every-step spiral: "the platforms shouldn't
+            // form a perfect spiral, they should be positioned randomly along the circumference")
+            // - each platform's angle steps from the previous by a random amount in
+            // [minAngleStepDeg, maxAngleStepDeg], in a randomly chosen direction around the
+            // circle. The minimum keeps the required "more than a 55 degree difference" between
+            // consecutive platforms; the MAXIMUM is the reachability half of that same request
+            // ("so it is always possible for the player to reach the next platform"): the
+            // empirically-measured max-charge range is ~216m (temporary Play-mode diagnostic -
+            // this project's own PredictLandingPoint comment distrusts hand-derived drag math),
+            // and the worst-case gap at the spiral's outermost radii (~116m mean radius) with a
+            // 100-degree step is chord 2*116*sin(50) ~ 178m plus the 20m Z advance - a demanding
+            // but genuinely reachable max-charge shot, with real margin under 216.
+            // Raised from the original 56 (which satisfied the earlier "atleast more than 55
+            // degrees" requirement) - direct request: "the difference between consecutive
+            // platforms should become 75 degrees now". Still random within [75, 100]: the layout
+            // stays scattered rather than regular, and the 100 ceiling (the reachability bound -
+            // see the comment above) is unchanged.
+            const float minAngleStepDeg = 75f;
+            const float maxAngleStepDeg = 100f;
+            // Seeded, not UnityEngine.Random - "randomly positioned" is about the layout not
+            // being a regular spiral, and a FIXED seed keeps every SetupAll re-run producing the
+            // exact same layout (the same idempotency every other builder in this file already
+            // has) instead of silently churning the saved scene on every rebuild.
+            System.Random rng = new System.Random(20260806);
+            // Empirically measured zero-gravity flight distances (same diagnostic as above):
+            // ~30m at minimum charge, ~78m at 50%, ~216m at max. Radius/Z growth tuned against
+            // those so gaps climb from an easy opening jump to a demanding late-spiral shot.
             const float startRadius = 14f;
             const float radiusStep = 12f;
             const float startZ = 16f;
@@ -1021,9 +1049,40 @@ namespace KineticEnergy.EditorSetup
             Vector3 finishSize = new Vector3(6f, 0.5f, 6f);
 
             GameObject firstSpiralPlatform = null;
+            // First platform: random within the UPPER two quadrants only, with a margin off the
+            // horizon so it clearly reads as overhead - direct request: "the very first platform
+            // from the starting platform needs to be reached by shooting up". The companion "at
+            // least 75 degrees away from the starting platform" is measured against the start
+            // pad's ORIENTATION (it sits at the circle's center, so there's no angular POSITION
+            // to measure from): the start pad faces world-up, and any upper-half circumference
+            // platform's landing face points back down toward the axis - already 90+ degrees
+            // from world-up everywhere in this range, so the 75-degree minimum holds by
+            // construction.
+            float angleDeg = 30f + (float)rng.NextDouble() * 120f;
             for (int i = 1; i <= platformCount; i++)
             {
-                float angleDeg = i * angleStepDeg;
+                if (i > 1)
+                {
+                    // Always advancing the SAME direction around the circle, not a random sign
+                    // per step (the earlier behavior) - direct request: "make sure there is
+                    // about an even distribution of the platforms along the 4 quadrants". A
+                    // random sign can bounce back and forth between the same two quadrants;
+                    // a one-directional sweep at 75-100 degrees per step (roughly a quadrant
+                    // each) cycles all four continuously, so 10 platforms spread ~2-3 per
+                    // quadrant. The step SIZE stays random, so it still reads as scattered
+                    // rather than a regular spiral, and the [75, 100] bounds are unchanged.
+                    //
+                    // The FINAL step (onto the finish platform) uses its own raised range -
+                    // direct request: "the finish platform needs to also have minimally 100
+                    // degrees difference with the last normal platform". Capped at 115 rather
+                    // than open-ended for the same reachability reason as maxAngleStepDeg: at
+                    // the outermost radii a 115-degree chord plus the 20m Z advance is ~197m,
+                    // still under the measured ~216m max-charge range.
+                    bool finalStep = i == platformCount;
+                    float stepMin = finalStep ? 100f : minAngleStepDeg;
+                    float stepMax = finalStep ? 115f : maxAngleStepDeg;
+                    angleDeg += stepMin + (float)rng.NextDouble() * (stepMax - stepMin);
+                }
                 float rad = angleDeg * Mathf.Deg2Rad;
                 float radius = startRadius + (i - 1) * radiusStep;
                 float z = startZ + (i - 1) * zStep;
@@ -1072,7 +1131,10 @@ namespace KineticEnergy.EditorSetup
             textMesh.text = "Finish";
             textMesh.color = new Color(0.15f, 0.45f, 1f);
             textMesh.fontSize = 48;
-            textMesh.characterSize = 0.2f;
+            // Doubled from the 0.2 the other levels' finish text uses (direct request: "the
+            // billboard text of the finish should be twice bigger") - this level's final jump is
+            // also its longest, so the label has to read from much further away.
+            textMesh.characterSize = 0.4f;
             textMesh.anchor = TextAnchor.MiddleCenter;
             textMesh.alignment = TextAlignment.Center;
 
