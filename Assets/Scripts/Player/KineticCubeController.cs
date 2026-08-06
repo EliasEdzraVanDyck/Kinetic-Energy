@@ -17,11 +17,17 @@ namespace KineticEnergy.Player
                          // LaunchInstantly, airborne behaves like StickAim but with a single
                          // shared once-per-flight limit across all three directions instead of
                          // one each - see UpdateMixedScheme.
-        DefyGravity      // RB cycles to/from this one - hold Right Trigger/Left Trigger/South to
+        DefyGravity,     // RB cycles to/from this one - hold Right Trigger/Left Trigger/South to
                          // charge a straight-line Forward/Up/Down flight (duration AND speed both
                          // grow with charge). Gravity is suspended for the whole charge AND the
                          // charged flight duration, resuming only once that timer runs out - see
                          // UpdateDefyGravityScheme.
+        FastPaced        // FastPacedLevel's only reachable scheme (schemeSwitchingEnabled false
+                         // there) - full free-look 3rd-person camera by default; hold Right Mouse
+                         // to aim (camera swings to first person, reticle shows), hold Left Mouse
+                         // to charge a shot straight along the camera's current look direction,
+                         // release to fire. Releasing Right Mouse cancels any charge and reverts
+                         // the camera. See UpdateFastPacedScheme.
     }
 
     [RequireComponent(typeof(Rigidbody))]
@@ -96,11 +102,31 @@ namespace KineticEnergy.Player
         // "make sure all control schemes have the same minimum launch force". Only the ceiling
         // stays scheme-specific (maxDefyGravitySpeed), since a sustained forced-velocity flight
         // and a ballistic arc's exit speed aren't really the same kind of "maximum" to begin with.
-        public float maxDefyGravitySpeed = 35f;
+        // Raised from 35 to stay ABOVE minLaunchForce once that became the shared floor (45) -
+        // left at the old value this would have made charging LONGER produce a SLOWER flight
+        // (Mathf.Lerp(45, 35, t) decreases as t grows), a real bug introduced by the unification
+        // above, not something anyone asked for. 70 keeps a comparable min-to-max ratio to the
+        // original 10/35 pair while staying below maxLaunchForce (110) - Defy Gravity's charge
+        // also scales flight DURATION at the same time (see minDefyGravityDuration/
+        // maxDefyGravityDuration), so its top end doesn't need to match a ballistic shot's exit
+        // speed to still cover serious distance (70 * 1.5s = up to 105m in a straight line).
+        public float maxDefyGravitySpeed = 70f;
         // Applied only AFTER the forced-flight timer runs out and gravity resumes ("you start
         // falling again since gravity starts affecting you again") - low, like downLaunchDamping,
         // so gravity is clearly the thing doing the falling rather than drag fighting it.
         public float defyGravityFallDamping = 0.2f;
+
+        [Header("Fast Paced Scheme")]
+        // Zero gravity in FastPacedLevel (see the scene's own gravity=0 override) turns a launch
+        // into a straight line with no arc to shape, so damping alone decides how far it carries
+        // before drag brings it to a stop - a fundamentally different physics regime than the
+        // gravity-arc curve minLaunchDamping/maxLaunchDamping is tuned for, so this gets its own
+        // dedicated pair rather than reusing that one. Same charge-fraction interpolation
+        // (Mathf.Lerp by ChargeFraction()) as every other scheme's damping curve.
+        public float fastPacedMinDamping = 2.8f;
+        public float fastPacedMaxDamping = 1.0f;
+        public InputActionReference fastPacedAimAction;
+        public InputActionReference fastPacedLaunchAction;
 
         // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
         // punchier-feeling launch, but a faster exit speed alone would also fly further - linear
@@ -202,6 +228,20 @@ namespace KineticEnergy.Player
         // Gravity's Down direction (straight down, dot 1.0) while still excluding mostly-forward
         // or mostly-up shots that legitimately need the spurious-recontact protection.
         [Range(0f, 1f)] public float slamDownwardThreshold = 0.7f;
+        // Backstop for the general case slamDownwardThreshold's INSTANT check doesn't cover: a
+        // launch that never gets any real separation from the ground at all, in ANY direction -
+        // found empirically (a trajectory-distance diagnostic while designing a level, not a
+        // direct report) firing a dead-level Defy Gravity Forward burst from standing on flat
+        // ground: with zero vertical component it stays exactly at ground height the whole
+        // flight, slides to a stop under ordinary friction, and never leaves contact long enough
+        // to re-trigger OnCollisionEnter - hasLaunched then never clears, exactly the same
+        // permanent-stuck symptom currentFlightIsDownward was built to fix, just via sliding
+        // contact instead of resting contact. Counted in FixedUpdate ticks rather than seconds to
+        // match launchGraceDuration's own scale - high enough that a real upward/angled shot
+        // (which clears groundCheckDistance within 1-2 ticks, see FixedUpdate's own isGrounded
+        // comment) is never mistaken for one of these, low enough that the stuck case is caught
+        // quickly (0.2s at the default 50Hz fixed timestep).
+        public int stuckOnGroundTickThreshold = 10;
 
         [Header("Input")]
         public InputActionReference moveAction;
@@ -308,6 +348,10 @@ namespace KineticEnergy.Player
         // See FixedUpdate's own comment - the clean, pre-collision-resolution velocity used by
         // GainEnergyFromCrash instead of reading rb.linearVelocity directly inside OnCollisionEnter.
         Vector3 velocityBeforePhysicsStep;
+        // Counts consecutive FixedUpdate ticks the cube has read isGrounded while still
+        // hasLaunched - see stuckOnGroundTickThreshold's own comment for what this catches that
+        // currentFlightIsDownward's instant check doesn't.
+        int groundedTicksSinceLaunch;
         bool isGrounded;
         // True from the instant a genuine in-flight crash is detected (see OnCollisionEnter)
         // until the next launch actually fires (see FixedUpdate's launchQueued handling) - "you
@@ -322,7 +366,15 @@ namespace KineticEnergy.Player
         float chargeTime;
         float aimYaw;
         float aimPitch;
-        ControlScheme controlScheme = ControlScheme.StickAim;
+        // [SerializeField] is load-bearing, not decorative - a bare private field is never
+        // written to the saved scene/prefab at all, so SetControlScheme's assignment (called by
+        // every scene's Editor setup script) would only ever hold for the remainder of that
+        // Editor session and silently revert to this field's C# default (StickAim) the next time
+        // the scene is loaded, including at real Play/build time. Every scene before
+        // FastPacedLevel happened to want StickAim anyway, which is exactly why this was never
+        // noticed - StickAim IS the default, so the bug was invisible. FastPacedLevel needs a
+        // genuinely different starting scheme, which is what surfaced this.
+        [SerializeField] ControlScheme controlScheme = ControlScheme.StickAim;
         // 0-1 fraction of a full tank, shared by every scheme - see startingEnergyFraction's own
         // comment for how it's spent/gained.
         float energyFraction;
@@ -367,7 +419,7 @@ namespace KineticEnergy.Player
         // Also blocked while charging any of the three hold-to-charge systems, same reasoning as
         // isAiming - the cube needs to stay put while charging, ground or air.
         public bool AllowGroundedMovement => !isAiming && !hasLaunched && !isStuck
-            && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None;
+            && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None && !fastPacedCharging;
 
         // AllowAirborneNudge: safe for FreeMove to apply a small, ADDITIVE force (air control,
         // leaning) while genuinely airborne. Only needs to wait out the brief post-launch grace
@@ -378,7 +430,7 @@ namespace KineticEnergy.Player
         // and during Defy Gravity's forced-velocity flight window, where even a small additive
         // nudge would spoil the straight line the charge promised.
         public bool AllowAirborneNudge => !isAiming && !isStuck && defyGravityFlightTimer <= 0f && launchGraceTimer <= 0f
-            && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None;
+            && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None && !fastPacedCharging;
 
         bool launchQueued;
         Vector3 queuedDirection;
@@ -403,6 +455,20 @@ namespace KineticEnergy.Player
         // FixedUpdate) - >0 means "still defying gravity", 0 means gravity has resumed.
         float defyGravityFlightTimer;
         Vector3 defyGravityFlightVelocity;
+        // True from the moment Right Mouse is pressed (with energy available) until it's
+        // released - see UpdateFastPacedScheme. Governs ONLY the camera's first-person mode and
+        // reticle visibility, not movement - unlike every other scheme, "aiming" here can span
+        // several shots in a row (direct request: only releasing Right Mouse reverts the camera),
+        // so it must NOT freeze velocity itself, or the very shot that just fired would be
+        // re-frozen the instant this flag re-triggers next frame while Right Mouse is still held.
+        bool fastPacedAiming;
+        // True only between a fresh Left Mouse press and its release/fire - THIS is what freezes
+        // velocity and accumulates charge (see FixedUpdate/AllowGroundedMovement/
+        // AllowAirborneNudge), matching every other scheme's "frozen only while actively
+        // charging" behavior. Requires a genuinely fresh press to (re)start, same as StickAim/
+        // DefyGravity's WasPressedThisFrame gate - holding Left Mouse through a fire does not
+        // auto-restart a new charge.
+        bool fastPacedCharging;
         // Forward-only: the last FLAT (horizontal) stick direction the stick was genuinely held
         // past stickAimDeadzone, remembered so a release can keep launching that same horizontal
         // direction while dropping to the shallow neutral angle (see the Forward case in
@@ -481,6 +547,8 @@ namespace KineticEnergy.Player
             selectNoneAction?.action?.Enable();
             trailToggleAction?.action?.Enable();
             upLaunchAction?.action?.Enable();
+            fastPacedAimAction?.action?.Enable();
+            fastPacedLaunchAction?.action?.Enable();
         }
 
         void OnDisable()
@@ -494,10 +562,36 @@ namespace KineticEnergy.Player
             selectNoneAction?.action?.Disable();
             trailToggleAction?.action?.Disable();
             upLaunchAction?.action?.Disable();
+            fastPacedAimAction?.action?.Disable();
+            fastPacedLaunchAction?.action?.Disable();
         }
 
         void Update()
         {
+            // FastPaced is mouse-driven (camera on raw mouse delta, RMB/LMB as its two triggers),
+            // so the OS cursor has to be locked+hidden during play or it drifts across (and
+            // eventually out of) the window while looking around - direct request: "the cursor
+            // should lock when playing that scene". Released whenever the game is paused, since
+            // the pause menu's buttons are unusable without a visible, free cursor - which is why
+            // this sits ABOVE the timeScale early-return below (that return firing is exactly the
+            // paused case this must react to). Every other scheme is gamepad-driven and never
+            // locks, preserving their existing behavior untouched.
+            if (controlScheme == ControlScheme.FastPaced)
+            {
+                bool paused = Time.timeScale <= 0f;
+                Cursor.lockState = paused ? CursorLockMode.None : CursorLockMode.Locked;
+                Cursor.visible = paused;
+            }
+            else if (Cursor.lockState == CursorLockMode.Locked)
+            {
+                // Only ever true after arriving FROM FastPacedLevel (nothing else in this project
+                // locks the cursor) - the scene menu can jump straight from that scene to any
+                // other, whose own Player instance would otherwise inherit a locked cursor it
+                // never asked for and has no code path to release.
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
+
             // Time.timeScale freezes deltaTime-scaled logic (like charge accumulation) for free,
             // but not this raw edge-detected input - without this guard, aiming/firing could
             // still start or complete while the pause menu is up.
@@ -542,7 +636,7 @@ namespace KineticEnergy.Player
             if (energyMeter != null)
             {
                 energyMeter.SetEnergy(energyFraction);
-                bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None;
+                bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || fastPacedCharging;
                 energyMeter.SetCharge(ChargeFraction(), charging);
             }
 
@@ -557,6 +651,9 @@ namespace KineticEnergy.Player
                 case ControlScheme.DefyGravity:
                     UpdateDefyGravityScheme();
                     return;
+                case ControlScheme.FastPaced:
+                    UpdateFastPacedScheme();
+                    return;
             }
 
             UpdateChargeBasedScheme();
@@ -564,7 +661,7 @@ namespace KineticEnergy.Player
 
         void ApplyChargeTimeScale()
         {
-            bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None;
+            bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || fastPacedCharging;
             Time.timeScale = charging ? chargeTimeScale : 1f;
         }
 
@@ -788,7 +885,7 @@ namespace KineticEnergy.Player
             // Defy Gravity charges frozen in place for their whole duration, not just their
             // opening frame - and, now, also what keeps a crashed/isStuck cube pinned exactly
             // where it crashed (direct request: "stop all movement and stick to that location").
-            if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || isStuck)
+            if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || isStuck || fastPacedCharging)
             {
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
@@ -878,6 +975,28 @@ namespace KineticEnergy.Player
             if (slamJustFired && isGrounded)
             {
                 RegisterCrash(groundHit.normal, slamForce);
+            }
+
+            // Backstop for every OTHER direction that can end up with the exact same "never
+            // actually leaves the ground" symptom slamJustFired already handles for steep downward
+            // launches - see stuckOnGroundTickThreshold's own comment. Reset to 0 the instant
+            // isGrounded reads false (a real departure), hasLaunched is false (nothing to catch -
+            // walking counts as "grounded" too and must never trip this), or
+            // defyGravityFlightTimer is still running - a flat Defy Gravity charge deliberately
+            // holds a fixed height for its whole flight (that's the mechanic), which reads exactly
+            // like "grounded" to the BoxCast the entire time; only counts from the moment that
+            // forced-flight window actually ends.
+            if (hasLaunched && isGrounded && defyGravityFlightTimer <= 0f)
+            {
+                groundedTicksSinceLaunch++;
+                if (groundedTicksSinceLaunch >= stuckOnGroundTickThreshold && !isStuck)
+                {
+                    RegisterCrash(groundHit.normal, rb.linearVelocity.magnitude);
+                }
+            }
+            else
+            {
+                groundedTicksSinceLaunch = 0;
             }
 
             // Breaks a crashed/isStuck cube free automatically once it's genuinely resting on
@@ -983,6 +1102,17 @@ namespace KineticEnergy.Player
             stuckSurfaceNormal = contactNormal;
             freeMoveController?.AlignVisualToSurface(stuckSurfaceNormal);
 
+            // FastPaced only - re-bases the whole camera orbit (and first-person aim) around the
+            // crashed platform's surface normal, so "up" on screen matches the platform's own up
+            // (direct request). The spiral's platforms face every direction around a full circle;
+            // keeping world-up would leave the camera sideways or upside-down relative to
+            // whatever you just stuck to. The other schemes' levels are world-up-oriented and
+            // keep the camera's existing behavior untouched.
+            if (controlScheme == ControlScheme.FastPaced)
+            {
+                cameraOrbit?.SetUpVector(stuckSurfaceNormal);
+            }
+
             GainEnergyFromCrash(crashSpeed);
         }
 
@@ -1087,6 +1217,16 @@ namespace KineticEnergy.Player
                         trailToggleLine +
                         switchLine +
                         "Pause: Start / Options / Esc",
+                    ControlScheme.FastPaced =>
+                        "Move/Nudge: WASD (or equivalent)\n" +
+                        "Look / Camera: Mouse\n" +
+                        "Aim (first person): Right Mouse (hold)\n" +
+                        "Hold Left Mouse to charge, release to launch where you're looking\n" +
+                        "Longer charge = further shot, and the camera zooms in to help you judge it\n" +
+                        "Release Right Mouse to return to 3rd person\n" +
+                        "Gravity is off in this level\n" +
+                        stuckLine +
+                        "Pause: Start / Options / Esc",
                     _ =>
                         "Move (on the ground): Left Stick\n" +
                         "Nudge (in the air): Left Stick\n" +
@@ -1150,6 +1290,20 @@ namespace KineticEnergy.Player
                         trailToggleLinePanel +
                         switchLinePanel +
                         "Start / Options / Esc - Pause",
+                    ControlScheme.FastPaced =>
+                        "WASD (or equivalent) - Move / Nudge in the air\n" +
+                        "Mouse - Look around (full 3rd person camera by default)\n" +
+                        "Right Mouse (hold) - Aim: switches to a first-person view with a\n" +
+                        "  trail-and-reticle landing preview\n" +
+                        "Left Mouse (hold, while aiming) - Charge a launch straight along the\n" +
+                        "  camera's current look direction. Release to fire.\n" +
+                        "The longer the charge, the further the launch travels and the more the\n" +
+                        "  camera zooms in on the predicted landing spot, so it stays readable.\n" +
+                        "Release Right Mouse at any time to cancel and return to 3rd person.\n" +
+                        "Gravity is off throughout this level - you fly in a straight line until\n" +
+                        "  you crash into something.\n" +
+                        stuckLinePanel +
+                        "Start / Options / Esc - Pause",
                     _ =>
                         "Left Stick - Move (on the ground, while not aiming)\n" +
                         "Left Stick (in the air) - Nudge distance / drift sideways\n" +
@@ -1178,6 +1332,10 @@ namespace KineticEnergy.Player
         // whether OTHER schemes are reachable, unrelated to a visual on/off toggle.
         void HandleTrailToggle()
         {
+            // FastPaced's reticle is a dedicated TrailAndCrosshair mode, not the plain Trail this
+            // toggle switches between - a stray Right Bumper press (a gamepad plugged in
+            // alongside mouse/keyboard) would otherwise silently stomp it to Trail or None mid-aim.
+            if (controlScheme == ControlScheme.FastPaced) return;
             if (trailToggleAction == null || trailToggleAction.action == null || !trailToggleAction.action.WasPressedThisFrame()) return;
             if (landingPreview == null) return;
 
@@ -1220,6 +1378,15 @@ namespace KineticEnergy.Player
                 chargeTime = 0f;
                 aimArrow?.SetVisible(false);
                 landingPreview?.SetVisible(false);
+            }
+            if (fastPacedAiming)
+            {
+                fastPacedAiming = false;
+                fastPacedCharging = false;
+                chargeTime = 0f;
+                landingPreview?.SetVisible(false);
+                cameraOrbit?.SetFirstPersonMode(false);
+                cameraOrbit?.SetAimZoom(0f);
             }
 
             UpdateSchemeLabel();
@@ -1485,6 +1652,97 @@ namespace KineticEnergy.Player
             landingPreview?.SetVisible(false);
         }
 
+        // FastPacedLevel's only scheme. Right Mouse (held) is a pure aim/camera toggle - swings
+        // to first person and shows the reticle, but does NOT by itself freeze the player, since
+        // (direct request) only releasing Right Mouse should return to 3rd person, which means a
+        // single hold has to be able to cover several shots in a row. Left Mouse (held, only
+        // while aiming) is the actual charge trigger, mirroring StickAim/DefyGravity's own
+        // hold-to-charge/release-to-fire shape exactly, just fired along the camera's current
+        // look direction instead of a stick-picked one - see fastPacedAiming/fastPacedCharging's
+        // own field comments for why the freeze lives on the charge flag, not the aim flag.
+        void UpdateFastPacedScheme()
+        {
+            bool rmbHeld = fastPacedAimAction != null && fastPacedAimAction.action != null && fastPacedAimAction.action.IsPressed();
+
+            if (!rmbHeld)
+            {
+                if (fastPacedAiming)
+                {
+                    fastPacedAiming = false;
+                    fastPacedCharging = false;
+                    chargeTime = 0f;
+                    landingPreview?.SetVisible(false);
+                    cameraOrbit?.SetFirstPersonMode(false);
+                    cameraOrbit?.SetAimZoom(0f);
+                }
+                return;
+            }
+
+            if (!fastPacedAiming)
+            {
+                // Same energy gate every other scheme uses to allow STARTING a new aim - see
+                // canStartNewAim/canLaunch's own comments.
+                if (energyFraction <= 0f) return;
+                fastPacedAiming = true;
+                cameraOrbit?.SetFirstPersonMode(true);
+            }
+
+            bool lmbPressed = fastPacedLaunchAction != null && fastPacedLaunchAction.action != null && fastPacedLaunchAction.action.WasPressedThisFrame();
+            bool lmbReleased = fastPacedLaunchAction != null && fastPacedLaunchAction.action != null && fastPacedLaunchAction.action.WasReleasedThisFrame();
+
+            if (!fastPacedCharging)
+            {
+                // A fresh press only - holding Left Mouse through a fire does not auto-restart a
+                // new charge, matching StickAim/DefyGravity's own WasPressedThisFrame gate.
+                if (!lmbPressed || energyFraction <= 0f) return;
+
+                fastPacedCharging = true;
+                chargeTime = 0f;
+                // Instant stop, same reasoning as every other scheme's charge-start - FixedUpdate
+                // keeps re-applying this for the whole charge (see fastPacedCharging's own use
+                // there), so the shot always fires from a dead stop with no drift to account for.
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                landingPreview?.SetVisible(true);
+                landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
+            }
+
+            AccumulateCharge();
+
+            Vector3 dir = cameraOrbit != null ? cameraOrbit.AimForward : transform.forward;
+            float chargeFraction = ChargeFraction();
+            // Narrows the camera's field of view as charge builds - direct request: "the longer
+            // you charge the more you need to zoom in on the landing spot".
+            cameraOrbit?.SetAimZoom(chargeFraction);
+
+            float previewForce = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
+            float previewDamping = Mathf.Lerp(fastPacedMinDamping, fastPacedMaxDamping, chargeFraction);
+
+            // rb.linearVelocity is held at zero for the whole charge (see FixedUpdate), so no
+            // drift term to add in - same reasoning as StickAim/DefyGravity's own preview.
+            Vector3 initialVelocity = dir * previewForce / rb.mass;
+            Vector3 lineStart = transform.position + Vector3.up * previewLineHeight;
+            Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, previewDamping, out int stepCount, out bool didLand);
+            lastPredictedLanding = landingPoint;
+            hasPredictedLanding = true;
+
+            if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
+            {
+                landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand);
+            }
+
+            if (lmbReleased)
+            {
+                QueueLaunch(dir, previewForce, previewDamping);
+
+                fastPacedCharging = false;
+                chargeTime = 0f;
+                landingPreview?.SetVisible(false);
+                // fastPacedAiming (and the first-person camera) deliberately stay active here -
+                // Right Mouse is still held, ready to charge another shot immediately.
+            }
+        }
+
         // Shared by every scheme's actual firing moment - just the physics-impulse queuing
         // (FixedUpdate applies it next tick) plus arming hasLaunched/launchGraceTimer. Doesn't
         // zero velocity itself: the charge-based flows already hold it at zero continuously for
@@ -1622,7 +1880,18 @@ namespace KineticEnergy.Player
             // 15m further. A stronger shot cleared the margin fast enough within one step to
             // avoid the false contact, which is why this wasn't uniformly wrong - "isn't accurate
             // in all cases" is exactly what that looks like from the player's side.
-            predictionRb.position = startPos + Vector3.up * 0.15f;
+            // Offset direction matters as much as the margin itself: world-up is only "away from
+            // the surface I'm resting on" while standing on a floor. Stuck to a wall or hanging
+            // from a platform's underside (FastPacedLevel's tilted spiral platforms especially -
+            // direct bug report: "the visual doesn't appear if you are hanging onto a platform at
+            // certain degrees, mostly 90 degrees or up"), up is parallel to - or straight INTO -
+            // the stuck surface, embedding the clone in it, which registers an instant false
+            // "landed" at the player's own position and collapses the trail/reticle to nothing.
+            // The stuck surface's normal always points away from whatever the cube is stuck to,
+            // so it's the correct clearance direction in every orientation; world-up remains the
+            // un-stuck fallback (grounded standing, mid-air) where it was already correct.
+            Vector3 clearanceDir = isStuck && stuckSurfaceNormal.sqrMagnitude > 0.0001f ? stuckSurfaceNormal : Vector3.up;
+            predictionRb.position = startPos + clearanceDir * 0.15f;
             predictionRb.rotation = transform.rotation;
             predictionRb.linearVelocity = initialVelocity;
             predictionRb.angularVelocity = Vector3.zero;

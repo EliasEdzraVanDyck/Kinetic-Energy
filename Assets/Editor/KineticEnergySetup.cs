@@ -22,6 +22,8 @@ namespace KineticEnergy.EditorSetup
         const string ScenePath = "Assets/Scenes/Sandbox Scene.unity";
         const string Level1ScenePath = "Assets/Scenes/Level1.unity";
         const string Level2ScenePath = "Assets/Scenes/Level2.unity";
+        const string Level3ScenePath = "Assets/Scenes/Level3.unity";
+        const string FastPacedLevelScenePath = "Assets/Scenes/FastPacedLevel.unity";
         const string VolumeProfilePath = "Assets/Settings/SampleSceneProfile.asset";
         const string ActionsPath = "Assets/InputSystem_Actions.inputactions";
         const string PrefabFolder = "Assets/Prefabs";
@@ -34,6 +36,8 @@ namespace KineticEnergy.EditorSetup
             ("Sandbox", "Sandbox Scene"),
             ("Level 1", "Level1"),
             ("Level 2", "Level2"),
+            ("Level 3", "Level3"),
+            ("Fast Paced", "FastPacedLevel"),
         };
 
         public static void SetupAll()
@@ -42,6 +46,8 @@ namespace KineticEnergy.EditorSetup
             Setup();
             SetupLevel1();
             SetupLevel2();
+            SetupLevel3();
+            SetupFastPacedLevel();
             UpdateBuildSettings();
 
             Debug.Log("KineticEnergySetup: SetupAll complete OK");
@@ -438,6 +444,362 @@ namespace KineticEnergy.EditorSetup
             return endPlatform;
         }
 
+        // Level3 is hand-placed, static level geometry, same as Level2 - direct request: "design
+        // a new level yourself that would fit the launching mechanic and kinetic energy best...
+        // it should have 3 distinct segments". Each segment is deliberately built around a
+        // different part of the shared mechanic set instead of just repeating Level2's flat
+        // hallway shape:
+        //   1. Launch Basics - a straight line of flat platforms with steadily widening gaps,
+        //      teaching charge-and-release distance judgment and the crash-refunds-energy loop
+        //      before anything harder shows up.
+        //   2. Varied Path - primarily a forward run (Z is the main axis, Y only ever drifts in a
+        //      modest band) that alternates which SURFACE you stick to: normal floor platforms,
+        //      a ceiling hit from below, and side-wall stubs hit with a sideways-aimed shot - same
+        //      any-surface-sticks mechanic throughout, just choreographed into a rhythm.
+        //   3. The Gauntlet - a fast, flat endurance run suited to Defy Gravity's Forward burst,
+        //      with one deliberate wall checkpoint partway through: a wide, unmissable target
+        //      worth crashing into on purpose to refuel before the final stretch, since the legs
+        //      either side of it are sized to need a real charge, not a token tap.
+        // Every distance below came from a real Play-mode diagnostic (TrajectoryProbeRunner, since
+        // deleted) that fired actual launches at known charge levels and measured where they
+        // actually landed - reasoning about force/damping/gravity numbers alone already produced
+        // one wrong guess this session (see maxDefyGravitySpeed's own comment), so this level's
+        // gaps are sized against measured reality, not the tuning constants directly:
+        //   Old-scheme/StickAim-Forward @ 30 degrees: 12m (min charge) to 87m (max charge)
+        //   StickAim Up @ tilted 80 degrees: 3m/9m (min) to 19m/61m (max) horizontal/height
+        //   StickAim Down @ 60 degrees, fired from standing: 0m either way - the impulse gets
+        //     absorbed by the ground it's already resting on, so it's only useful started
+        //     airborne, aimed at something below - deliberately not used for traversal here
+        //   Defy Gravity Forward (flat): 26m (0.4s charge) to 64m (~1s charge)
+        //   Defy Gravity Up: 46m (0.4s charge) to 61m+ (0.55s charge)
+        // Every gap below stays well inside its relevant range (never near the max-charge figure)
+        // so no jump ever demands a pixel-perfect maximum hold.
+        static void SetupLevel3()
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(Level3ScenePath) == null)
+            {
+                // Same reasoning as SetupLevel1/SetupLevel2 - copying Sandbox Scene guarantees
+                // identical RenderSettings/skybox/ambient instead of trying to replicate them by hand.
+                if (!AssetDatabase.CopyAsset(ScenePath, Level3ScenePath))
+                {
+                    throw new Exception("KineticEnergySetup: failed to copy Sandbox Scene to create Level3.");
+                }
+            }
+
+            EditorSceneManager.OpenScene(Level3ScenePath, OpenSceneMode.Single);
+
+            BuildDirectionalLight();
+            BuildGlobalVolume();
+
+            GameObject playerAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/Player.prefab");
+            GameObject cameraAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/ThirdPersonCameraRig.prefab");
+            GameObject pauseAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PauseSystem.prefab");
+            if (playerAsset == null || cameraAsset == null || pauseAsset == null)
+            {
+                throw new Exception("KineticEnergySetup: Level3 needs Player/ThirdPersonCameraRig/PauseSystem prefabs - run Setup() (part of SetupAll) first.");
+            }
+
+            // Same duplicate-camera-name trap as SetupLevel1/SetupLevel2 - both names destroyed
+            // deliberately, see SetupLevel1's own comment for why.
+            DestroyIfExists("Player");
+            DestroyIfExists("Main Camera");
+            DestroyIfExists("ThirdPersonCameraRig");
+            DestroyIfExists("PauseSystem");
+            DestroyIfExists("LevelGenerator");
+            DestroyIfExists("Plane");
+            // Level3.unity was created by copying Sandbox Scene, which already has its own 5
+            // circular jump platforms - same reasoning as SetupLevel2, those don't belong here.
+            DestroyIfExists("SandboxPlatforms");
+
+            GameObject playerGo = (GameObject)PrefabUtility.InstantiatePrefab(playerAsset);
+            GameObject camGo = (GameObject)PrefabUtility.InstantiatePrefab(cameraAsset);
+            GameObject pauseGo = (GameObject)PrefabUtility.InstantiatePrefab(pauseAsset);
+
+            KineticCubeController controller = playerGo.GetComponent<KineticCubeController>();
+            KineticCubeControllerFreeMove freeMoveController = playerGo.GetComponent<KineticCubeControllerFreeMove>();
+            ThirdPersonOrbitCamera orbitCam = camGo.GetComponent<ThirdPersonOrbitCamera>();
+
+            controller.cameraTransform = camGo.transform;
+            controller.cameraOrbit = orbitCam;
+            freeMoveController.cameraTransform = camGo.transform;
+            orbitCam.target = playerGo.transform;
+
+            // Same single-source-of-truth reasoning as SetupLevel1/SetupLevel2 - this is a plain
+            // instance of Player.prefab, not rebuilt from scratch here.
+            ApplyLaunchTuning(controller);
+
+            Text modeLabel = pauseGo.transform.Find("PauseCanvas/PreviewModeLabel")?.GetComponent<Text>();
+            controller.landingPreview.modeLabel = modeLabel;
+            controller.controlsHintLabel = pauseGo.transform.Find("PauseCanvas/ControlsHintLabel")?.GetComponent<Text>();
+            controller.controlsPanelBody = pauseGo.transform.Find("PauseCanvas/ControlsPanel/ControlsBody")?.GetComponent<Text>();
+            controller.energyMeter = pauseGo.transform.Find("EnergyMeter")?.GetComponent<EnergyMeterController>();
+            RadialMenuController radialMenu = pauseGo.transform.Find("RadialMenuController")?.GetComponent<RadialMenuController>();
+            if (radialMenu != null) radialMenu.controller = controller;
+
+            EditorUtility.SetDirty(controller);
+            EditorUtility.SetDirty(freeMoveController);
+            EditorUtility.SetDirty(orbitCam);
+            EditorUtility.SetDirty(controller.landingPreview);
+            if (radialMenu != null) EditorUtility.SetDirty(radialMenu);
+
+            GameObject nextPlatform = BuildLevel3Segments(playerGo.transform, camGo.transform);
+            BuildCameraStartFacing(playerGo.transform, orbitCam, nextPlatform.transform);
+            BuildPlayerShadow(playerGo.transform);
+
+            Scene level3Scene = EditorSceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(level3Scene);
+            EditorSceneManager.SaveScene(level3Scene);
+
+            Debug.Log("KineticEnergySetup: Level3 setup complete OK");
+        }
+
+        // Chains all three segments back to back, each one starting exactly where the previous one
+        // ended - same "spawn in a straight line, connected" idea SetupLevel2 established, just
+        // with height varying between segments (flat / climbing / flat again) instead of staying
+        // level throughout. Returns the very last platform (the finish) so the caller can point
+        // the camera at it.
+        static GameObject BuildLevel3Segments(Transform player, Transform cameraTransform)
+        {
+            GameObject container = GameObject.Find("Level3Segments");
+            if (container != null) UnityEngine.Object.DestroyImmediate(container);
+            container = new GameObject("Level3Segments");
+
+            GameObject basicsEnd = BuildLevel3LaunchBasics(container.transform, player);
+            GameObject variedPathEnd = BuildLevel3VariedPath(container.transform, basicsEnd);
+            GameObject gauntletEnd = BuildLevel3Gauntlet(container.transform, variedPathEnd, cameraTransform);
+            return gauntletEnd;
+        }
+
+        // Segment 1: "Launch Basics" - a straight line of flat platforms with steadily widening
+        // gaps (14m/18m/26m/40m/57m - all well inside the ~12-87m range a 30-degree charged shot
+        // actually covers, see SetupLevel3's own comment for where these numbers came from), each
+        // one a genuine crash on a comfortable-to-firm charge for any grounded scheme. Every
+        // landing refunds energy the same way any crash does, so by the time the gaps get serious
+        // the player has already felt that loop a few times. Every platform past the start has a
+        // low back wall on its far (+Z) edge - direct request: "walls on the far side to help the
+        // player land on them more easily to get used to them" - a slightly-overshot landing
+        // clips the wall and sticks (a genuine crash, refunding energy same as anything else)
+        // instead of sailing past into open air. A little X jitter on the middle platforms is
+        // small horizontal variation, not a hazard - the gaps are still overwhelmingly a Z-forward
+        // judgment call. Returns the last platform.
+        static GameObject BuildLevel3LaunchBasics(Transform parent, Transform player)
+        {
+            GameObject segment = new GameObject("LaunchBasics");
+            segment.transform.SetParent(parent, true);
+
+            Vector3 platformSize = new Vector3(5f, 0.5f, 5f);
+            Material platformMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/CheckeredFloor.mat");
+            if (platformMat == null)
+            {
+                platformMat = new Material(FindBestShader());
+                platformMat.color = new Color(0.5f, 0.5f, 0.55f);
+                platformMat = SaveMaterialAsset(platformMat, "Level3PlatformMaterial");
+            }
+
+            Material wallMat = new Material(FindBestShader());
+            wallMat.color = new Color(0.45f, 0.45f, 0.5f);
+            wallMat = SaveMaterialAsset(wallMat, "Level3BackWallMaterial");
+
+            Vector3[] centers =
+            {
+                new Vector3(0f, 0f, 0f),
+                new Vector3(0f, 0f, 14f),
+                new Vector3(2f, 1f, 32f),
+                new Vector3(-2f, 0f, 58f),
+                new Vector3(1.5f, 2f, 98f),
+                new Vector3(0f, 5f, 155f),
+            };
+
+            GameObject last = null;
+            for (int i = 0; i < centers.Length; i++)
+            {
+                bool isLast = i == centers.Length - 1;
+                Vector3 size = isLast ? new Vector3(6f, 0.5f, 6f) : platformSize;
+                string name = i == 0 ? "StartPlatform" : $"Platform{i}";
+                last = CreateBlock(segment.transform, name, centers[i], size, platformMat);
+
+                if (i > 0)
+                {
+                    const float backWallHeight = 1.6f;
+                    const float backWallThickness = 0.5f;
+                    Vector3 backWallCenter = centers[i] + new Vector3(0f, size.y * 0.5f + backWallHeight * 0.5f, size.z * 0.5f - backWallThickness * 0.5f);
+                    Vector3 backWallSize = new Vector3(size.x, backWallHeight, backWallThickness);
+                    CreateBlock(segment.transform, $"Platform{i}BackWall", backWallCenter, backWallSize, wallMat);
+                }
+            }
+
+            player.position = centers[0] + new Vector3(0f, platformSize.y * 0.5f + 0.5f, 0f);
+
+            return last;
+        }
+
+        // Segment 2: "Varied Path" - reworked from an earlier straight-up shaft per direct
+        // feedback: "shouldn't be as vertical, it's allowed to have some vertical difference, but
+        // the main direction the player should be moving should be forward rather than vertical".
+        // Z advances 200m end to end (the primary axis) while Y only ever drifts within a ~15m
+        // band - a real height change, but nowhere close to a dedicated climb. The variety instead
+        // comes from alternating WHICH surface you stick to, per direct request: "alternatingly
+        // stick to the ceiling of a platform, and left/right turned platforms and a regular
+        // platform". None of these need special-case code - a "ceiling" is just an ordinary
+        // platform positioned above the approach path, hit from underneath (its bottom face has a
+        // downward normal, so flatGroundStickThreshold correctly keeps it a real stick, not a
+        // walk-away); a "turned" platform is a thin vertical slab exactly like the walls
+        // elsewhere in this file, just placed beside the path instead of flanking it, hit with a
+        // sideways-aimed shot (the stick already steers aim off the pure-forward axis on every
+        // charge-based scheme, so no new input is needed) - same mechanic as any wall-stick, just
+        // choreographed into a rhythm. Reached with StickAim's Up-charge tilted toward each
+        // target (the same 3-19m horizontal / 9-61m vertical range already used for reaching an
+        // offset target at height) or Defy Gravity, whichever the player prefers. Returns the
+        // last platform.
+        static GameObject BuildLevel3VariedPath(Transform parent, GameObject fromPlatform)
+        {
+            GameObject segment = new GameObject("VariedPath");
+            segment.transform.SetParent(parent, true);
+
+            Vector3 basePos = fromPlatform.transform.position;
+            float x = basePos.x;
+            float y = basePos.y;
+            float z = basePos.z;
+
+            Material pathMat = new Material(FindBestShader());
+            pathMat.color = new Color(0.3f, 0.45f, 0.55f);
+            pathMat = SaveMaterialAsset(pathMat, "Level3PathMaterial");
+
+            // Same accent color for BOTH special stick types (ceiling and side-wall) - a
+            // deliberate, learnable visual grammar: orange means "you'll stick to this from an
+            // unusual angle", blue-grey means "ordinary floor".
+            Material specialMat = new Material(FindBestShader());
+            specialMat.color = new Color(0.95f, 0.55f, 0.15f);
+            specialMat = SaveMaterialAsset(specialMat, "Level3LedgeMaterial");
+
+            Vector3 platformSize = new Vector3(5f, 0.5f, 5f);
+            Vector3 ceilingSize = new Vector3(6f, 0.5f, 6f);
+            Vector3 sideWallSize = new Vector3(1f, 5f, 5f);
+
+            CreateBlock(segment.transform, "Normal1", new Vector3(x, y + 3f, z + 35f), platformSize, pathMat);
+            // Ceiling - positioned above the path between Normal1 and Normal2, hit from below on
+            // the way up from Normal1. Center height chosen so an up-tilted charge from Normal1
+            // (roughly a 35-45% hold) clips its underside rather than needing a maximum charge.
+            CreateBlock(segment.transform, "Ceiling1", new Vector3(x, y + 13f, z + 60f), ceilingSize, pathMat);
+            CreateBlock(segment.transform, "Normal2", new Vector3(x, y + 1f, z + 90f), platformSize, pathMat);
+            // Side-wall (left) - thin slab beside the path, same construction as any other wall in
+            // this file, just standalone rather than flanking a corridor. Its X-facing sides are
+            // what the player actually sticks to, reached with a sideways-tilted charge.
+            CreateBlock(segment.transform, "SideWallLeft", new Vector3(x - 9f, y + 4f, z + 115f), sideWallSize, specialMat);
+            CreateBlock(segment.transform, "Normal3", new Vector3(x, y + 2f, z + 145f), platformSize, pathMat);
+            CreateBlock(segment.transform, "SideWallRight", new Vector3(x + 9f, y + 5f, z + 170f), sideWallSize, specialMat);
+            // Centered (no X offset) - opens straight into segment 3's corridor along Z.
+            GameObject last = CreateBlock(segment.transform, "Normal4", new Vector3(x, y + 3f, z + 200f), platformSize, pathMat);
+
+            return last;
+        }
+
+        // Segment 3: "The Gauntlet" - a fast, flat endurance run suited to Defy Gravity's Forward
+        // burst (measured 26-64m per charge), with one deliberate wall checkpoint partway through:
+        // a wide target that's easy to hit ON PURPOSE, worth crashing into for the energy refund
+        // before the final leg, since both legs either side of it need a real charge rather than a
+        // token tap. Ends at a finish pad. Returns the finish platform.
+        // Direct feedback on an earlier pass: "the final segment was really bare bones" - expanded
+        // from 2 stops either side of the refuel wall to 4, with small X/Y jitter on every one
+        // (direct request: "where ever you can add some small horizontal and vertical variation"),
+        // stretching the total run from 150m to 240m. Still built around the same core idea - a
+        // fast Defy Gravity Forward run with one deliberate, unmissable wall checkpoint worth
+        // crashing into on purpose - just with more of it either side. Returns the finish platform.
+        static GameObject BuildLevel3Gauntlet(Transform parent, GameObject fromPlatform, Transform cameraTransform)
+        {
+            GameObject segment = new GameObject("Gauntlet");
+            segment.transform.SetParent(parent, true);
+
+            Vector3 startPos = fromPlatform.transform.position;
+            float x0 = startPos.x;
+            float y = startPos.y;
+            float z0 = startPos.z;
+
+            Material platformMat = new Material(FindBestShader());
+            platformMat.color = new Color(0.55f, 0.3f, 0.22f);
+            platformMat = SaveMaterialAsset(platformMat, "Level3GauntletPlatformMaterial");
+
+            Material wallMat = new Material(FindBestShader());
+            wallMat.color = new Color(0.65f, 0.35f, 0.2f);
+            wallMat = SaveMaterialAsset(wallMat, "Level3GauntletWallMaterial");
+
+            Vector3 platformSize = new Vector3(6f, 0.5f, 6f);
+            CreateBlock(segment.transform, "Waypoint1", new Vector3(x0, y, z0 + 40f), platformSize, platformMat);
+            CreateBlock(segment.transform, "Waypoint2", new Vector3(x0 + 5f, y + 2f, z0 + 78f), platformSize, platformMat);
+
+            // Wide, unmissable wall spanning the corridor - deliberately a target you crash INTO
+            // on purpose, not an obstacle you route around.
+            Vector3 wallCenter = new Vector3(x0, y + 4f, z0 + 115f);
+            Vector3 wallSize = new Vector3(16f, 10f, 1f);
+            CreateBlock(segment.transform, "RefuelWall", wallCenter, wallSize, wallMat);
+
+            // A small platform right at the wall's base, floor-level - so a shot that clips low
+            // still has solid ground underfoot right where the wall is, rather than open air.
+            Vector3 wallBasePos = new Vector3(x0, y, z0 + 115f);
+            CreateBlock(segment.transform, "RefuelWallBase", wallBasePos, new Vector3(8f, 0.5f, 4f), platformMat);
+
+            CreateBlock(segment.transform, "Waypoint3", new Vector3(x0 - 5f, y + 1f, z0 + 155f), platformSize, platformMat);
+            CreateBlock(segment.transform, "Waypoint4", new Vector3(x0 + 3f, y - 1f, z0 + 195f), platformSize, platformMat);
+
+            Vector3 finishPos = new Vector3(x0, y, z0 + 240f);
+            Vector3 finishSize = new Vector3(7f, 0.5f, 7f);
+            GameObject finishPlatform = CreateBlock(segment.transform, "FinishPlatform", finishPos, finishSize, platformMat);
+
+            BuildLevel3FinishPad(segment.transform, finishPos, finishSize, cameraTransform);
+
+            return finishPlatform;
+        }
+
+        // Static equivalent of LevelGenerator.BuildFinishPad (that one's an instance method tied
+        // to LevelGenerator's own runtime fields - Level3's geometry is hand-placed at edit time,
+        // not generated at runtime, so this is its own copy rather than a shared call). Same
+        // visual language (translucent green pad, floating blue "Finish" text, billboard) and the
+        // same FinishLine trigger component, just parameterized directly instead of reading fields.
+        static void BuildLevel3FinishPad(Transform parent, Vector3 platformPosition, Vector3 platformSize, Transform cameraTransform)
+        {
+            GameObject pad = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            pad.name = "FinishPad";
+            pad.transform.SetParent(parent, true);
+            UnityEngine.Object.DestroyImmediate(pad.GetComponent<Collider>());
+
+            // Small vertical gap above the platform surface so the two faces never coincide - see
+            // LevelGenerator.BuildFinishPad's own comment for the Z-fighting this avoids.
+            const float padHeight = 0.05f;
+            const float zFightGap = 0.03f;
+            pad.transform.position = platformPosition + new Vector3(0f, platformSize.y * 0.5f + zFightGap + padHeight * 0.5f, 0f);
+            pad.transform.localScale = new Vector3(platformSize.x, padHeight, platformSize.z);
+
+            Color padColor = new Color(0.2f, 1f, 0.5f, 0.45f);
+            Material padMat = new Material(FindBestShader());
+            padMat.color = padColor;
+            MakeTransparent(padMat, padColor.a);
+            padMat = SaveMaterialAsset(padMat, "Level3FinishPadMaterial");
+            pad.GetComponent<Renderer>().sharedMaterial = padMat;
+
+            GameObject textGo = new GameObject("FinishText");
+            textGo.transform.SetParent(parent, true);
+            textGo.transform.position = platformPosition + new Vector3(0f, 2.5f, 0f);
+
+            TextMesh textMesh = textGo.AddComponent<TextMesh>();
+            textMesh.text = "Finish";
+            textMesh.color = new Color(0.15f, 0.45f, 1f);
+            textMesh.fontSize = 48;
+            textMesh.characterSize = 0.2f;
+            textMesh.anchor = TextAnchor.MiddleCenter;
+            textMesh.alignment = TextAlignment.Center;
+
+            Billboard billboard = textGo.AddComponent<Billboard>();
+            billboard.target = cameraTransform;
+
+            GameObject trigger = new GameObject("FinishTrigger");
+            trigger.transform.SetParent(parent, true);
+            trigger.transform.position = platformPosition + new Vector3(0f, platformSize.y * 0.5f + 1f, 0f);
+            BoxCollider triggerCollider = trigger.AddComponent<BoxCollider>();
+            triggerCollider.isTrigger = true;
+            triggerCollider.size = new Vector3(platformSize.x, 2f, platformSize.z);
+            trigger.AddComponent<FinishLine>();
+        }
+
         // "Camera should face behind the player and look at the next platform on bootup" (direct
         // request) - same idea as LevelGenerator.FaceCameraTowardFinish for Level1, pulled out
         // into the reusable CameraStartFacing component (see its own comment) since Level2 has no
@@ -453,6 +815,281 @@ namespace KineticEnergy.EditorSetup
             facing.player = player;
             facing.cameraOrbit = orbitCam;
             facing.lookAtPoint = lookAtPoint;
+        }
+
+        // "Add a FastPacedLevel, with only 1 control scheme" - a new scene, mirroring
+        // SetupLevel3's exact shape (copy Sandbox Scene for identical RenderSettings, instantiate
+        // the 3 shared prefabs, cross-wire, then build hand-placed geometry) but with per-instance
+        // overrides on the Player: FastPaced is the only reachable scheme
+        // (schemeSwitchingEnabled false), gravity is off, and launch force is raised - see
+        // ApplyLaunchTuning's own call below for what stays shared vs. what's overridden after it.
+        static void SetupFastPacedLevel()
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(FastPacedLevelScenePath) == null)
+            {
+                if (!AssetDatabase.CopyAsset(ScenePath, FastPacedLevelScenePath))
+                {
+                    throw new Exception("KineticEnergySetup: failed to copy Sandbox Scene to create FastPacedLevel.");
+                }
+            }
+
+            EditorSceneManager.OpenScene(FastPacedLevelScenePath, OpenSceneMode.Single);
+
+            BuildDirectionalLight();
+            BuildGlobalVolume();
+
+            GameObject playerAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/Player.prefab");
+            GameObject cameraAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/ThirdPersonCameraRig.prefab");
+            GameObject pauseAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PauseSystem.prefab");
+            if (playerAsset == null || cameraAsset == null || pauseAsset == null)
+            {
+                throw new Exception("KineticEnergySetup: FastPacedLevel needs Player/ThirdPersonCameraRig/PauseSystem prefabs - run Setup() (part of SetupAll) first.");
+            }
+
+            // Same duplicate-camera-name trap as every other level scene - both names destroyed
+            // deliberately, see SetupLevel1's own comment for why.
+            DestroyIfExists("Player");
+            DestroyIfExists("Main Camera");
+            DestroyIfExists("ThirdPersonCameraRig");
+            DestroyIfExists("PauseSystem");
+            DestroyIfExists("LevelGenerator");
+            DestroyIfExists("Plane");
+            // FastPacedLevel.unity was created by copying Sandbox Scene, which already has its
+            // own 5 circular jump platforms and floor - same reasoning as SetupLevel2/SetupLevel3,
+            // those don't belong here (and the floor would just get in the way of the spiral).
+            DestroyIfExists("SandboxPlatforms");
+
+            GameObject playerGo = (GameObject)PrefabUtility.InstantiatePrefab(playerAsset);
+            GameObject camGo = (GameObject)PrefabUtility.InstantiatePrefab(cameraAsset);
+            GameObject pauseGo = (GameObject)PrefabUtility.InstantiatePrefab(pauseAsset);
+
+            KineticCubeController controller = playerGo.GetComponent<KineticCubeController>();
+            KineticCubeControllerFreeMove freeMoveController = playerGo.GetComponent<KineticCubeControllerFreeMove>();
+            ThirdPersonOrbitCamera orbitCam = camGo.GetComponent<ThirdPersonOrbitCamera>();
+
+            controller.cameraTransform = camGo.transform;
+            controller.cameraOrbit = orbitCam;
+            freeMoveController.cameraTransform = camGo.transform;
+            orbitCam.target = playerGo.transform;
+
+            // Same single-source-of-truth reasoning as every other level - this is a plain
+            // instance of Player.prefab, not rebuilt from scratch here.
+            ApplyLaunchTuning(controller);
+
+            // FastPaced-only overrides, scoped to just this scene's Player instance (every other
+            // scene's instance keeps ApplyLaunchTuning's shared defaults untouched) - direct
+            // request: "only 1 control scheme", "increase the base speed of the players
+            // launching in that scene for that control scheme", "gravity shouldn't affect the
+            // player in this scene".
+            controller.SetControlScheme(ControlScheme.FastPaced);
+            controller.schemeSwitchingEnabled = false;
+            controller.gravity = 0f;
+            // The shared default (-30) is tuned for world-up levels where being below the floor
+            // means "fell off". This level's spiral circles through the X/Y plane - platforms on
+            // the lower half of each turn legitimately sit at Y down to -(startRadius + 9 *
+            // radiusStep) = -122, so a shot flying toward one crossed Y=-30 mid-flight and got
+            // silently scene-reset (direct bug report: "you respawn randomly sometimes while you
+            // are launching in the middle of the air"). With zero gravity there's no such thing
+            // as falling forever anyway - drag stops every missed shot dead in place - so this
+            // only needs to be safely below anything reachable, not carefully tuned. BOTH
+            // controllers need this - KineticCubeControllerFreeMove carries its own duplicate
+            // fallResetY field with its own scene-reload check, and overriding only the main
+            // controller's copy left the FreeMove one still firing at -30 (the exact "still
+            // respawns even at -1000" bug reported after the first fix).
+            controller.fallResetY = -1000f;
+            freeMoveController.fallResetY = -1000f;
+            controller.minLaunchForce = 90f;
+            controller.maxLaunchForce = 220f;
+            // Anti-staleness reassignment like every other tunable here, even though these
+            // currently match the field's own default - keeps a future re-tune (see the
+            // empirical zero-gravity distance measurement this level still needs) actually taking
+            // effect on a re-run instead of silently keeping whatever this instance last serialized.
+            controller.fastPacedMinDamping = 2.8f;
+            controller.fastPacedMaxDamping = 1.0f;
+            controller.fastPacedAimAction = FindActionReference("Player", "FastPacedAim");
+            controller.fastPacedLaunchAction = FindActionReference("Player", "FastPacedLaunch");
+
+            Text modeLabel = pauseGo.transform.Find("PauseCanvas/PreviewModeLabel")?.GetComponent<Text>();
+            controller.landingPreview.modeLabel = modeLabel;
+            controller.controlsHintLabel = pauseGo.transform.Find("PauseCanvas/ControlsHintLabel")?.GetComponent<Text>();
+            controller.controlsPanelBody = pauseGo.transform.Find("PauseCanvas/ControlsPanel/ControlsBody")?.GetComponent<Text>();
+            controller.energyMeter = pauseGo.transform.Find("EnergyMeter")?.GetComponent<EnergyMeterController>();
+            RadialMenuController radialMenu = pauseGo.transform.Find("RadialMenuController")?.GetComponent<RadialMenuController>();
+            if (radialMenu != null) radialMenu.controller = controller;
+
+            // The reticle's cross+ring visual (see BuildLandingPreview's Circle) is gated behind
+            // ghostAndCrosshairEnabled, which stays false for every other scene's instance - only
+            // this one needs it on, for FastPaced's TrailAndCrosshair mode.
+            controller.landingPreview.ghostAndCrosshairEnabled = true;
+
+            // "This scene specifically should have no wiring to the other scenes" (direct
+            // request) - deactivates the pause menu's Scenes button (and the panel it opens) on
+            // just this scene's PauseSystem instance, as per-instance overrides; every other
+            // scene's pause menu keeps the full scene list. Restart and Quit stay, since both
+            // are self-contained.
+            pauseGo.transform.Find("PauseCanvas/PausePanel/ScenesButton")?.gameObject.SetActive(false);
+            pauseGo.transform.Find("PauseCanvas/ScenesPanel")?.gameObject.SetActive(false);
+
+            PauseController pauseController = pauseGo.transform.Find("PauseController")?.GetComponent<PauseController>();
+
+            EditorUtility.SetDirty(controller);
+            EditorUtility.SetDirty(freeMoveController);
+            EditorUtility.SetDirty(orbitCam);
+            EditorUtility.SetDirty(controller.landingPreview);
+            if (radialMenu != null) EditorUtility.SetDirty(radialMenu);
+
+            GameObject firstSpiralPlatform = BuildFastPacedSpiral(playerGo.transform, camGo.transform, pauseController);
+            BuildCameraStartFacing(playerGo.transform, orbitCam, firstSpiralPlatform.transform);
+            BuildPlayerShadow(playerGo.transform);
+
+            Scene fastPacedScene = EditorSceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(fastPacedScene);
+            EditorSceneManager.SaveScene(fastPacedScene);
+
+            Debug.Log("KineticEnergySetup: FastPacedLevel setup complete OK");
+        }
+
+        // "Are all platforms placed on the circumference of a circle, with their rotation set to
+        // the centre of that circle (= z axis), for every platform the circle radius becomes
+        // slightly bigger and the distance along the z axis should too, the angle of the x and y
+        // coordinates between 2 subsequent platforms needs to be atleast a 55 degrees difference,
+        // the starting platform should always start with world up as its rotation" (direct
+        // request, implemented verbatim). Builds an expanding helix: X/Y form the circle (a fixed
+        // 60-degree step per platform, safely past the 55-degree minimum), Z is the separate depth
+        // axis advancing alongside the radius, so the whole thing spirals both outward and forward
+        // at once. Each platform's rotation aligns local up (its flat landing face) to point
+        // radially INWARD, toward the z-axis at that platform's own depth ("the centre of that
+        // circle") - except the very first, which stays plain world-up (direct request), since
+        // it's the flat launch pad the spiral starts from rather than a point ON the spiral
+        // itself. Returns the first real spiral platform (not the start pad) so the caller can
+        // point the starting camera down the spiral rather than at its own far end.
+        static GameObject BuildFastPacedSpiral(Transform player, Transform cameraTransform, PauseController pauseController)
+        {
+            GameObject container = GameObject.Find("FastPacedSpiral");
+            if (container != null) UnityEngine.Object.DestroyImmediate(container);
+            container = new GameObject("FastPacedSpiral");
+
+            // Pre-configured as Transparent-surface at full alpha (1, visually identical to
+            // Opaque until faded) rather than left Opaque - direct bug report: standing on/stuck
+            // to one of these tilted platforms in first person puts the camera right against its
+            // surface, filling the screen with solid color. TransparentWhenOccupied (added to
+            // each platform below) fades this by lowering alpha at runtime, which URP silently
+            // ignores on an Opaque-surface material - see MakeTransparent's own comment for that
+            // gotcha. Starting at alpha 1 keeps every platform looking exactly as before until
+            // the player actually touches one.
+            Material startMat = new Material(FindBestShader());
+            startMat.color = new Color(0.3f, 0.75f, 0.85f);
+            MakeTransparent(startMat, 1f);
+            startMat = SaveMaterialAsset(startMat, "FastPacedStartMaterial");
+
+            Material platformMat = new Material(FindBestShader());
+            platformMat.color = new Color(0.75f, 0.25f, 0.65f);
+            MakeTransparent(platformMat, 1f);
+            platformMat = SaveMaterialAsset(platformMat, "FastPacedPlatformMaterial");
+
+            Material finishMat = new Material(FindBestShader());
+            finishMat.color = new Color(0.95f, 0.75f, 0.15f);
+            MakeTransparent(finishMat, 1f);
+            finishMat = SaveMaterialAsset(finishMat, "FastPacedFinishMaterial");
+
+            Vector3 startSize = new Vector3(6f, 0.5f, 6f);
+            GameObject startPlatform = CreateBlock(container.transform, "StartPlatform", Vector3.zero, startSize, startMat);
+            startPlatform.transform.rotation = Quaternion.identity;
+            startPlatform.AddComponent<TransparentWhenOccupied>();
+
+            player.position = new Vector3(0f, startSize.y * 0.5f + 0.5f, 0f);
+
+            const int platformCount = 10;
+            // Comfortably past the "atleast a 55 degrees difference" requirement - also a clean
+            // 6-platforms-per-revolution, so the spiral completes a full turn every 6 steps while
+            // still advancing outward/forward each time (it never retraces the same ring).
+            const float angleStepDeg = 60f;
+            // Empirically measured (temporary Play-mode diagnostic, since this project's own
+            // PredictLandingPoint comment explicitly distrusts hand-derived drag-formula guesses
+            // in favor of the real physics engine) how far a zero-gravity FastPaced shot actually
+            // travels before drag stops it: ~30m at minimum charge, ~78m at 50% charge, ~216m at
+            // max charge - a much bigger and more nonlinear range than a gravity-arc shot, and far
+            // more than an initial linear-extrapolation guess suggested. These constants are tuned
+            // against those real numbers so consecutive gaps climb from just under min-charge range
+            // (an easy opening jump) up to a bit past mid-charge range by the last platform (a real
+            // but not maximum-charge demand), rather than either trivially close or unreachable.
+            const float startRadius = 14f;
+            const float radiusStep = 12f;
+            const float startZ = 16f;
+            const float zStep = 20f;
+            Vector3 platformSize = new Vector3(4.5f, 0.5f, 4.5f);
+            Vector3 finishSize = new Vector3(6f, 0.5f, 6f);
+
+            GameObject firstSpiralPlatform = null;
+            for (int i = 1; i <= platformCount; i++)
+            {
+                float angleDeg = i * angleStepDeg;
+                float rad = angleDeg * Mathf.Deg2Rad;
+                float radius = startRadius + (i - 1) * radiusStep;
+                float z = startZ + (i - 1) * zStep;
+
+                Vector3 center = new Vector3(radius * Mathf.Cos(rad), radius * Mathf.Sin(rad), z);
+                // Direction from this platform back toward (0, 0, z) - the circle's centre at
+                // this same depth ("= z axis"). Local up gets aligned to point this way, below.
+                Vector3 inward = new Vector3(-Mathf.Cos(rad), -Mathf.Sin(rad), 0f);
+                Quaternion rotation = Quaternion.FromToRotation(Vector3.up, inward);
+
+                bool isLast = i == platformCount;
+                Vector3 size = isLast ? finishSize : platformSize;
+                Material mat = isLast ? finishMat : platformMat;
+                string name = isLast ? "FinishPlatform" : $"SpiralPlatform{i}";
+
+                GameObject platform = CreateBlock(container.transform, name, center, size, mat);
+                platform.transform.rotation = rotation;
+                platform.AddComponent<TransparentWhenOccupied>();
+
+                if (i == 1) firstSpiralPlatform = platform;
+
+                if (isLast)
+                {
+                    BuildFastPacedFinish(container.transform, center, inward, rotation, size, cameraTransform, pauseController);
+                }
+            }
+
+            return firstSpiralPlatform;
+        }
+
+        // The finish platform's extras: a billboarded "Finish" TextMesh floating off its landing
+        // face, and a trigger volume hugging that face that opens the win screen (FinishLineWin ->
+        // PauseController.ShowWin - see each of their own comments) instead of reloading the
+        // scene the way the other levels' FinishLine does. Everything is positioned along
+        // `inward` (this platform's landing-face normal - the spiral's platforms face every
+        // direction, so a hardcoded world-up offset like BuildLevel3FinishPad's would bury both
+        // inside or behind the platform for most of the spiral).
+        static void BuildFastPacedFinish(Transform parent, Vector3 platformCenter, Vector3 inward, Quaternion platformRotation,
+            Vector3 platformSize, Transform cameraTransform, PauseController pauseController)
+        {
+            GameObject textGo = new GameObject("FinishText");
+            textGo.transform.SetParent(parent, true);
+            textGo.transform.position = platformCenter + inward * 3f;
+
+            TextMesh textMesh = textGo.AddComponent<TextMesh>();
+            textMesh.text = "Finish";
+            textMesh.color = new Color(0.15f, 0.45f, 1f);
+            textMesh.fontSize = 48;
+            textMesh.characterSize = 0.2f;
+            textMesh.anchor = TextAnchor.MiddleCenter;
+            textMesh.alignment = TextAlignment.Center;
+
+            Billboard billboard = textGo.AddComponent<Billboard>();
+            billboard.target = cameraTransform;
+
+            GameObject trigger = new GameObject("FinishTrigger");
+            trigger.transform.SetParent(parent, true);
+            // Rotated WITH the platform so the box's local Y is the landing-face normal - size
+            // and offset then mean the same thing they do for a flat finish pad, just tilted.
+            trigger.transform.SetPositionAndRotation(platformCenter + inward * (platformSize.y * 0.5f + 1f), platformRotation);
+            BoxCollider triggerCollider = trigger.AddComponent<BoxCollider>();
+            triggerCollider.isTrigger = true;
+            triggerCollider.size = new Vector3(platformSize.x, 2f, platformSize.z);
+
+            FinishLineWin finishWin = trigger.AddComponent<FinishLineWin>();
+            finishWin.pauseController = pauseController;
         }
 
         // Plain solid cube - collider included (never destroyed here, unlike the decorative
@@ -587,7 +1224,7 @@ namespace KineticEnergy.EditorSetup
             // Defy Gravity scheme tuning.
             controller.minDefyGravityDuration = 0.4f;
             controller.maxDefyGravityDuration = 1.5f;
-            controller.maxDefyGravitySpeed = 35f;
+            controller.maxDefyGravitySpeed = 70f;
             controller.defyGravityFallDamping = 0.2f;
             // Moved here (was only set in BuildPlayerCube) so Level1's instance gets the same
             // explicit anti-staleness reassignment Sandbox Scene's prefab does - the exact same
@@ -615,7 +1252,9 @@ namespace KineticEnergy.EditorSetup
             {
                 new EditorBuildSettingsScene(ScenePath, true),
                 new EditorBuildSettingsScene(Level1ScenePath, true),
-                new EditorBuildSettingsScene(Level2ScenePath, true)
+                new EditorBuildSettingsScene(Level2ScenePath, true),
+                new EditorBuildSettingsScene(Level3ScenePath, true),
+                new EditorBuildSettingsScene(FastPacedLevelScenePath, true)
             };
         }
 
@@ -699,6 +1338,7 @@ namespace KineticEnergy.EditorSetup
             controller.minLaunchClearDistance = 2f;
             controller.flatGroundStickThreshold = 0.9f;
             controller.slamDownwardThreshold = 0.7f;
+            controller.stuckOnGroundTickThreshold = 10;
             controller.moveAction = moveRef;
             controller.launchAction = launchRef;
             controller.fireAction = fireRef;
@@ -1066,6 +1706,34 @@ namespace KineticEnergy.EditorSetup
             barZ.transform.localPosition = new Vector3(0f, 0.03f, 0f);
             barZ.GetComponent<Renderer>().sharedMaterial = solidMat;
 
+            // Ring of small dashed segments around the cross - FastPaced scheme's reticle
+            // (direct request: "a cross with a circle at the end") - built from the same small-
+            // block visual language as the Trail's dots rather than a custom mesh. Same angle
+            // convention as FacingFlatDirection/StickWorldDirection elsewhere in this project
+            // (Quaternion.Euler(0, angleDeg, 0) * Vector3.forward), so segment i's local +Z
+            // points radially outward and local +X (the segment's long axis) lands tangent to
+            // the ring.
+            GameObject circle = new GameObject("Circle");
+            circle.transform.SetParent(crosshair.transform, false);
+
+            const int ringSegmentCount = 16;
+            const float ringRadius = 0.75f;
+            float ringSegmentLength = (2f * Mathf.PI * ringRadius / ringSegmentCount) * 0.6f;
+            for (int i = 0; i < ringSegmentCount; i++)
+            {
+                float angleDeg = i * (360f / ringSegmentCount);
+                Quaternion segRotation = Quaternion.Euler(0f, angleDeg, 0f);
+
+                GameObject ringSegment = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                ringSegment.name = "RingSegment" + i;
+                ringSegment.transform.SetParent(circle.transform, false);
+                UnityEngine.Object.DestroyImmediate(ringSegment.GetComponent<Collider>());
+                ringSegment.transform.localPosition = (segRotation * Vector3.forward) * ringRadius + new Vector3(0f, 0.03f, 0f);
+                ringSegment.transform.localRotation = segRotation;
+                ringSegment.transform.localScale = new Vector3(ringSegmentLength, 0.08f, 0.08f);
+                ringSegment.GetComponent<Renderer>().sharedMaterial = solidMat;
+            }
+
             ghost.SetActive(false);
             trail.SetActive(false);
             crosshair.SetActive(false);
@@ -1123,7 +1791,7 @@ namespace KineticEnergy.EditorSetup
             // after the first, whose serialized values are whatever they were the very first time
             // this ran, regardless of any later change to the code-side default (the same
             // staleness risk every other tunable in this file already guards against explicitly).
-            orbitCam.minPitch = -20f;
+            orbitCam.minPitch = -75f;
             orbitCam.maxPitch = 75f;
             orbitCam.recenterSpeed = 240f;
             return orbitCam;
@@ -1216,6 +1884,13 @@ namespace KineticEnergy.EditorSetup
             GameObject controlsBtn = CreateButton("ControlsButton", pausePanel.transform, "Controls", font, accent, new Vector2(0f, -85f), new Vector2(300f, 70f));
             GameObject quitBtn = CreateButton("QuitButton", pausePanel.transform, "Quit", font, accent, new Vector2(0f, -175f), new Vector2(300f, 70f));
 
+            // Hidden by default in every scene - only FastPacedLevel's finish (FinishLineWin ->
+            // PauseController.ShowWin) ever activates it, sitting above the PAUSED title so the
+            // ordinary pause layout underneath stays untouched.
+            Text winLabel = CreateText("WinLabel", pausePanel.transform, "You Win!", font, 64, new Vector2(0f, 300f), new Vector2(700f, 90f));
+            winLabel.color = new Color(0.3f, 1f, 0.45f);
+            winLabel.gameObject.SetActive(false);
+
             GameObject controlsPanel = CreatePanel("ControlsPanel", canvasGo.transform, backdrop);
             CreateText("ControlsTitle", controlsPanel.transform, "CONTROLS", font, 48, new Vector2(0f, 220f), new Vector2(600f, 80f));
             // Wider/shorter-per-line than before to fit fontSize 30's longer StickAim description
@@ -1251,6 +1926,7 @@ namespace KineticEnergy.EditorSetup
             controller.firstControlsButton = backBtn;
             controller.firstScenesButton = sceneButtons.Length > 0 ? sceneButtons[0] : scenesBackBtn;
             controller.controlsBodyText = controlsBody;
+            controller.winLabel = winLabel;
 
             // Persistent listeners only: Button.onClick.AddListener() from an Editor script
             // registers a runtime-only delegate that is NOT serialized, so it would silently

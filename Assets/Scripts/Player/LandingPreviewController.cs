@@ -8,6 +8,11 @@ namespace KineticEnergy.Player
         Ghost,
         Trail,
         Crosshair,
+        // FastPaced scheme only (direct request: "a dotted line again with a cross with a circle
+        // at the end") - shows the Trail dots AND the Crosshair (bars + ring, see
+        // KineticEnergySetup.BuildLandingPreview) at the same time, unlike every other mode here
+        // which is exclusive (see ApplyModeVisibility).
+        TrailAndCrosshair,
         None
     }
 
@@ -68,7 +73,8 @@ namespace KineticEnergy.Player
 
         public void SetMode(PredictionMode mode)
         {
-            if (!ghostAndCrosshairEnabled && (mode == PredictionMode.Ghost || mode == PredictionMode.Crosshair)) return;
+            bool needsCrosshair = mode == PredictionMode.Ghost || mode == PredictionMode.Crosshair || mode == PredictionMode.TrailAndCrosshair;
+            if (!ghostAndCrosshairEnabled && needsCrosshair) return;
 
             currentMode = mode;
             ApplyModeVisibility();
@@ -231,8 +237,8 @@ namespace KineticEnergy.Player
         void ApplyModeVisibility()
         {
             ghostGroup?.SetActive(isVisible && currentMode == PredictionMode.Ghost && hasLanding);
-            trailGroup?.SetActive(isVisible && currentMode == PredictionMode.Trail);
-            crosshairGroup?.SetActive(isVisible && currentMode == PredictionMode.Crosshair && hasLanding);
+            trailGroup?.SetActive(isVisible && (currentMode == PredictionMode.Trail || currentMode == PredictionMode.TrailAndCrosshair));
+            crosshairGroup?.SetActive(isVisible && (currentMode == PredictionMode.Crosshair || currentMode == PredictionMode.TrailAndCrosshair) && hasLanding);
         }
     }
 }

@@ -28,6 +28,14 @@ namespace KineticEnergy.UI
         // matches whichever scheme is actually active instead of a fixed string baked in here.
         public Text controlsBodyText;
 
+        [Header("Win")]
+        // Hidden by default, inside PausePanel - FastPacedLevel's finish line (FinishLineWin)
+        // shows it via ShowWin() instead of reloading the scene the way the other levels'
+        // FinishLine does. Lives here rather than on its own component since the win screen IS
+        // the pause screen, just with this one extra label - direct request: "once you reach the
+        // finish line you should open the pause screen and display a text saying You Win!".
+        public Text winLabel;
+
         bool isPaused;
 
         void OnEnable()
@@ -45,6 +53,15 @@ namespace KineticEnergy.UI
             pausePanel?.SetActive(false);
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
+            winLabel?.gameObject.SetActive(false);
+        }
+
+        // FastPacedLevel's finish - the ordinary pause screen with the win label showing. Not
+        // one-shot-guarded here; FinishLineWin only ever calls it once.
+        public void ShowWin()
+        {
+            winLabel?.gameObject.SetActive(true);
+            if (!isPaused) Pause();
         }
 
         void Update()
@@ -77,6 +94,9 @@ namespace KineticEnergy.UI
             pausePanel?.SetActive(false);
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
+            // Un-pausing after winning keeps playing in the finished level, which is fine - but
+            // the win label shouldn't stick around on the NEXT pause after that.
+            winLabel?.gameObject.SetActive(false);
             Select(null);
         }
 

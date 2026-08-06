@@ -184,6 +184,24 @@
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": true
+                },
+                {
+                    "name": "FastPacedAim",
+                    "type": "Button",
+                    "id": "4f5061a1-2b3c-4d5e-8f90-1a2b3c4d5e6f",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
+                    "name": "FastPacedLaunch",
+                    "type": "Button",
+                    "id": "5f6172b2-3c4d-4e5f-9061-2b3c4d5e6f70",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
                 }
             ],
             "bindings": [
@@ -811,6 +829,28 @@
                     "processors": "",
                     "groups": "Gamepad",
                     "action": "RadialMenu",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "6a7283c3-4d5e-4f60-a172-3c4d5e6f7081",
+                    "path": "<Mouse>/rightButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Keyboard&Mouse",
+                    "action": "FastPacedAim",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "7b8394d4-5e6f-4071-b283-4d5e6f708192",
+                    "path": "<Mouse>/leftButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Keyboard&Mouse",
+                    "action": "FastPacedLaunch",
                     "isComposite": false,
                     "isPartOfComposite": false
                 }

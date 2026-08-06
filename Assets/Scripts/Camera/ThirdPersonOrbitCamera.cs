@@ -13,7 +13,15 @@ namespace KineticEnergy.Camera
         [Header("Orbit")]
         public float distance = 6f;
         public float rotationSpeed = 120f;
-        public float minPitch = -20f;
+        // Raised in magnitude from -20 - direct request: "allow the camera to be pointed upwards
+        // as well, for the vertical segment it was hard not being able to see what was above me".
+        // Negative pitch swings the camera BELOW the target, looking UP (see the position formula
+        // below: desiredPosition = focusPoint - rotation*forward*distance, and positive pitch
+        // tilts forward toward -Y, so negative pitch tilts it toward +Y, putting the camera
+        // underneath) - -20 only allowed a shallow 20-degree glance upward, nowhere near enough to
+        // see a platform directly overhead. -75 mirrors maxPitch's own margin from the 90-degree
+        // gimbal-adjacent instability described below, applied to the opposite pole.
+        public float minPitch = -75f;
         // Pulled back from an earlier 89 - that was close enough to true top-down (90) that
         // Quaternion.LookRotation(lookDir, Vector3.up) started reading as visibly "spinning"
         // while rotating: as lookDir approaches anti-parallel to the Vector3.up hint, tiny
@@ -40,6 +48,55 @@ namespace KineticEnergy.Camera
         [Header("Input")]
         public InputActionReference lookAction;
 
+        [Header("First Person Aim")]
+        // FastPaced scheme only (see KineticCubeController.UpdateFastPacedScheme) -
+        // SetFirstPersonMode collapses the orbit to sit exactly at the focus point instead of
+        // orbiting at `distance`, and SetAimZoom narrows the field of view as charge builds so a
+        // long-charged shot's distant landing spot stays legible instead of shrinking to a speck
+        // - direct request: "the longer you charge the more you need to zoom in on the landing
+        // spot". Both are no-ops for every other scheme, which never calls them.
+        public float normalFov = 60f;
+        public float maxZoomFov = 20f;
+
+        UnityEngine.Camera cam;
+        bool firstPerson;
+
+        // The up direction the whole orbit is built around - world up everywhere except after a
+        // FastPaced crash onto a tilted platform, where SetUpVector re-bases it to that
+        // platform's surface normal (direct request: "the camera's up should be the platform's up
+        // that the player crashed onto"). currentUp glides toward targetUp in LateUpdate rather
+        // than snapping, so the horizon rolls smoothly over ~a second instead of jump-cutting.
+        // All the orbit math below composes tiltRotation (world-up -> currentUp) with the
+        // ordinary world-up yaw/pitch rotation, so yaw/pitch keep meaning "turn/look within the
+        // current frame of reference" no matter which way that frame is tilted.
+        Vector3 targetUp = Vector3.up;
+        Vector3 currentUp = Vector3.up;
+        public float upAlignSpeed = 3f;
+
+        Quaternion TiltRotation => Quaternion.FromToRotation(Vector3.up, currentUp);
+
+        // World-space direction this camera is currently looking - the FastPaced scheme fires
+        // exactly along this, so the shot always goes exactly where the first-person view points.
+        public Vector3 AimForward => TiltRotation * Quaternion.Euler(pitch, yaw, 0f) * Vector3.forward;
+
+        public void SetUpVector(Vector3 up)
+        {
+            targetUp = up.sqrMagnitude > 0.0001f ? up.normalized : Vector3.up;
+        }
+
+        public void SetFirstPersonMode(bool enabled)
+        {
+            firstPerson = enabled;
+            if (!enabled) SetAimZoom(0f);
+        }
+
+        public void SetAimZoom(float chargeFraction01)
+        {
+            if (cam == null) cam = GetComponent<UnityEngine.Camera>();
+            if (cam == null) return;
+            cam.fieldOfView = Mathf.Lerp(normalFov, maxZoomFov, Mathf.Clamp01(chargeFraction01));
+        }
+
         [Header("Wall Occlusion")]
         // "If the camera is looking at a wall from the outside, you should be able to look
         // through the wall" (direct request - commonly called camera occlusion culling). There
@@ -60,6 +117,12 @@ namespace KineticEnergy.Camera
 
         readonly List<Renderer> occludedRenderers = new List<Renderer>();
         readonly List<Renderer> stillOccludedThisFrame = new List<Renderer>();
+
+        void Awake()
+        {
+            cam = GetComponent<UnityEngine.Camera>();
+            if (cam != null) cam.fieldOfView = normalFov;
+        }
 
         void Start()
         {
@@ -157,24 +220,50 @@ namespace KineticEnergy.Camera
             float pitchDelta = (invertY ? look.y : -look.y) * rotationSpeed * dt;
             pitch = Mathf.Clamp(pitch + pitchDelta, minPitch, maxPitch);
 
+            // Glide the reference-frame up toward wherever the last crash re-based it (see
+            // SetUpVector) - Slerp by a rate*dt fraction gives a fast start that eases out, which
+            // reads as the horizon "settling" onto the new platform rather than snapping.
+            currentUp = Vector3.Slerp(currentUp, targetUp, Mathf.Clamp01(upAlignSpeed * dt)).normalized;
+            Quaternion tilt = TiltRotation;
+
             // Traditional 3rd-person platformer orbit: position swings around the target on
             // both yaw and pitch, always framing it, rather than tilting/panning in place.
-            Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
-            Vector3 focusPoint = target.position + Vector3.up * height;
-            Vector3 desiredPosition = focusPoint - rotation * Vector3.forward * distance;
+            // firstPerson (FastPaced scheme's RMB-aim only - see SetFirstPersonMode) collapses
+            // this to sit exactly at the focus point instead of orbiting at `distance`, using the
+            // raw look rotation directly rather than LookRotation-at-target (which degenerates at
+            // zero distance, where focusPoint - transform.position is ~zero and has no reliable
+            // direction). Reuses the same SmoothDamp position glide either way, so switching in
+            // or out of first person eases smoothly rather than snapping. Everything is composed
+            // on top of `tilt` so the whole orbit - height offset included - is expressed in the
+            // crashed platform's frame of reference, not the world's (see currentUp above).
+            Quaternion rotation = tilt * Quaternion.Euler(pitch, yaw, 0f);
+            Vector3 focusPoint = target.position + currentUp * height;
+            Vector3 desiredPosition = firstPerson ? focusPoint : focusPoint - rotation * Vector3.forward * distance;
 
             transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, positionSmoothTime);
 
-            // Look directly at the target from wherever the camera ACTUALLY is, rather than
-            // reusing the theoretical orbit rotation - position lags behind via SmoothDamp, so
-            // during fast stick movement the two used to disagree and the camera briefly didn't
-            // point exactly at the player.
-            Vector3 lookDir = focusPoint - transform.position;
-            if (lookDir.sqrMagnitude > 0.0001f)
+            if (firstPerson)
             {
-                transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+                transform.rotation = rotation;
+            }
+            else
+            {
+                // Look directly at the target from wherever the camera ACTUALLY is, rather than
+                // reusing the theoretical orbit rotation - position lags behind via SmoothDamp, so
+                // during fast stick movement the two used to disagree and the camera briefly didn't
+                // point exactly at the player.
+                Vector3 lookDir = focusPoint - transform.position;
+                if (lookDir.sqrMagnitude > 0.0001f)
+                {
+                    transform.rotation = Quaternion.LookRotation(lookDir, currentUp);
+                }
             }
 
+            // Always called, even in first person - UpdateWallOcclusion's own distance check
+            // already no-ops the sphere-cast when the camera sits ~on top of the target (exactly
+            // the first-person case), but the loop that RESTORES a renderer hidden just before
+            // switching into first person still needs to run every frame, or a wall occluded the
+            // instant before RMB was pressed would stay disabled for the entire aim.
             UpdateWallOcclusion(focusPoint);
         }
 
