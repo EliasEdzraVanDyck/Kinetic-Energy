@@ -64,6 +64,14 @@ namespace KineticEnergy.Player
         // crashSpeed * energyGainPerSpeed * (1 + crashSpeed * energyGainSpeedBonus).
         public float energyGainPerSpeed = 0.03f;
         public float energyGainSpeedBonus = 0.01f;
+        // Floors GainEnergyFromCrash's result - direct request: "you should at least get 5% of
+        // the meter back no matter your speed when you land". Without this, a crash at very low
+        // speed (a gentle short hop, or the tail end of a soft landing) could compute a gain close
+        // to zero from the speed-based formula above, reading as "the meter doesn't always update
+        // /you don't always gain energy properly" even though a genuine stick-and-refund DID just
+        // happen - this guarantees every crash that reaches GainEnergyFromCrash refunds at least
+        // this much regardless of how gentle it was.
+        [Range(0f, 1f)] public float minEnergyGainPerCrash = 0.05f;
         // Yellow energy / blue charge-preview meter, top-right corner - wired by KineticEnergySetup.
         public EnergyMeterController energyMeter;
         // Multiplies Time.deltaTime in AccumulateCharge, so a second of real holding doesn't turn
@@ -82,7 +90,12 @@ namespace KineticEnergy.Player
         // chargeFraction interpolating both ranges together.
         public float minDefyGravityDuration = 0.4f;
         public float maxDefyGravityDuration = 1.5f;
-        public float minDefyGravitySpeed = 10f;
+        // Minimum deliberately reuses minLaunchForce (the SAME field every other scheme's charge
+        // curve starts from - see UpdateChargeBasedScheme/UpdateStickAimChargeScheme) rather than
+        // its own separate value, so the schemes can never drift apart again - direct request:
+        // "make sure all control schemes have the same minimum launch force". Only the ceiling
+        // stays scheme-specific (maxDefyGravitySpeed), since a sustained forced-velocity flight
+        // and a ballistic arc's exit speed aren't really the same kind of "maximum" to begin with.
         public float maxDefyGravitySpeed = 35f;
         // Applied only AFTER the forced-flight timer runs out and gravity resumes ("you start
         // falling again since gravity starts affecting you again") - low, like downLaunchDamping,
@@ -179,6 +192,16 @@ namespace KineticEnergy.Player
         // treated ramps/near-walls as walkable ground and auto-cleared isStuck for them too. 0.9
         // only accepts genuinely near-horizontal surfaces (~25 degrees off flat or less).
         [Range(0f, 1f)] public float flatGroundStickThreshold = 0.9f;
+        // How steeply DOWN a launch has to be aimed (Vector3.Dot(direction, Vector3.down)) to
+        // count as a "slam" for OnCollisionEnter's guard-bypass (see currentFlightIsDownward's own
+        // comment) - direct request fixing a real bug: launching straight down from standing on
+        // the ground never registered as a crash at all, since it always fell inside
+        // launchGraceDuration/minLaunchClearDistance, guards built for a DIFFERENT problem
+        // (a shallow horizontal shot spuriously re-touching its own launch platform). 0.7 covers
+        // StickAim's down-charge (60 degrees off horizontal by default = dot ~0.87) and Defy
+        // Gravity's Down direction (straight down, dot 1.0) while still excluding mostly-forward
+        // or mostly-up shots that legitimately need the spurious-recontact protection.
+        [Range(0f, 1f)] public float slamDownwardThreshold = 0.7f;
 
         [Header("Input")]
         public InputActionReference moveAction;
@@ -272,6 +295,19 @@ namespace KineticEnergy.Player
         bool isAiming;
         bool waitingForLtRelease;
         bool hasLaunched;
+        // Set in QueueLaunch, read by OnCollisionEnter - a launch aimed steeply enough downward
+        // (a "slam") is EXPECTED to immediately re-strike whatever surface it fired from (that's
+        // the whole point of aiming down while standing on the ground), so launchGraceTimer/
+        // minLaunchClearDistance's spurious-recontact protection doesn't apply to it the way it
+        // does to a forward/upward shot - see OnCollisionEnter's own comment on why this bypasses
+        // both guards. Direct request, fixing a real soft-lock: "when you touch a wall after
+        // launching you should stick to it" type crashes that should register right away (a close
+        // slam) instead never did, leaving hasLaunched stuck true and movement blocked, which
+        // was worst when energy was also 0 (no way to fire a NEW, farther-travelling shot either).
+        bool currentFlightIsDownward;
+        // See FixedUpdate's own comment - the clean, pre-collision-resolution velocity used by
+        // GainEnergyFromCrash instead of reading rb.linearVelocity directly inside OnCollisionEnter.
+        Vector3 velocityBeforePhysicsStep;
         bool isGrounded;
         // True from the instant a genuine in-flight crash is detected (see OnCollisionEnter)
         // until the next launch actually fires (see FixedUpdate's launchQueued handling) - "you
@@ -758,6 +794,9 @@ namespace KineticEnergy.Player
                 rb.angularVelocity = Vector3.zero;
             }
 
+            bool slamJustFired = false;
+            float slamForce = 0f;
+
             if (launchQueued)
             {
                 launchQueued = false;
@@ -776,6 +815,9 @@ namespace KineticEnergy.Player
                     defyGravityFlightTimer = queuedDefyGravityDuration;
                     defyGravityFlightVelocity = queuedDirection * (queuedForce / rb.mass);
                 }
+
+                slamJustFired = currentFlightIsDownward;
+                slamForce = queuedForce;
             }
 
             // "Gravity shouldn't affect you [during the charge], after that time is up you start
@@ -815,7 +857,28 @@ namespace KineticEnergy.Player
             Vector3 halfExtents = boxCollider != null
                 ? new Vector3(boxCollider.bounds.extents.x * 0.9f, 0.05f, boxCollider.bounds.extents.z * 0.9f)
                 : new Vector3(0.4f, 0.05f, 0.4f);
-            isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out _, transform.rotation, groundCheckDistance);
+            isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out RaycastHit groundHit, transform.rotation, groundCheckDistance);
+
+            // A slam fired from ZERO clearance (already resting on the exact surface it's aimed
+            // at) never actually leaves that surface - PhysX's contact solver absorbs a downward
+            // impulse into an already-supporting surface instantly, same as pushing down on
+            // something already resting on a table, so rb.linearVelocity never shows any change
+            // and OnCollisionEnter never fires again (the contact never broke to begin with; at
+            // most Unity reports OnCollisionStay, which this script doesn't listen for at all).
+            // Confirmed directly with a Play-mode diagnostic - a Vector3.down slam from standing
+            // on flat ground left velocity/position completely unchanged for 35+ physics ticks
+            // despite currentFlightIsDownward's OnCollisionEnter guard-bypass being in place and
+            // working correctly; the crash simply never had an event to attach to. This handles
+            // that case directly instead of waiting for a collision callback that isn't coming -
+            // same direct request as currentFlightIsDownward's own comment, and same crash
+            // handling (RegisterCrash) either way. Uses queuedForce as the crash speed proxy,
+            // since the real velocity got absorbed before it could be measured - the cube
+            // committed to that speed the instant it fired, even though the ground meant it never
+            // got to carry it anywhere.
+            if (slamJustFired && isGrounded)
+            {
+                RegisterCrash(groundHit.normal, slamForce);
+            }
 
             // Breaks a crashed/isStuck cube free automatically once it's genuinely resting on
             // FLAT ground again, no fresh launch required - direct request: "you should still be
@@ -833,6 +896,19 @@ namespace KineticEnergy.Player
                 isStuck = false;
                 rb.useGravity = true;
             }
+
+            // Captured LAST, after everything above (including a fresh launchQueued impulse this
+            // exact tick) has had its say, and still strictly before Unity's physics simulation
+            // (which runs only after every script's FixedUpdate this frame) resolves whatever
+            // collision is about to happen - direct request, fixing "the energy you get from
+            // crashes doesn't always seem to be consistent". OnCollisionEnter used to read
+            // rb.linearVelocity directly, but by the time that callback fires PhysX may already
+            // have partially applied its own collision response (a documented Unity gotcha), and
+            // how much gets resolved before vs after the callback isn't consistent across impact
+            // angles/geometry. Capturing at the TOP of FixedUpdate instead (an earlier version of
+            // this fix) missed a same-tick "slam" launch's own impulse entirely, reading the
+            // stale pre-launch velocity instead - capturing here avoids both problems at once.
+            velocityBeforePhysicsStep = rb.linearVelocity;
         }
 
         void OnCollisionEnter(Collision collision)
@@ -845,11 +921,24 @@ namespace KineticEnergy.Player
             // reverted here - see isStuck's own comment for how walking away afterward still
             // works without needing a fresh launch, on a floor/ceiling at least).
             if (!hasLaunched || isStuck) return;
-            if (launchGraceTimer > 0f) return;
-            // See minLaunchClearDistance's own comment - a second, independent guard alongside
-            // the time-based one above, for a shallow shot that can still genuinely re-touch its
-            // own launch platform after the grace window has already expired.
-            if (Vector3.Distance(transform.position, launchStartPosition) < minLaunchClearDistance) return;
+            // A steeply-downward "slam" skips both guards below entirely - see
+            // currentFlightIsDownward's own comment. For every OTHER launch direction they still
+            // apply unchanged: launchGraceTimer guards against PhysX re-reporting a large impulse's
+            // own launch-platform contact as a fresh collision, and minLaunchClearDistance guards
+            // against a shallow, low-angle shot genuinely re-touching that same platform shortly
+            // after. Direct request, fixing a real soft-lock: launching straight down from
+            // standing on the ground fell inside BOTH of those windows every time, so the crash
+            // never registered at all - no stick, no energy, and hasLaunched stayed true forever,
+            // permanently blocking ground movement (worst at 0 energy, since firing a fresh,
+            // farther-travelling shot to escape wasn't an option either).
+            if (!currentFlightIsDownward)
+            {
+                if (launchGraceTimer > 0f) return;
+                // See minLaunchClearDistance's own comment - a second, independent guard alongside
+                // the time-based one above, for a shallow shot that can still genuinely re-touch its
+                // own launch platform after the grace window has already expired.
+                if (Vector3.Distance(transform.position, launchStartPosition) < minLaunchClearDistance) return;
+            }
 
             // TEMPORARY diagnostic: logs exactly how far off the prediction was the moment it's
             // possible to measure (right as the real landing is detected), including which axis
@@ -863,15 +952,23 @@ namespace KineticEnergy.Player
                 hasPredictedLanding = false;
             }
 
-            // "Whenever you crash onto an object, you stop all movement and stick to that
-            // location until you launch again" (direct request) - stop dead, freeze in place, and
-            // turn gravity off outright (direct request, replacing reliance on the FixedUpdate
-            // freeze block's continuous velocity-zeroing alone) so there's no way for even a
-            // single tick's worth of gravity to sneak in a visible sag before the next zero.
-            // isStuck itself clears two ways: a fresh launch (as before, see FixedUpdate's
-            // launchQueued handling), or automatically once resting on genuinely FLAT ground - see
-            // flatGroundStickThreshold's own comment for why isGrounded alone wasn't enough.
-            float crashSpeed = rb.linearVelocity.magnitude;
+            RegisterCrash(collision.GetContact(0).normal, velocityBeforePhysicsStep.magnitude);
+        }
+
+        // "Whenever you crash onto an object, you stop all movement and stick to that location
+        // until you launch again" (direct request) - stop dead, freeze in place, and turn gravity
+        // off outright (direct request, replacing reliance on the FixedUpdate freeze block's
+        // continuous velocity-zeroing alone) so there's no way for even a single tick's worth of
+        // gravity to sneak in a visible sag before the next zero. isStuck itself clears two ways:
+        // a fresh launch (as before, see FixedUpdate's launchQueued handling), or automatically
+        // once resting on genuinely FLAT ground - see flatGroundStickThreshold's own comment for
+        // why isGrounded alone wasn't enough. Shared by OnCollisionEnter (the normal path - a shot
+        // that travelled away and later hit something) AND FixedUpdate's own immediate-slam check
+        // (see slamAbsorbedByGround's own comment) - a slam fired from ZERO clearance never gets a
+        // fresh OnCollisionEnter to react to at all, since the cube never actually leaves the
+        // surface it's already touching.
+        void RegisterCrash(Vector3 contactNormal, float crashSpeed)
+        {
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
             rb.useGravity = false;
@@ -883,7 +980,7 @@ namespace KineticEnergy.Player
             // Fed to flatGroundStickThreshold's check above and to AlignVisualToSurface below -
             // direct request: "the cubes surface should align with the surface it just hit, so
             // they are parallel".
-            stuckSurfaceNormal = collision.GetContact(0).normal;
+            stuckSurfaceNormal = contactNormal;
             freeMoveController?.AlignVisualToSurface(stuckSurfaceNormal);
 
             GainEnergyFromCrash(crashSpeed);
@@ -1323,7 +1420,7 @@ namespace KineticEnergy.Player
                 float chargeFraction = ChargeFraction();
                 aimArrow?.SetAim(dir, chargeFraction);
 
-                float flightSpeed = Mathf.Lerp(minDefyGravitySpeed, maxDefyGravitySpeed, chargeFraction);
+                float flightSpeed = Mathf.Lerp(minLaunchForce, maxDefyGravitySpeed, chargeFraction);
                 float flightDuration = Mathf.Lerp(minDefyGravityDuration, maxDefyGravityDuration, chargeFraction);
 
                 // rb.linearVelocity is held at zero for the whole charge (see FixedUpdate), so
@@ -1401,6 +1498,7 @@ namespace KineticEnergy.Player
             queuedDefyGravityDuration = defyGravityDuration;
             launchQueued = true;
             hasLaunched = true;
+            currentFlightIsDownward = Vector3.Dot(direction.normalized, Vector3.down) >= slamDownwardThreshold;
             // Every launch spends the charge fraction it took to build, straight out of the
             // shared energy tank - "no more time/energy/speed can be added... when you reach the
             // limit" (direct request) is what AccumulateCharge already enforces on the way up;
@@ -1706,6 +1804,7 @@ namespace KineticEnergy.Player
         void GainEnergyFromCrash(float crashSpeed)
         {
             float gained = crashSpeed * energyGainPerSpeed * (1f + crashSpeed * energyGainSpeedBonus);
+            gained = Mathf.Max(gained, minEnergyGainPerCrash);
             energyFraction = Mathf.Clamp01(energyFraction + gained);
         }
 

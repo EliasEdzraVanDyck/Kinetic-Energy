@@ -581,12 +581,12 @@ namespace KineticEnergy.EditorSetup
             controller.energyCostPerFullCharge = 1f;
             controller.energyGainPerSpeed = 0.03f;
             controller.energyGainSpeedBonus = 0.01f;
+            controller.minEnergyGainPerCrash = 0.05f;
             controller.chargeAccumulationRate = 0.3f;
 
             // Defy Gravity scheme tuning.
             controller.minDefyGravityDuration = 0.4f;
             controller.maxDefyGravityDuration = 1.5f;
-            controller.minDefyGravitySpeed = 10f;
             controller.maxDefyGravitySpeed = 35f;
             controller.defyGravityFallDamping = 0.2f;
             // Moved here (was only set in BuildPlayerCube) so Level1's instance gets the same
@@ -698,6 +698,7 @@ namespace KineticEnergy.EditorSetup
             controller.launchGraceDuration = 0.15f;
             controller.minLaunchClearDistance = 2f;
             controller.flatGroundStickThreshold = 0.9f;
+            controller.slamDownwardThreshold = 0.7f;
             controller.moveAction = moveRef;
             controller.launchAction = launchRef;
             controller.fireAction = fireRef;
