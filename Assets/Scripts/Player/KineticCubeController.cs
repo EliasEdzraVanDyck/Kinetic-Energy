@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
@@ -2075,6 +2076,10 @@ namespace KineticEnergy.Player
         Vector3 PredictLandingPoint(Vector3 startPos, Vector3 initialVelocity, float damping, out int stepCount, out bool didLand, float gravityFreeDuration = 0f)
         {
             EnsurePredictionClone();
+            // Keeps the isolated physics scene's geometry matching the live scene before this
+            // frame's simulation - active-state flips (launch buttons), moves, resizes,
+            // rotations all land here. See SyncPredictionGeometry's own comment.
+            SyncPredictionGeometry();
 
             // Damping now varies by charge level (see the Launch Force header comment) - set
             // fresh every call to match whatever shot is currently being aimed, rather than the
@@ -2224,12 +2229,17 @@ namespace KineticEnergy.Player
         // static-geometry stand-ins inside the prediction's own isolated scene, matching every
         // collider in the main scene that isn't a Rigidbody (platforms, floor) so the clone has
         // something to land on. Built once, lazily, on the first prediction of the level's
-        // lifetime - aiming can't start before at least one real Update() frame has passed, by
-        // which point every Awake()/Start() in the scene (including LevelGenerator's) has
-        // already run, so the geometry being copied is guaranteed final.
+        // lifetime - but no longer a frozen snapshot: each proxy stays PAIRED with its source
+        // collider (geometryProxies) and SyncPredictionGeometry re-mirrors transform, collider
+        // dimensions, and active state on every prediction frame, so the dotted line stays
+        // accurate when a launch button flips a platform on/off, or anything gets moved,
+        // resized, or rotated at runtime (direct request). INACTIVE objects are included in
+        // this initial scan on purpose - a button-revealed platform needs its proxy already
+        // waiting (disabled) before it first turns on. Only colliders created brand-new at
+        // runtime after this scan remain invisible to the prediction.
         void BuildPredictionGeometryProxies()
         {
-            Collider[] colliders = FindObjectsByType<Collider>(FindObjectsInactive.Exclude);
+            Collider[] colliders = FindObjectsByType<Collider>(FindObjectsInactive.Include, FindObjectsSortMode.None);
 
             foreach (Collider col in colliders)
             {
@@ -2241,27 +2251,74 @@ namespace KineticEnergy.Player
 
                 GameObject proxy = new GameObject("PredictionGeometryProxy");
                 SceneManager.MoveGameObjectToScene(proxy, predictionScene);
-                proxy.transform.SetPositionAndRotation(col.transform.position, col.transform.rotation);
-                proxy.transform.localScale = col.transform.lossyScale;
 
-                if (col is BoxCollider box)
+                PredictionGeometryProxy entry = new PredictionGeometryProxy { source = col, proxy = proxy };
+                if (col is BoxCollider)
                 {
-                    BoxCollider proxyBox = proxy.AddComponent<BoxCollider>();
-                    proxyBox.center = box.center;
-                    proxyBox.size = box.size;
+                    entry.proxyBox = proxy.AddComponent<BoxCollider>();
                 }
                 else if (col is MeshCollider meshCol)
                 {
-                    MeshCollider proxyMesh = proxy.AddComponent<MeshCollider>();
-                    proxyMesh.sharedMesh = meshCol.sharedMesh;
-                    proxyMesh.convex = meshCol.convex;
+                    entry.proxyMesh = proxy.AddComponent<MeshCollider>();
+                    entry.proxyMesh.convex = meshCol.convex;
                 }
                 else
                 {
                     Debug.LogWarning($"KineticCubeController: unhandled collider type {col.GetType().Name} on {col.name} - not included in landing prediction geometry.");
                     Destroy(proxy);
+                    continue;
                 }
+
+                geometryProxies.Add(entry);
+                MirrorGeometryProxy(entry);
             }
+        }
+
+        class PredictionGeometryProxy
+        {
+            public Collider source;
+            public GameObject proxy;
+            public BoxCollider proxyBox;
+            public MeshCollider proxyMesh;
+        }
+        readonly List<PredictionGeometryProxy> geometryProxies = new List<PredictionGeometryProxy>();
+
+        // Re-mirrors every proxy from its live source - called once per prediction (i.e. every
+        // frame while aiming). ~10-30 proxies of trivially cheap copies; only SetActive is
+        // guarded, since toggling an object is the one genuinely non-free operation here.
+        void SyncPredictionGeometry()
+        {
+            for (int i = geometryProxies.Count - 1; i >= 0; i--)
+            {
+                PredictionGeometryProxy entry = geometryProxies[i];
+                if (entry.source == null)
+                {
+                    if (entry.proxy != null) Destroy(entry.proxy);
+                    geometryProxies.RemoveAt(i);
+                    continue;
+                }
+                MirrorGeometryProxy(entry);
+            }
+        }
+
+        void MirrorGeometryProxy(PredictionGeometryProxy entry)
+        {
+            Transform sourceTransform = entry.source.transform;
+            entry.proxy.transform.SetPositionAndRotation(sourceTransform.position, sourceTransform.rotation);
+            entry.proxy.transform.localScale = sourceTransform.lossyScale;
+
+            if (entry.proxyBox != null && entry.source is BoxCollider sourceBox)
+            {
+                if (entry.proxyBox.center != sourceBox.center) entry.proxyBox.center = sourceBox.center;
+                if (entry.proxyBox.size != sourceBox.size) entry.proxyBox.size = sourceBox.size;
+            }
+            else if (entry.proxyMesh != null && entry.source is MeshCollider sourceMesh)
+            {
+                if (entry.proxyMesh.sharedMesh != sourceMesh.sharedMesh) entry.proxyMesh.sharedMesh = sourceMesh.sharedMesh;
+            }
+
+            bool sourceSolid = entry.source.enabled && entry.source.gameObject.activeInHierarchy;
+            if (entry.proxy.activeSelf != sourceSolid) entry.proxy.SetActive(sourceSolid);
         }
 
         float ChargeFraction()
