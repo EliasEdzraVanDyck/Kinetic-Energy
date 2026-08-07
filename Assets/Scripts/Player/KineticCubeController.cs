@@ -512,7 +512,10 @@ namespace KineticEnergy.Player
         // and during Defy Gravity's forced-velocity flight window, where even a small additive
         // nudge would spoil the straight line the charge promised.
         public bool AllowAirborneNudge => !isAiming && !isStuck && !mixedAirAiming && defyGravityFlightTimer <= 0f && launchGraceTimer <= 0f
-            && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None && !fastPacedCharging;
+            && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None && !fastPacedCharging
+            // Tutorial2's midair aim repurposes the left stick for AIMING (see the camera's
+            // SetAimStickOverride) - the same stick must not simultaneously nudge the flight.
+            && !(mixedFastPacedAir && fastPacedAiming);
 
         bool launchQueued;
         Vector3 queuedDirection;
@@ -712,6 +715,20 @@ namespace KineticEnergy.Player
             // frame's scheme update sets them) is imperceptible, well under 17ms.
             ApplyChargeTimeScale();
 
+            // Tutorial2's midair aim steers with the LEFT stick (direct request) - fed to the
+            // camera every frame while that aim is active and cleared otherwise, so the right
+            // stick hands control back cleanly the moment the aim ends. Mouse aiming is
+            // unaffected (the camera only substitutes non-mouse look input).
+            if (cameraOrbit != null)
+            {
+                bool aimWithMoveStick = mixedFastPacedAir && controlScheme == ControlScheme.Mixed && (fastPacedAiming || fastPacedCharging);
+                Vector2 aimStick = aimWithMoveStick && moveAction != null && moveAction.action != null
+                    ? moveAction.action.ReadValue<Vector2>()
+                    : Vector2.zero;
+                if (aimStick.sqrMagnitude < aimDeadzone * aimDeadzone) aimStick = Vector2.zero;
+                cameraOrbit.SetAimStickOverride(aimWithMoveStick, aimStick);
+            }
+
             // Yellow energy / blue charge-preview meter - updated unconditionally every frame
             // (not just inside whichever scheme branch is active) so it stays correct through
             // scheme switches too.
@@ -743,7 +760,12 @@ namespace KineticEnergy.Player
 
         void ApplyChargeTimeScale()
         {
-            bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || fastPacedCharging || mixedAirAiming;
+            // Tutorial2's midair aim slows the game like Tutorial's LT-aim does (direct
+            // request) - the hybrid can only ever be aiming while airborne (grounded cancels
+            // it, see UpdateMixedScheme), so this never slows grounded play. FastPacedLevel's
+            // own aiming (mixedFastPacedAir false) deliberately stays full speed.
+            bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || fastPacedCharging || mixedAirAiming
+                || (mixedFastPacedAir && controlScheme == ControlScheme.Mixed && fastPacedAiming);
             // Charging's bullet-time wins over the flight speed-up - starting a mid-air charge
             // freezes the cube anyway (the "flight" is suspended), so the slow-down is the state
             // that matches what's on screen. hasLaunched clears on crash (RegisterCrash), which
@@ -2010,6 +2032,17 @@ namespace KineticEnergy.Player
                 // Same energy gate every other scheme uses to allow STARTING a new aim - see
                 // canStartNewAim/canLaunch's own comments.
                 if (energyFraction <= 0f) return;
+                // Tutorial2's hybrid (mixedFastPacedAir): opening the air aim needs a FRESH
+                // press, not a hold carried over from the grounded launch - Mixed fires its
+                // grounded shot with these same physical buttons still down, and without this
+                // gate the air aim (and, one more press later, the charge zoom) opened itself
+                // the instant the launch left the ground (direct bug report). FastPacedLevel
+                // (mixedFastPacedAir false) keeps its original hold-to-aim behavior.
+                if (mixedFastPacedAir && controlScheme == ControlScheme.Mixed
+                    && !(fastPacedAimAction != null && fastPacedAimAction.action != null && fastPacedAimAction.action.WasPressedThisFrame()))
+                {
+                    return;
+                }
                 fastPacedAiming = true;
                 cameraOrbit?.SetFirstPersonMode(true);
             }
@@ -2065,6 +2098,10 @@ namespace KineticEnergy.Player
                 fastPacedCharging = false;
                 chargeTime = 0f;
                 landingPreview?.SetVisible(false);
+                // The charge zoom lives exactly as long as the launch button is held (direct
+                // request) - firing lets go of it, so the camera snaps back out here rather
+                // than staying zoomed at the last charge level until the aim itself ends.
+                cameraOrbit?.SetAimZoom(0f);
                 // fastPacedAiming (and the first-person camera) deliberately stay active here -
                 // Right Mouse is still held, ready to charge another shot immediately.
             }

@@ -48,6 +48,19 @@ namespace KineticEnergy.Camera
         [Header("Input")]
         public InputActionReference lookAction;
 
+        // Tutorial2's midair aim (KineticCubeController.mixedFastPacedAir) - while active, the
+        // LEFT stick aims instead of the right stick (direct request): any non-mouse look input
+        // is substituted by the stick value fed in here each frame. Mouse aiming is deliberately
+        // unaffected - the substitution only applies when the look action isn't mouse-driven.
+        bool aimStickOverrideActive;
+        Vector2 aimStickOverrideValue;
+
+        public void SetAimStickOverride(bool active, Vector2 stick)
+        {
+            aimStickOverrideActive = active;
+            aimStickOverrideValue = active ? stick : Vector2.zero;
+        }
+
         [Header("Fine Aim")]
         // "Slow down the speed of aiming if you make fine adjustments with your mouse or stick,
         // if you make wider less fine movements, the speed should be the same as now" (direct
@@ -201,6 +214,16 @@ namespace KineticEnergy.Camera
             Vector2 look = lookAction != null && lookAction.action != null
                 ? lookAction.action.ReadValue<Vector2>()
                 : Vector2.zero;
+
+            // Left-stick aim substitution (see SetAimStickOverride) - replaces stick-driven
+            // look input only; a mouse-driven frame keeps the mouse delta untouched.
+            if (aimStickOverrideActive)
+            {
+                bool lookIsMouseDriven = lookAction != null && lookAction.action != null
+                    && lookAction.action.activeControl != null
+                    && lookAction.action.activeControl.device is Mouse;
+                if (!lookIsMouseDriven) look = aimStickOverrideValue;
+            }
 
             // Unscaled, not Time.deltaTime - Time.deltaTime already shrinks 1:1 with
             // Time.timeScale, which would otherwise make the camera merely ride along with
