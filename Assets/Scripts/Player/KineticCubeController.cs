@@ -322,6 +322,17 @@ namespace KineticEnergy.Player
         // NOT slow down aim/turn responsiveness - see UpdateChargeBasedScheme's use of
         // Time.unscaledDeltaTime for aimYaw/aimPitch specifically.
         public float chargeTimeScale = 0.75f;
+        // "While launching and not aiming, make the game speed 200%" (direct request) - global
+        // Time.timeScale while a launch is in flight (hasLaunched) and nothing is charging or
+        // aiming (those keep chargeTimeScale's slow-down, which always wins). Purely the
+        // player's PERCEPTION of speed, not the real values: the trajectory is identical (same
+        // physics, just more of it per real second), the camera reads unscaled time so turning
+        // is unaffected, and the airborne nudge divides its acceleration back out by any
+        // timeScale above 1 (see KineticCubeControllerFreeMove.FixedUpdate), so steering
+        // strength per real second is unchanged too. Resets to 1x the moment the flight ends
+        // (crash or landing). FastPaced ignores this and keeps its own
+        // fastPacedFlightTimeScale.
+        public float launchFlightTimeScale = 2f;
 
         [Header("Stick Aim Scheme")]
         // Right Bumper - shows/hides the landing-preview trail, for every scheme, and does NOT
@@ -730,7 +741,9 @@ namespace KineticEnergy.Player
             // is the "reset after" the request asks for; the fall-reset and pause system already
             // manage timeScale themselves on their own paths.
             bool fastPacedInFlight = controlScheme == ControlScheme.FastPaced && hasLaunched;
-            Time.timeScale = charging ? chargeTimeScale : (fastPacedInFlight ? fastPacedFlightTimeScale : 1f);
+            // Every other scheme's in-flight speed-up - see launchFlightTimeScale's own comment.
+            float flightScale = fastPacedInFlight ? fastPacedFlightTimeScale : (hasLaunched ? launchFlightTimeScale : 1f);
+            Time.timeScale = charging ? chargeTimeScale : flightScale;
         }
 
         // Shared by LaunchInstantly/HoldRelease/AnalogPressure (standalone) and Mixed's grounded
@@ -1108,7 +1121,19 @@ namespace KineticEnergy.Player
             // got to carry it anywhere.
             if (slamJustFired && isGrounded)
             {
-                RegisterCrash(groundHit.normal, slamForce, groundHit.collider);
+                // Slamming while STANDING on a breakable pane: the zero-clearance slam's
+                // contact never breaks (see the comment above), so OnCollisionEnter's own
+                // breakable check can't fire - smash it from here instead, and skip the crash
+                // so gravity carries the cube down through the fresh hole.
+                BreakableCrackWall groundBreakable = groundHit.collider != null ? groundHit.collider.GetComponentInParent<BreakableCrackWall>() : null;
+                if (groundBreakable != null)
+                {
+                    groundBreakable.Smash();
+                }
+                else
+                {
+                    RegisterCrash(groundHit.normal, slamForce, groundHit.collider);
+                }
             }
 
             // Backstop for every OTHER direction that can end up with the exact same "never
@@ -1186,6 +1211,30 @@ namespace KineticEnergy.Player
 
         void OnCollisionEnter(Collision collision)
         {
+            // RestartWall: any touch reloads the level - checked before every guard below, so a
+            // grounded walk-in restarts just as reliably as a mid-flight crash. Same reload the
+            // fall-reset uses.
+            if (collision.collider.GetComponentInParent<RestartWall>() != null)
+            {
+                Time.timeScale = 1f;
+                SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+                return;
+            }
+
+            // BreakableCrackWall: solid to everything EXCEPT a downward launch (direct request:
+            // "you can only smash through if you launch downwards") - smashing destroys the
+            // pane and restores the pre-impact velocity, since PhysX has already absorbed the
+            // slam into the contact by the time this callback runs; without the restore the
+            // cube would stop dead on a surface that no longer exists. A non-downward hit falls
+            // through to the normal crash handling below, treating the pane as ordinary solid.
+            BreakableCrackWall breakable = collision.collider.GetComponentInParent<BreakableCrackWall>();
+            if (breakable != null && hasLaunched && currentFlightIsDownward)
+            {
+                breakable.Smash();
+                rb.linearVelocity = velocityBeforePhysicsStep;
+                return;
+            }
+
             // Only a genuine in-flight crash counts - not pre-launch walking (hasLaunched false),
             // and not an already-stuck body (frozen, shouldn't be generating fresh contacts at
             // all, but defensive regardless). Any surface counts, walls included - direct

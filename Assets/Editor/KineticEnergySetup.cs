@@ -3210,6 +3210,64 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: LaunchButton prefab created OK");
         }
 
+        // ==================== Breakable crack wall prefab ====================
+
+        // Builds Assets/Prefabs/BreakableCrackWall.prefab (direct request): a wall rotated 90
+        // degrees to lie flat, light beige, with a big version of the crash-decal crack drawn
+        // across its top - smashable only by launching downwards through it (see
+        // BreakableCrackWall / KineticCubeController's breakable checks). Creates ONLY the
+        // prefab asset and its materials - no scene is modified or saved.
+        [MenuItem("Tools/Kinetic Energy/Create Breakable Crack Wall Prefab")]
+        public static void CreateBreakableCrackWallPrefab()
+        {
+            Material paneMat = MakeSlowPacedMaterial("BreakableWallMaterial", new Color(0.88f, 0.82f, 0.70f));
+
+            // The big crack face: the SAME processed sheet the impact decals use, windowed to
+            // its center cell via the material's own tiling/offset (a persistent material, not
+            // a MaterialPropertyBlock, which wouldn't survive being saved into a prefab).
+            Material crackMat = EnsureCrackDecalAssets();
+            Material bigCrackMat = new Material(crackMat);
+            bigCrackMat.SetTextureScale("_BaseMap", new Vector2(1f / 3f, 1f / 3f));
+            bigCrackMat.SetTextureOffset("_BaseMap", new Vector2(1f / 3f, 1f / 3f));
+            bigCrackMat = SaveMaterialAsset(bigCrackMat, "BreakableCrackFaceMaterial");
+
+            if (!AssetDatabase.IsValidFolder(PrefabFolder))
+            {
+                AssetDatabase.CreateFolder("Assets", "Prefabs");
+            }
+
+            GameObject root = new GameObject("BreakableCrackWall");
+            try
+            {
+                // The pane itself: a thin flat slab (origin at its bottom face), solid via one
+                // exact BoxCollider.
+                CreateTutorialSlab(root.transform, "Pane", new Vector3(0f, 0.15f, 0f), new Vector3(4f, 0.3f, 4f), paneMat);
+                root.AddComponent<BreakableCrackWall>();
+
+                // The big crack, laid flat just above the top face (the material is
+                // double-sided, so orientation can never cull it away).
+                GameObject crackGo = new GameObject("CrackFace");
+                crackGo.transform.SetParent(root.transform, false);
+                crackGo.transform.localPosition = new Vector3(0f, 0.315f, 0f);
+                crackGo.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                crackGo.transform.localScale = new Vector3(3.4f, 3.4f, 1f);
+                MeshFilter crackFilter = crackGo.AddComponent<MeshFilter>();
+                crackFilter.sharedMesh = Resources.GetBuiltinResource<Mesh>("Quad.fbx");
+                MeshRenderer crackRenderer = crackGo.AddComponent<MeshRenderer>();
+                crackRenderer.sharedMaterial = bigCrackMat;
+                crackRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+                PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/BreakableCrackWall.prefab");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+            }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: BreakableCrackWall prefab created OK");
+        }
+
         // ==================== In-place shadow / sign refresh ====================
 
         // Applies the shadows-back-on change (and the reworded tutorial signs) to the EXISTING
