@@ -57,8 +57,20 @@ namespace KineticEnergy.Player
         // real option besides None) so SetMode silently ignores requests for the other two.
         public bool ghostAndCrosshairEnabled = false;
 
+        // What the preview shows before any runtime SetMode call - Trail everywhere except
+        // SlowPacedLevel, whose setup bakes TrailAndCrosshair (the FastPaced-style dotted line
+        // plus cross-and-ring reticle) into its Player instance. Applied in Awake, deliberately
+        // bypassing SetMode's ghostAndCrosshairEnabled gate - the setup that sets this also
+        // enables that flag on the same instance.
+        public PredictionMode initialMode = PredictionMode.Trail;
+
         PredictionMode currentMode = PredictionMode.Trail;
         bool isVisible;
+
+        void Awake()
+        {
+            currentMode = initialMode;
+        }
         bool hasLanding = true;
         Vector3 ghostSmoothVelocity;
         Vector3 crosshairSmoothVelocity;

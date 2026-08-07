@@ -27,6 +27,7 @@ namespace KineticEnergy.EditorSetup
         const string Level3ScenePath = "Assets/Scenes/Level3.unity";
         const string FastPacedLevelScenePath = "Assets/Scenes/FastPacedLevel.unity";
         const string SlowPacedLevelScenePath = "Assets/Scenes/SlowPacedLevel.unity";
+        const string TutorialScenePath = "Assets/Scenes/Tutorial.unity";
         // The crack decal pipeline: SOURCE is the raw 3x3 sheet (procedurally generated if
         // missing; overwrite it with real art any time), PROCESSED is what the decal material
         // actually uses - ProcessCrackSheet keys the source's light background out into alpha.
@@ -47,6 +48,7 @@ namespace KineticEnergy.EditorSetup
             ("Level 3", "Level3"),
             ("Fast Paced", "FastPacedLevel"),
             ("Slow Paced", "SlowPacedLevel"),
+            ("Tutorial", "Tutorial"),
         };
 
         public static void SetupAll()
@@ -58,6 +60,7 @@ namespace KineticEnergy.EditorSetup
             SetupLevel3();
             SetupFastPacedLevel();
             SetupSlowPacedLevel();
+            SetupTutorial();
             UpdateBuildSettings();
 
             Debug.Log("KineticEnergySetup: SetupAll complete OK");
@@ -1196,11 +1199,11 @@ namespace KineticEnergy.EditorSetup
             if (light == null) light = lightGo.AddComponent<Light>();
             light.type = LightType.Directional;
             light.intensity = 2f;
-            // Direct request: disable every lighting-generated shadow across all levels (current
-            // and future - this single method is shared by every scene's setup) - NOT the
-            // separate PlayerShadow drop-shadow, which is a plain unlit mesh positioned by its
-            // own script, not a real-time shadow, and is completely unaffected by this.
-            light.shadows = LightShadows.None;
+            // Real-time shadows back ON for everything (direct request, reversing the earlier
+            // disable-all) - EXCEPT the player, whose renderers have shadow casting turned off
+            // (see BuildPlayerCube / RefreshShadows): its only shadow is the PlayerShadow
+            // drop-disc, per the same request.
+            light.shadows = LightShadows.Soft;
             EditorUtility.SetDirty(light);
         }
 
@@ -1327,7 +1330,8 @@ namespace KineticEnergy.EditorSetup
                 new EditorBuildSettingsScene(Level2ScenePath, true),
                 new EditorBuildSettingsScene(Level3ScenePath, true),
                 new EditorBuildSettingsScene(FastPacedLevelScenePath, true),
-                new EditorBuildSettingsScene(SlowPacedLevelScenePath, true)
+                new EditorBuildSettingsScene(SlowPacedLevelScenePath, true),
+                new EditorBuildSettingsScene(TutorialScenePath, true)
             };
         }
 
@@ -1456,6 +1460,14 @@ namespace KineticEnergy.EditorSetup
             // and launching are complementary now, not alternatives to switch between.
             freeMoveController.enabled = true;
 
+            // The player must never cast a real-time shadow (direct request - its only shadow
+            // is the PlayerShadow drop-disc) - covers the Visual mesh AND every indicator
+            // child (arrows, landing preview dots) in one sweep.
+            foreach (Renderer childRenderer in player.GetComponentsInChildren<Renderer>(true))
+            {
+                childRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            }
+
             return controller;
         }
 
@@ -1574,6 +1586,9 @@ namespace KineticEnergy.EditorSetup
             MakeTransparent(shadowMat, shadowColor.a);
             shadowMat = SaveMaterialAsset(shadowMat, "PlayerShadowMaterial");
             visualGo.GetComponent<Renderer>().sharedMaterial = shadowMat;
+            // The fake drop-shadow disc must not itself cast a real shadow now that real-time
+            // shadows are back on.
+            visualGo.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
             shadowScript.player = player;
             shadowScript.shadowVisual = visualGo.transform;
@@ -2371,17 +2386,28 @@ namespace KineticEnergy.EditorSetup
         // Every environment piece in this scene is a ProBuilder cube of this exact size - direct
         // request: "1 Block should be 50% bigger than the player" (the player is a 1x1x1 cube).
         const float SlowPacedBlockSize = 1.5f;
-        // Interior footprint is (2*this+1) = 13x13 blocks - deliberately ODD, so a 3-block-wide
-        // opening can sit exactly centered on a wall without straddling the grid.
-        const int SlowPacedHalfInterior = 6;
-        const int SlowPacedWallLayers = 7;    // interior room height in blocks (10.5m)
-        const int SlowPacedHallStartK = 8;    // first hallway grid row past the wall ring (k=7)
-        const int SlowPacedHallEndK = 23;     // last hallway row; the end cap sits one past this
-        const int SlowPacedVoidStartK = 12;   // hallway rows with NO floor at all - the void
-        const int SlowPacedVoidEndK = 19;     // (8 blocks = 12m of gap, well inside launch range)
-        const int SlowPacedFinishStartK = 20; // rows carrying the Finish platform floor
+        // Interior footprint is (2*this+1) = 27x27 blocks (40.5m) - doubled from the original 13
+        // per direct request ("the room should be much bigger, like twice as big"), and kept ODD
+        // so a 3-block-wide opening still sits exactly centered on a wall.
+        const int SlowPacedHalfInterior = 13;
+        const int SlowPacedWallLayers = 14;   // interior room height in blocks (21m, also doubled)
         const int SlowPacedHallHalfWidth = 1; // interior hallway columns: i in [-1..1] (3 wide)
         const int SlowPacedHallLayers = 3;    // hallway interior height in blocks (= opening height)
+        // Hallway rows, derived so resizing the room shifts the whole corridor with it.
+        const int SlowPacedHallStartK = SlowPacedHalfInterior + 2;             // first row past the wall ring
+        const int SlowPacedVoidStartK = SlowPacedHallStartK + 4;               // 4 rows of solid entry floor first
+        // 32 rows = 48m of gap - sized from a real-physics batch simulation of the launch
+        // integrator (semi-implicit Euler with Unity's 1/(1+d*dt) damping, gravity -30, force
+        // 45+65c, damping 2.8-1.8c): the BEST shot that fits under the hallway's 4.5m ceiling
+        // (~10 degrees) covers 49.8m at charge 0.8, only 42.2m at 0.7, and 63.4m at full charge
+        // - so the direct jump genuinely requires 80%+ of the energy meter (direct request),
+        // with real margin at full charge and no way to cheat it with a steeper lob (those
+        // crash into the hallway ceiling first). The sticky void walls remain the alternative
+        // route for anyone crossing on less energy in stick-and-relaunch hops.
+        const int SlowPacedVoidBlocks = 32;
+        const int SlowPacedVoidEndK = SlowPacedVoidStartK + SlowPacedVoidBlocks - 1;
+        const int SlowPacedFinishStartK = SlowPacedVoidEndK + 1;               // Finish platform floor rows
+        const int SlowPacedHallEndK = SlowPacedFinishStartK + 3;               // end cap sits one past this
 
         // "A new scene that's called SlowPacedLevel" (direct request): a big open cube-shaped
         // room (floor, walls, ceiling) built entirely from ProBuilder blocks, one opening
@@ -2463,6 +2489,32 @@ namespace KineticEnergy.EditorSetup
             controller.stickyWallsOnly = true;
             controller.nonStickyWallStickDuration = 0.3f;
 
+            // 1.5x launch speed at (near-)unchanged distances (direct request: "increase the
+            // speed at which you launch but don't change the distance") - force scaled 1.5x and
+            // damping re-solved with the same batch integrator that sized the void, calibrated
+            // at the 10-degree shallow regime this level's ceiling-capped hallway shots live in
+            // (a linear-drag model can't preserve every angle at once; steeper in-room arcs land
+            // slightly shorter at mid charges). Verified against the 48m void: the best
+            // ceiling-legal shot covers 47.0m at charge 0.8 and 55.4m at 0.9, so the direct
+            // crossing still demands 80%+ of the meter. The landing preview simulates with these
+            // same instance fields, so the visual stays exact by construction.
+            controller.minLaunchForce = 67.5f;
+            controller.maxLaunchForce = 165f;
+            controller.minLaunchDamping = 5.69f;
+            controller.maxLaunchDamping = 2.15f;
+
+            // Flat energy economy (direct request: "you just gain 1.2 times the energy you put
+            // in a launch, no matter the speed and all") - the same spent*1.2 refund FastPaced
+            // uses, enabled for this scene's instance only.
+            controller.refundSpentEnergyOnly = true;
+            controller.fastPacedRefundMultiplier = 1.2f;
+
+            // FastPaced's cross-and-ring reticle at the predicted landing spot, alongside the
+            // trail dots (direct request) - unlock the crosshair visuals on this instance and
+            // start in the combined mode; Right Bumper toggles it off/on as a whole.
+            controller.landingPreview.ghostAndCrosshairEnabled = true;
+            controller.landingPreview.initialMode = PredictionMode.TrailAndCrosshair;
+
             // Crack-on-impact decals - an added component on THIS scene's Player instance only
             // (a per-instance override), so Player.prefab and every other scene stay untouched.
             ImpactCrackDecals crackDecals = playerGo.GetComponent<ImpactCrackDecals>();
@@ -2535,6 +2587,7 @@ namespace KineticEnergy.EditorSetup
             Material stickyA = MakeSlowPacedMaterial("SlowPacedStickyA", new Color(0.25f, 0.85f, 0.45f));
             Material stickyB = MakeSlowPacedMaterial("SlowPacedStickyB", new Color(0.20f, 0.72f, 0.38f));
             Material finishMat = MakeSlowPacedMaterial("SlowPacedFinishBlockMaterial", new Color(0.95f, 0.75f, 0.15f));
+            Material crashCubeMat = MakeSlowPacedMaterial("SlowPacedCrashCubeMaterial", new Color(0.95f, 0.55f, 0.15f));
 
             Transform floorGroup = NewGroup(room.transform, "Floor");
             Transform ceilingGroup = NewGroup(room.transform, "Ceiling");
@@ -2677,6 +2730,44 @@ namespace KineticEnergy.EditorSetup
             triggerCollider.size = new Vector3(finishWidth, 2f, finishLength);
             FinishLineWin finishWin = trigger.AddComponent<FinishLineWin>();
             finishWin.pauseController = pauseController;
+
+            // "Add 3 cubes randomly in the middle where you can crash onto" - free-floating
+            // crash targets in the room's central airspace, orange (the same "special target"
+            // accent language as Level3's ledges). Not sticky, so the scene rule applies: crash,
+            // refund energy, cling 0.3s, drop - i.e. these are how you farm the meter up toward
+            // the 80% the void demands. Seeded placement (same idempotency reasoning as the
+            // FastPaced spiral) with a minimum spacing so they never clump.
+            Transform crashCubes = NewGroup(room.transform, "CrashCubes");
+            System.Random cubeRng = new System.Random(20260807);
+            float crashCubeSize = SlowPacedBlockSize * 2f;
+            List<Vector3> placedCubes = new List<Vector3>();
+            for (int c = 0; c < 3; c++)
+            {
+                Vector3 pos;
+                int guard = 0;
+                do
+                {
+                    float x = ((float)cubeRng.NextDouble() * 2f - 1f) * SlowPacedHalfInterior * 0.6f * b;
+                    float z = ((float)cubeRng.NextDouble() * 2f - 1f) * SlowPacedHalfInterior * 0.6f * b;
+                    float y = 4f + (float)cubeRng.NextDouble() * (SlowPacedWallLayers * b * 0.5f);
+                    pos = new Vector3(x, y, z);
+                } while (guard++ < 50 && placedCubes.Exists(p => Vector3.Distance(p, pos) < crashCubeSize * 4f));
+                placedCubes.Add(pos);
+
+                ProBuilderMesh cubeMesh = ShapeGenerator.GenerateCube(PivotLocation.Center, Vector3.one * crashCubeSize);
+                GameObject cube = cubeMesh.gameObject;
+                cube.name = $"CrashCube{c + 1}";
+                cube.transform.SetParent(crashCubes, true);
+                cube.transform.position = pos;
+                cube.GetComponent<MeshRenderer>().sharedMaterial = crashCubeMat;
+                cubeMesh.ToMesh();
+                cubeMesh.Refresh();
+                // Freestanding, so a single exact BoxCollider is seam-free by construction -
+                // unlike the wall/floor blocks, these carry their own collision.
+                BoxCollider cubeCollider = cube.AddComponent<BoxCollider>();
+                cubeCollider.center = Vector3.zero;
+                cubeCollider.size = Vector3.one * crashCubeSize;
+            }
 
             BuildSlowPacedColliders(room.transform);
 
@@ -2839,6 +2930,381 @@ namespace KineticEnergy.EditorSetup
             if (scenes.Exists(s => s.path == scenePath)) return;
             scenes.Add(new EditorBuildSettingsScene(scenePath, true));
             EditorBuildSettings.scenes = scenes.ToArray();
+        }
+
+        // ==================== Tutorial ====================
+
+        // "A level called Tutorial" (direct request): three launch lessons in a straight line,
+        // each platform a single adjustable ProBuilder slab with an exact BoxCollider (seam-free
+        // by construction), ending at a wall with "Finish" written on it. Mixed is the only
+        // scheme, with the SHARED default tuning and the default speed-based crash refunds -
+        // "positioned well enough that you get enough energy" relies on faster/longer crashes
+        // refunding more, which is exactly what the default economy does (the SlowPaced flat
+        // 1.2x rule stays scoped to that scene). Hop distances come from the same batch
+        // integrator used for SlowPacedLevel's void (default tuning, 30-degree grounded aim:
+        // charge 0.2 -> 19.7m, 0.5 -> 34.0m; air forward neutral 5 degrees at 0.5 -> ~21m at
+        // level height, ~38m falling 12m):
+        //   1. Start -> Platform2: a 16m center-to-center gap - the starting 20% energy covers
+        //      it with margin, and the landing refund (~35%) sets up lesson 2.
+        //   2. Platform2 -> Platform3, 26m ahead and 12m DOWN: forward launch, then West's
+        //      down-slam mid-air. The slam crash is fast, refilling most of the tank.
+        //   3. Platform3 -> Finish, 58m ahead at the same height: forward (~45%), then a second
+        //      forward mid-air at ~50% - a single max-charge shot tends to overfly the wall, so
+        //      the taught chain is also the reliable one.
+        [MenuItem("Tools/Kinetic Energy/Setup Tutorial")]
+        public static void SetupTutorial()
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(TutorialScenePath) == null)
+            {
+                if (!AssetDatabase.CopyAsset(ScenePath, TutorialScenePath))
+                {
+                    throw new Exception("KineticEnergySetup: failed to copy Sandbox Scene to create Tutorial.");
+                }
+            }
+
+            EditorSceneManager.OpenScene(TutorialScenePath, OpenSceneMode.Single);
+
+            BuildDirectionalLight();
+            BuildGlobalVolume();
+
+            GameObject playerAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/Player.prefab");
+            GameObject cameraAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/ThirdPersonCameraRig.prefab");
+            GameObject pauseAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PauseSystem.prefab");
+            if (playerAsset == null || cameraAsset == null || pauseAsset == null)
+            {
+                throw new Exception("KineticEnergySetup: Tutorial needs Player/ThirdPersonCameraRig/PauseSystem prefabs - run Setup() (part of SetupAll) first.");
+            }
+
+            DestroyIfExists("Player");
+            DestroyIfExists("Main Camera");
+            DestroyIfExists("ThirdPersonCameraRig");
+            DestroyIfExists("PauseSystem");
+            DestroyIfExists("LevelGenerator");
+            DestroyIfExists("Plane");
+            DestroyIfExists("SandboxPlatforms");
+            DestroyIfExists("ParkourHint");
+            DestroyIfExists("TutorialCourse");
+
+            GameObject playerGo = (GameObject)PrefabUtility.InstantiatePrefab(playerAsset);
+            GameObject camGo = (GameObject)PrefabUtility.InstantiatePrefab(cameraAsset);
+            GameObject pauseGo = (GameObject)PrefabUtility.InstantiatePrefab(pauseAsset);
+
+            KineticCubeController controller = playerGo.GetComponent<KineticCubeController>();
+            KineticCubeControllerFreeMove freeMoveController = playerGo.GetComponent<KineticCubeControllerFreeMove>();
+            ThirdPersonOrbitCamera orbitCam = camGo.GetComponent<ThirdPersonOrbitCamera>();
+
+            controller.cameraTransform = camGo.transform;
+            controller.cameraOrbit = orbitCam;
+            freeMoveController.cameraTransform = camGo.transform;
+            orbitCam.target = playerGo.transform;
+
+            ApplyLaunchTuning(controller);
+
+            // Mixed only, same as SlowPacedLevel - this course teaches exactly that scheme's
+            // grounded aim, the West down-slam, and the mid-air forward relaunch.
+            controller.SetControlScheme(ControlScheme.Mixed);
+            controller.schemeSwitchingEnabled = false;
+            // Nothing in this scene is sticky (direct request): sticky-walls-only mode with no
+            // StickySurface anywhere means a wall/ceiling crash clings only briefly and drops
+            // you; flat platforms keep the normal land-refund-walk-away behavior.
+            controller.stickyWallsOnly = true;
+            // "Only allowed to perform 2 launches before landing" (direct request) - matches
+            // the lessons exactly (each hop is at most a two-launch chain); any landing or
+            // crash restores the budget.
+            controller.maxLaunchesPerFlight = 2;
+
+            Text modeLabel = pauseGo.transform.Find("PauseCanvas/PreviewModeLabel")?.GetComponent<Text>();
+            controller.landingPreview.modeLabel = modeLabel;
+            controller.controlsHintLabel = pauseGo.transform.Find("PauseCanvas/ControlsHintLabel")?.GetComponent<Text>();
+            controller.controlsPanelBody = pauseGo.transform.Find("PauseCanvas/ControlsPanel/ControlsBody")?.GetComponent<Text>();
+            controller.energyMeter = pauseGo.transform.Find("EnergyMeter")?.GetComponent<EnergyMeterController>();
+            RadialMenuController radialMenu = pauseGo.transform.Find("RadialMenuController")?.GetComponent<RadialMenuController>();
+            if (radialMenu != null) radialMenu.controller = controller;
+
+            PauseController pauseController = pauseGo.transform.Find("PauseController")?.GetComponent<PauseController>();
+
+            EditorUtility.SetDirty(controller);
+            EditorUtility.SetDirty(freeMoveController);
+            EditorUtility.SetDirty(orbitCam);
+            EditorUtility.SetDirty(controller.landingPreview);
+            if (radialMenu != null) EditorUtility.SetDirty(radialMenu);
+
+            GameObject firstTarget = BuildTutorialCourse(playerGo.transform, camGo.transform, pauseController);
+            BuildCameraStartFacing(playerGo.transform, orbitCam, firstTarget.transform);
+            BuildPlayerShadow(playerGo.transform);
+
+            AddSceneToBuildSettings(TutorialScenePath);
+
+            Scene tutorialScene = EditorSceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(tutorialScene);
+            EditorSceneManager.SaveScene(tutorialScene);
+            AssetDatabase.SaveAssets();
+
+            Debug.Log("KineticEnergySetup: Tutorial setup complete OK");
+        }
+
+        // Returns the second platform (the first launch target) so the boot camera faces it.
+        static GameObject BuildTutorialCourse(Transform player, Transform cameraTransform, PauseController pauseController)
+        {
+            GameObject course = new GameObject("TutorialCourse");
+
+            Material platformMat = MakeSlowPacedMaterial("TutorialPlatformMaterial", new Color(0.50f, 0.55f, 0.62f));
+            Material finishMat = MakeSlowPacedMaterial("TutorialFinishWallMaterial", new Color(0.95f, 0.75f, 0.15f));
+
+            // Lesson 1: a plain gap. 16m center to center = ~10m of open air between the edges.
+            GameObject start = CreateTutorialSlab(course.transform, "StartPlatform", new Vector3(0f, -0.75f, 0f), new Vector3(6f, 1.5f, 6f), platformMat);
+            GameObject platform2 = CreateTutorialSlab(course.transform, "Platform2", new Vector3(0f, -0.75f, 16f), new Vector3(6f, 1.5f, 6f), platformMat);
+            BuildTutorialSign(course.transform, cameraTransform, new Vector3(0f, 3.2f, 0f),
+                "1. Hold Left Trigger to aim, stick to adjust,\nRight Trigger to launch across the gap");
+
+            // Lesson 2: 26m ahead, 12m down - forward launch, then West's down-slam mid-air.
+            // Extra-large landing pad, since two-stage launches are new at this point.
+            GameObject platform3 = CreateTutorialSlab(course.transform, "Platform3", new Vector3(0f, -12.75f, 42f), new Vector3(10f, 1.5f, 10f), platformMat);
+            BuildTutorialSign(course.transform, cameraTransform, new Vector3(0f, 3.2f, 16f),
+                "2. Launch forward, then hold Left Trigger in the air\nto aim, hold West and release to slam down");
+
+            // Lesson 3: an UP launch (direct request) - Platform4 sits 10m ahead of and 12m
+            // ABOVE platform3 (back at the course's starting height). South's up-charge tilted
+            // toward it (80 degrees when the stick is held) covers roughly 3-19m horizontal /
+            // 9-61m vertical across the charge range, so a moderate charge lands it.
+            CreateTutorialSlab(course.transform, "Platform4", new Vector3(0f, -0.75f, 52f), new Vector3(8f, 1.5f, 8f), platformMat);
+            BuildTutorialSign(course.transform, cameraTransform, new Vector3(0f, -8.8f, 42f),
+                "3. Hold South and tilt the stick toward the high\nplatform, release to launch up onto it");
+
+            // Lesson 4: 58m ahead of Platform4, one story below it - forward, then forward
+            // again mid-air (hold Right Trigger, release at ~50% charge). The finish platform
+            // runs into the Finish wall itself.
+            Vector3 finishPlatformCenter = new Vector3(0f, -12.75f, 110f);
+            Vector3 finishPlatformSize = new Vector3(10f, 1.5f, 14f);
+            CreateTutorialSlab(course.transform, "FinishPlatform", finishPlatformCenter, finishPlatformSize, platformMat);
+            BuildTutorialSign(course.transform, cameraTransform, new Vector3(0f, 3.2f, 52f),
+                "4. Launch forward, then hold Left Trigger and Right\nTrigger in the air - release at about half charge");
+
+            // The final platform IS a wall with "Finish" on it (direct request) - crashing into
+            // it sticks (default any-surface stick applies here) and the trigger opens the win
+            // screen, same FinishLineWin flow as the other finishes.
+            float wallZ = finishPlatformCenter.z + finishPlatformSize.z * 0.5f - 0.75f; // flush with the platform's far edge
+            Vector3 wallSize = new Vector3(12f, 9f, 1.5f);
+            Vector3 wallCenter = new Vector3(0f, -12f + wallSize.y * 0.5f, wallZ);
+            GameObject wall = CreateTutorialSlab(course.transform, "FinishWall", wallCenter, wallSize, finishMat);
+
+            GameObject wallText = new GameObject("FinishWallText");
+            wallText.transform.SetParent(wall.transform, true);
+            // On the wall's approach face, nudged off it so the letters never z-fight the slab.
+            wallText.transform.position = wallCenter + new Vector3(0f, 0.5f, -(wallSize.z * 0.5f + 0.05f));
+            TextMesh wallTextMesh = wallText.AddComponent<TextMesh>();
+            wallTextMesh.text = "FINISH";
+            wallTextMesh.color = new Color(0.15f, 0.45f, 1f);
+            wallTextMesh.fontSize = 48;
+            wallTextMesh.characterSize = 0.5f;
+            wallTextMesh.anchor = TextAnchor.MiddleCenter;
+            wallTextMesh.alignment = TextAlignment.Center;
+
+            GameObject trigger = new GameObject("FinishTrigger");
+            trigger.transform.SetParent(course.transform, true);
+            trigger.transform.position = wallCenter + new Vector3(0f, 0f, -(wallSize.z * 0.5f + 1f));
+            BoxCollider triggerCollider = trigger.AddComponent<BoxCollider>();
+            triggerCollider.isTrigger = true;
+            triggerCollider.size = new Vector3(wallSize.x, wallSize.y, 2f);
+            FinishLineWin finishWin = trigger.AddComponent<FinishLineWin>();
+            finishWin.pauseController = pauseController;
+
+            player.position = new Vector3(0f, 0.5f, 0f);
+            return platform2;
+        }
+
+        // A single ProBuilder cuboid with one exact BoxCollider - still fully adjustable with
+        // ProBuilder's tools, but seam-free physics by construction (one collider per platform).
+        static GameObject CreateTutorialSlab(Transform parent, string name, Vector3 center, Vector3 size, Material material)
+        {
+            ProBuilderMesh pbMesh = ShapeGenerator.GenerateCube(PivotLocation.Center, size);
+            GameObject go = pbMesh.gameObject;
+            go.name = name;
+            go.transform.SetParent(parent, true);
+            go.transform.position = center;
+            go.GetComponent<MeshRenderer>().sharedMaterial = material;
+            pbMesh.ToMesh();
+            pbMesh.Refresh();
+            BoxCollider collider = go.AddComponent<BoxCollider>();
+            collider.center = Vector3.zero;
+            collider.size = size;
+            return go;
+        }
+
+        // Floating instruction text above a lesson's launch point, always turned toward the
+        // camera - same TextMesh+Billboard language as every finish label in this project.
+        static void BuildTutorialSign(Transform parent, Transform cameraTransform, Vector3 position, string text)
+        {
+            GameObject signGo = new GameObject("TutorialSign");
+            signGo.transform.SetParent(parent, true);
+            signGo.transform.position = position;
+
+            TextMesh textMesh = signGo.AddComponent<TextMesh>();
+            textMesh.text = text;
+            textMesh.color = Color.white;
+            textMesh.fontSize = 40;
+            textMesh.characterSize = 0.12f;
+            textMesh.anchor = TextAnchor.MiddleCenter;
+            textMesh.alignment = TextAlignment.Center;
+
+            Billboard billboard = signGo.AddComponent<Billboard>();
+            billboard.target = cameraTransform;
+        }
+
+        // ==================== Launch Button prefab ====================
+
+        // Builds Assets/Prefabs/LaunchButton.prefab (direct request): a flat socket rectangle
+        // with a smaller, taller cap on top - launch onto the cap and it sinks back into the
+        // socket, FLIPPING the active state of every object in the button's targets list
+        // (assign those per placed instance). The cap carries NonStickSurface, so touching it
+        // never crash-sticks the player. Creates ONLY the prefab asset and its materials - no
+        // scene is modified or saved.
+        [MenuItem("Tools/Kinetic Energy/Create Launch Button Prefab")]
+        public static void CreateLaunchButtonPrefab()
+        {
+            Material socketMat = MakeSlowPacedMaterial("ButtonSocketMaterial", new Color(0.30f, 0.32f, 0.36f));
+            Material capMat = MakeSlowPacedMaterial("ButtonCapMaterial", new Color(0.85f, 0.20f, 0.20f));
+            Material pressedMat = MakeSlowPacedMaterial("ButtonCapPressedMaterial", new Color(0.25f, 0.80f, 0.40f));
+
+            if (!AssetDatabase.IsValidFolder(PrefabFolder))
+            {
+                AssetDatabase.CreateFolder("Assets", "Prefabs");
+            }
+
+            GameObject root = new GameObject("LaunchButton");
+            try
+            {
+                // Socket: the flat base rectangle. Origin sits at its BOTTOM face, so a placed
+                // button rests on whatever it's dropped onto at y-position 0.
+                CreateTutorialSlab(root.transform, "Socket", new Vector3(0f, 0.2f, 0f), new Vector3(3f, 0.4f, 3f), socketMat);
+
+                // Cap: less wide/deep, taller, resting on the socket's top - the actual button.
+                GameObject cap = CreateTutorialSlab(root.transform, "ButtonCap", new Vector3(0f, 0.7f, 0f), new Vector3(2f, 0.6f, 2f), capMat);
+                cap.AddComponent<NonStickSurface>();
+                LaunchButtonCap capRelay = cap.AddComponent<LaunchButtonCap>();
+
+                LaunchButton button = root.AddComponent<LaunchButton>();
+                button.buttonCap = cap.transform;
+                button.capRenderer = cap.GetComponent<MeshRenderer>();
+                button.pressedMaterial = pressedMat;
+                // Sinks until the cap's top sits just proud of the socket's (0.5 of its 0.6
+                // height stays out of view).
+                button.pressDepth = 0.5f;
+                button.pressSpeed = 4f;
+                button.stayPressed = true;
+                // These two are intra-prefab references (same hierarchy), which a prefab asset
+                // CAN hold - only cross-hierarchy references are forbidden. targetPlatform is
+                // deliberately left null here for exactly that reason.
+                capRelay.button = button;
+
+                PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/LaunchButton.prefab");
+            }
+            finally
+            {
+                // The temp build hierarchy must not survive in whatever scene happened to be
+                // open - the prefab ASSET is the only output of this method.
+                UnityEngine.Object.DestroyImmediate(root);
+            }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: LaunchButton prefab created OK");
+        }
+
+        // ==================== In-place shadow / sign refresh ====================
+
+        // Applies the shadows-back-on change (and the reworded tutorial signs) to the EXISTING
+        // scenes and prefabs IN PLACE - deliberately NOT by re-running the scene builders, which
+        // rebuild geometry at scripted positions and would wipe the user's hand-placed object
+        // arrangements (explicit instruction: "Do not change any of the objects transforms in
+        // the scene"). This touches only: the Player prefab's renderer shadow flags, the URP
+        // assets' shadow distance, and per scene the directional light's shadow mode, the
+        // PlayerShadow disc's casting flag, and TutorialSign text. No transform is ever written.
+        [MenuItem("Tools/Kinetic Energy/Refresh Shadows In All Scenes")]
+        public static void RefreshShadows()
+        {
+            // Player prefab: no real-time shadow from any of its renderers - the drop-disc is
+            // the player's only shadow.
+            GameObject playerRoot = PrefabUtility.LoadPrefabContents(PrefabFolder + "/Player.prefab");
+            foreach (Renderer childRenderer in playerRoot.GetComponentsInChildren<Renderer>(true))
+            {
+                childRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            }
+            PrefabUtility.SaveAsPrefabAsset(playerRoot, PrefabFolder + "/Player.prefab");
+            PrefabUtility.UnloadPrefabContents(playerRoot);
+
+            // The default 50m shadow distance fades everything out well inside the doubled
+            // room; 150 covers the biggest sightlines.
+            foreach (string rpPath in new[] { "Assets/Settings/PC_RPAsset.asset", "Assets/Settings/Mobile_RPAsset.asset" })
+            {
+                var rpAsset = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset>(rpPath);
+                if (rpAsset != null)
+                {
+                    rpAsset.shadowDistance = 150f;
+                    EditorUtility.SetDirty(rpAsset);
+                }
+            }
+
+            string[] scenePaths =
+            {
+                ScenePath, Level1ScenePath, Level2ScenePath, Level3ScenePath,
+                FastPacedLevelScenePath, SlowPacedLevelScenePath, TutorialScenePath,
+            };
+
+            foreach (string scenePath in scenePaths)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                GameObject lightGo = FindByNameIncludingInactive("Directional Light");
+                Light light = lightGo != null ? lightGo.GetComponent<Light>() : null;
+                if (light != null)
+                {
+                    light.shadows = LightShadows.Soft;
+                    EditorUtility.SetDirty(light);
+                }
+
+                GameObject shadowGo = FindByNameIncludingInactive("PlayerShadow");
+                if (shadowGo != null)
+                {
+                    foreach (Renderer discRenderer in shadowGo.GetComponentsInChildren<Renderer>(true))
+                    {
+                        discRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                        EditorUtility.SetDirty(discRenderer);
+                    }
+                }
+
+                if (scenePath == TutorialScenePath)
+                {
+                    RetitleTutorialSigns();
+                }
+
+                Scene scene = EditorSceneManager.GetActiveScene();
+                EditorSceneManager.MarkSceneDirty(scene);
+                EditorSceneManager.SaveScene(scene);
+            }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: RefreshShadows complete OK");
+        }
+
+        // Updates the tutorial signs' TEXT in place to describe the new LT-gated air aiming,
+        // matched by their lesson-number prefix so it works wherever the user has moved them.
+        static void RetitleTutorialSigns()
+        {
+            foreach (TextMesh textMesh in UnityEngine.Object.FindObjectsByType<TextMesh>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (textMesh.gameObject.name != "TutorialSign") continue;
+                if (textMesh.text.StartsWith("2."))
+                {
+                    textMesh.text = "2. Launch forward, then hold Left Trigger in the air\nto aim, hold West and release to slam down";
+                    EditorUtility.SetDirty(textMesh);
+                }
+                else if (textMesh.text.StartsWith("4."))
+                {
+                    textMesh.text = "4. Launch forward, then hold Left Trigger and Right\nTrigger in the air - release at about half charge";
+                    EditorUtility.SetDirty(textMesh);
+                }
+            }
         }
 
         // ==================== Crack decal sheet ====================

@@ -72,6 +72,11 @@ namespace KineticEnergy.Player
         // crashSpeed * energyGainPerSpeed * (1 + crashSpeed * energyGainSpeedBonus).
         public float energyGainPerSpeed = 0.03f;
         public float energyGainSpeedBonus = 0.01f;
+        // SlowPacedLevel's economy (direct request: "you just gain 1.2 times the energy you put
+        // in a launch, no matter the speed and all"): when true, every crash refunds exactly
+        // lastLaunchEnergySpent * fastPacedRefundMultiplier, replacing the speed-based formula
+        // above - the same rule FastPaced already uses, now available to any scheme per scene.
+        public bool refundSpentEnergyOnly = false;
         // Floors GainEnergyFromCrash's result - direct request: "you should at least get 5% of
         // the meter back no matter your speed when you land". Without this, a crash at very low
         // speed (a gentle short hop, or the tail end of a soft landing) could compute a gain close
@@ -271,6 +276,14 @@ namespace KineticEnergy.Player
         public bool stickyWallsOnly = false;
         public float nonStickyWallStickDuration = 0.3f;
 
+        [Header("Launch Limit")]
+        // Tutorial only (direct request: "the player should only be allowed to perform 2
+        // launches before landing") - 0 means unlimited, the default everywhere else. Counts
+        // every launch since the cube last stood on the ground; a crash (any surface) is a
+        // "landing" and resets it, so a wall crash mid-chain gives fresh launches, exactly like
+        // the energy refund treats it as a fresh start.
+        public int maxLaunchesPerFlight = 0;
+
         [Header("Input")]
         public InputActionReference moveAction;
         public InputActionReference launchAction;
@@ -395,6 +408,17 @@ namespace KineticEnergy.Player
         // FixedUpdate and releases the stick (gravity back on) when it runs out. See
         // nonStickyWallStickDuration's own comment.
         float nonStickyReleaseTimer;
+        // Launches fired since the cube last rested on the ground (or crashed) - gates new
+        // charges against maxLaunchesPerFlight. See that field's own comment.
+        int launchesSinceGrounded;
+        // Mixed's airborne aim gate (direct request: "when you want to launch midair, you need
+        // to press left trigger to aim again... letting go of the left trigger stops aiming in
+        // midair too"): true while LT is held in the air with no charge fired yet. Freezes the
+        // cube (FixedUpdate) exactly like every other aim/charge state, and gates the three
+        // directional charges - RT/South/West only start a charge while this is on. Cleared by
+        // releasing LT (cancels any charge in progress without firing), by firing, or by a
+        // scheme switch.
+        bool mixedAirAiming;
         float chargeTime;
         float aimYaw;
         float aimPitch;
@@ -455,7 +479,7 @@ namespace KineticEnergy.Player
         // blocking for a wall-stuck cube (never satisfies isGrounded) until it launches free.
         // Also blocked while charging any of the three hold-to-charge systems, same reasoning as
         // isAiming - the cube needs to stay put while charging, ground or air.
-        public bool AllowGroundedMovement => !isAiming && !hasLaunched && !isStuck
+        public bool AllowGroundedMovement => !isAiming && !hasLaunched && !isStuck && !mixedAirAiming
             && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None && !fastPacedCharging;
 
         // AllowAirborneNudge: safe for FreeMove to apply a small, ADDITIVE force (air control,
@@ -466,7 +490,7 @@ namespace KineticEnergy.Player
         // shots the last time this was "fixed"). Also blocked while isStuck (frozen, not falling)
         // and during Defy Gravity's forced-velocity flight window, where even a small additive
         // nudge would spoil the straight line the charge promised.
-        public bool AllowAirborneNudge => !isAiming && !isStuck && defyGravityFlightTimer <= 0f && launchGraceTimer <= 0f
+        public bool AllowAirborneNudge => !isAiming && !isStuck && !mixedAirAiming && defyGravityFlightTimer <= 0f && launchGraceTimer <= 0f
             && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None && !fastPacedCharging;
 
         bool launchQueued;
@@ -698,7 +722,7 @@ namespace KineticEnergy.Player
 
         void ApplyChargeTimeScale()
         {
-            bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || fastPacedCharging;
+            bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || fastPacedCharging || mixedAirAiming;
             // Charging's bullet-time wins over the flight speed-up - starting a mid-air charge
             // freezes the cube anyway (the "flight" is suspended), so the slow-down is the state
             // that matches what's on screen. hasLaunched clears on crash (RegisterCrash), which
@@ -749,7 +773,7 @@ namespace KineticEnergy.Player
             // keep going (see ltHeld just below) - re-deriving a live/proximity-based condition
             // every frame of an already-active charge could spuriously flip it and read as "LT let
             // go", firing prematurely. This exact class of bug has bitten this project before.
-            bool canStartNewAim = energyFraction > 0f;
+            bool canStartNewAim = energyFraction > 0f && CanStartNewLaunch();
             bool ltHeld = isAiming ? ltIsPressed : (ltIsPressed && canStartNewAim);
 
             if (ltHeld)
@@ -919,20 +943,47 @@ namespace KineticEnergy.Player
                 if (upPressed) UpdateStickAimChargeScheme();
                 else UpdateChargeBasedScheme();
             }
-            else if (launchAction != null && launchAction.action != null && launchAction.action.IsPressed())
+            else
             {
-                // Airborne LT now opens the exact same aim-and-confirm flow as on the ground
-                // (direct request: "while in the air left trigger should also start aiming") -
-                // UpdateChargeBasedScheme's existing air-relaunch path already freezes the cube
-                // and runs the full stick-adjusted aim, RT to confirm. This also covers the
-                // waitingForLtRelease case after a fire, which that method handles internally.
-                // The three directional hold-to-charges moved off LT entirely: RT = Forward,
-                // South = Up, West = Down - see UpdateStickAimChargeScheme's Mixed remap.
-                UpdateChargeBasedScheme();
+                UpdateMixedAirScheme();
+            }
+        }
+
+        // Mixed's airborne flow (direct request rework): Left Trigger is the aim GATE - holding
+        // it freezes the cube in place, and only then do RT/South/West start their
+        // Forward/Up/Down hold-to-charges (release fires, stick tilts the angle, exactly as
+        // before). Releasing LT stops aiming - including cancelling a charge in progress
+        // without firing (see UpdateStickAimChargeScheme's mixedAirAiming check). After a fire
+        // LT must be genuinely released before it can open a new aim (waitingForLtRelease, the
+        // same one-shot-per-hold rule the grounded flow uses), or the shot that just fired
+        // would be re-frozen the very next frame while LT is still down.
+        void UpdateMixedAirScheme()
+        {
+            bool ltHeld = launchAction != null && launchAction.action != null && launchAction.action.IsPressed();
+
+            if (waitingForLtRelease)
+            {
+                if (!ltHeld) waitingForLtRelease = false;
+                return;
+            }
+
+            // Same gates as starting any new launch - without energy (or launches) left, LT
+            // does nothing, so the freeze can't be used to hover indefinitely.
+            if (ltHeld && energyFraction > 0f && CanStartNewLaunch())
+            {
+                if (!mixedAirAiming)
+                {
+                    mixedAirAiming = true;
+                    // Instant stop, same as every other aim/charge start - FixedUpdate keeps
+                    // re-applying this for as long as the aim is held.
+                    rb.linearVelocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                }
+                UpdateStickAimChargeScheme();
             }
             else
             {
-                UpdateStickAimChargeScheme();
+                mixedAirAiming = false;
             }
         }
 
@@ -945,6 +996,13 @@ namespace KineticEnergy.Player
             return controlScheme == ControlScheme.Mixed ? selectClassicSchemeAction : launchAction;
         }
 
+        // Gates STARTING a new charge only, never an already-active one - same reasoning as the
+        // energy gate (canStartNewAim): re-deriving mid-charge could spuriously cancel it.
+        bool CanStartNewLaunch()
+        {
+            return maxLaunchesPerFlight <= 0 || launchesSinceGrounded < maxLaunchesPerFlight;
+        }
+
         void FixedUpdate()
         {
             // Continuously (not just once at the instant aiming/charging starts) - gravity would
@@ -954,7 +1012,7 @@ namespace KineticEnergy.Player
             // Defy Gravity charges frozen in place for their whole duration, not just their
             // opening frame - and, now, also what keeps a crashed/isStuck cube pinned exactly
             // where it crashed (direct request: "stop all movement and stick to that location").
-            if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || isStuck || fastPacedCharging)
+            if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || isStuck || fastPacedCharging || mixedAirAiming)
             {
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
@@ -1025,6 +1083,11 @@ namespace KineticEnergy.Player
                 ? new Vector3(boxCollider.bounds.extents.x * 0.9f, 0.05f, boxCollider.bounds.extents.z * 0.9f)
                 : new Vector3(0.4f, 0.05f, 0.4f);
             isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out RaycastHit groundHit, transform.rotation, groundCheckDistance);
+
+            // Standing (or walking) on the ground with no flight in progress restores the full
+            // per-flight launch budget - hasLaunched must be false so the brief grounded window
+            // right after firing (launch grace) can't refund the launch that just spent it.
+            if (isGrounded && !hasLaunched) launchesSinceGrounded = 0;
 
             // A slam fired from ZERO clearance (already resting on the exact surface it's aimed
             // at) never actually leaves that surface - PhysX's contact solver absorbs a downward
@@ -1178,6 +1241,12 @@ namespace KineticEnergy.Player
         // surface it's already touching.
         void RegisterCrash(Vector3 contactNormal, float crashSpeed, Collider surface)
         {
+            // A NonStickSurface (the launch button's cap) never registers as a crash at all -
+            // no freeze, no energy refund; physics carries the cube onward, so it just falls
+            // away again (direct request: "touching the button shouldn't be sticky, meaning
+            // the player falls down again").
+            if (surface != null && surface.GetComponentInParent<NonStickSurface>() != null) return;
+
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
             rb.useGravity = false;
@@ -1185,6 +1254,8 @@ namespace KineticEnergy.Player
             isStuck = true;
             hasLaunched = false;
             defyGravityFlightTimer = 0f; // interrupt an in-progress forced flight if the crash happens mid-flight
+            launchesSinceGrounded = 0;   // a crash is a landing - the per-flight launch budget resets
+            mixedAirAiming = false;      // defensive - the freeze should prevent crashing mid-aim at all
 
             // Fed to flatGroundStickThreshold's check above and to AlignVisualToSurface below -
             // direct request: "the cubes surface should align with the surface it just hit, so
@@ -1312,9 +1383,10 @@ namespace KineticEnergy.Player
                         "Move (on the ground): Left Stick\n" +
                         "Grounded: Left Trigger to aim+charge, Right Trigger to launch - or hold\n" +
                         "  South to charge an Up launch (release to fire)\n" +
-                        "Airborne: Left Trigger aims just like grounded (Right Trigger confirms),\n" +
-                        "  or hold Right Trigger / South / West to charge Forward / Up / Down -\n" +
-                        "  release to fire, tilt the Left Stick to angle it (centered = straight)\n" +
+                        "Airborne: hold Left Trigger to aim (you freeze in place), then hold\n" +
+                        "  Right Trigger / South / West to charge Forward / Up / Down - release\n" +
+                        "  to fire, tilt the Left Stick to angle it. Letting go of Left Trigger\n" +
+                        "  stops aiming without firing\n" +
                         "Left Bumper cancels either\n" +
                         stuckLine +
                         "Camera: Right Stick\n" +
@@ -1384,10 +1456,11 @@ namespace KineticEnergy.Player
                         "  aim, Right Trigger to launch (exactly like the original scheme).\n" +
                         "  South (hold) also works from the ground: charge an Up launch, release\n" +
                         "  to fire - tilted toward the Left Stick, straight up when centered.\n" +
-                        "Airborne - Left Trigger (hold) opens that same aim-and-confirm flow in\n" +
-                        "  the air. Or hold Right Trigger / South / West to charge a Forward /\n" +
+                        "Airborne - hold Left Trigger to aim: you freeze in place while it's\n" +
+                        "  held. Then hold Right Trigger / South / West to charge a Forward /\n" +
                         "  Up / Down launch - release to fire, tilted toward the Left Stick when\n" +
-                        "  it's held past the deadzone, straight when centered.\n" +
+                        "  it's held past the deadzone, straight when centered. Letting go of\n" +
+                        "  Left Trigger stops aiming (or a charge) without firing.\n" +
                         "Left Bumper - Cancel whichever is currently charging, grounded or air.\n" +
                         stuckLinePanel +
                         "Right Stick - Camera\n" +
@@ -1458,7 +1531,10 @@ namespace KineticEnergy.Player
             if (trailToggleAction == null || trailToggleAction.action == null || !trailToggleAction.action.WasPressedThisFrame()) return;
             if (landingPreview == null) return;
 
-            landingPreview.SetMode(landingPreview.CurrentMode == PredictionMode.None ? PredictionMode.Trail : PredictionMode.None);
+            // Where crosshair visuals are unlocked for this scene (SlowPacedLevel), the toggle
+            // restores the full trail+reticle mode rather than downgrading to plain Trail.
+            PredictionMode shownMode = landingPreview.ghostAndCrosshairEnabled ? PredictionMode.TrailAndCrosshair : PredictionMode.Trail;
+            landingPreview.SetMode(landingPreview.CurrentMode == PredictionMode.None ? shownMode : PredictionMode.None);
         }
 
         // The Dpad radial menu's entry point (see RadialMenuController) - now the ONLY way to
@@ -1507,6 +1583,7 @@ namespace KineticEnergy.Player
                 cameraOrbit?.SetFirstPersonMode(false);
                 cameraOrbit?.SetAimZoom(0f);
             }
+            mixedAirAiming = false;
 
             UpdateSchemeLabel();
         }
@@ -1530,6 +1607,17 @@ namespace KineticEnergy.Player
 
             if (stickAimChargeType != StickAimChargeType.None)
             {
+                // Mixed-air only: letting go of Left Trigger stops aiming, cancelling whatever
+                // charge is in progress WITHOUT firing (direct request) - grounded charges
+                // (South's up-launch, standalone StickAim) never set mixedAirAiming, so this
+                // can't touch them.
+                if (mixedAirAiming && !(launchAction != null && launchAction.action != null && launchAction.action.IsPressed()))
+                {
+                    CancelStickAimCharge();
+                    mixedAirAiming = false;
+                    return;
+                }
+
                 if (cancelPressed)
                 {
                     CancelStickAimCharge();
@@ -1601,11 +1689,19 @@ namespace KineticEnergy.Player
                     chargeTime = 0f;
                     aimArrow?.SetVisible(false);
                     landingPreview?.SetVisible(false);
+
+                    // Mixed-air fire: close the aim and demand a fresh LT press for the next
+                    // one - see UpdateMixedAirScheme's own comment.
+                    if (mixedAirAiming)
+                    {
+                        mixedAirAiming = false;
+                        waitingForLtRelease = true;
+                    }
                 }
             }
             else
             {
-                bool canLaunch = energyFraction > 0f;
+                bool canLaunch = energyFraction > 0f && CanStartNewLaunch();
 
                 InputActionReference downAction = DownChargeActionForCurrentScheme();
                 bool upPressed = canLaunch && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
@@ -1740,7 +1836,7 @@ namespace KineticEnergy.Player
             }
             else
             {
-                bool canLaunch = energyFraction > 0f;
+                bool canLaunch = energyFraction > 0f && CanStartNewLaunch();
 
                 bool ltPressed = canLaunch && launchAction != null && launchAction.action != null && launchAction.action.WasPressedThisFrame();
                 bool southPressed = canLaunch && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
@@ -1815,7 +1911,7 @@ namespace KineticEnergy.Player
             {
                 // A fresh press only - holding Left Mouse through a fire does not auto-restart a
                 // new charge, matching StickAim/DefyGravity's own WasPressedThisFrame gate.
-                if (!lmbPressed || energyFraction <= 0f) return;
+                if (!lmbPressed || energyFraction <= 0f || !CanStartNewLaunch()) return;
 
                 fastPacedCharging = true;
                 chargeTime = 0f;
@@ -1877,6 +1973,7 @@ namespace KineticEnergy.Player
             queuedDefyGravityDuration = defyGravityDuration;
             launchQueued = true;
             hasLaunched = true;
+            launchesSinceGrounded++;
             currentFlightIsDownward = Vector3.Dot(direction.normalized, Vector3.down) >= slamDownwardThreshold;
             // Every launch spends the charge fraction it took to build, straight out of the
             // shared energy tank - "no more time/energy/speed can be added... when you reach the
@@ -2202,7 +2299,7 @@ namespace KineticEnergy.Player
             // comment). The minEnergyGainPerCrash floor (itself a direct request from earlier)
             // still applies to both paths - without it, a tap-charge FastPaced shot could refund
             // near zero and soft-lock a nearly-empty tank mid-air.
-            float gained = controlScheme == ControlScheme.FastPaced
+            float gained = controlScheme == ControlScheme.FastPaced || refundSpentEnergyOnly
                 ? lastLaunchEnergySpent * fastPacedRefundMultiplier
                 : crashSpeed * energyGainPerSpeed * (1f + crashSpeed * energyGainSpeedBonus);
             gained = Mathf.Max(gained, minEnergyGainPerCrash);
