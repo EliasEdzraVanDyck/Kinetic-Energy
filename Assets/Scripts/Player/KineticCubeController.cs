@@ -309,6 +309,15 @@ namespace KineticEnergy.Player
         // HandlePreviewModeSwitch) from ever leaving StickAim, without deleting either scheme's
         // logic. Flip true to get the old switching behavior back for testing.
         public bool schemeSwitchingEnabled = false;
+        // Tutorial2 only (direct request: "replace the tutorial's midair controls with the air
+        // controls of the FastPaced Level"): while Mixed is active and this is on, the AIRBORNE
+        // phase runs the full FastPaced flow instead of the LT-gated directional charges -
+        // hold Right Mouse / Left Trigger to aim (first-person camera + reticle), hold Left
+        // Mouse / Right Trigger to charge, release to fire along the camera's look direction.
+        // Grounded controls stay Mixed's own (LT aim / RT confirm, South's up-charge). Needs
+        // fastPacedAimAction/fastPacedLaunchAction wired, same as FastPacedLevel. Also locks
+        // the OS cursor for the whole scene, since the air aim is mouse-driven.
+        public bool mixedFastPacedAir = false;
 
         [Header("Testing")]
         // Applied to the GLOBAL Physics.gravity every time this changes (Awake + OnValidate, so
@@ -649,7 +658,7 @@ namespace KineticEnergy.Player
             // this sits ABOVE the timeScale early-return below (that return firing is exactly the
             // paused case this must react to). Every other scheme is gamepad-driven and never
             // locks, preserving their existing behavior untouched.
-            if (controlScheme == ControlScheme.FastPaced)
+            if (controlScheme == ControlScheme.FastPaced || (controlScheme == ControlScheme.Mixed && mixedFastPacedAir))
             {
                 bool paused = Time.timeScale <= 0f;
                 Cursor.lockState = paused ? CursorLockMode.None : CursorLockMode.Locked;
@@ -947,6 +956,16 @@ namespace KineticEnergy.Player
             {
                 UpdateStickAimChargeScheme();
             }
+            else if (mixedFastPacedAir && (fastPacedAiming || fastPacedCharging))
+            {
+                // The first-person aim (and its charge zoom) exists ONLY midair in this hybrid
+                // (direct request: "should only happen if you aim when midair, not when you are
+                // grounded") - the moment the cube is grounded again, the aim cancels cleanly
+                // and the ordinary grounded Mixed controls take over, even if the aim button is
+                // still held.
+                if (isGrounded) CancelFastPacedAim();
+                else UpdateFastPacedScheme();
+            }
             else if (isGrounded)
             {
                 // South's Up hold-to-charge also works straight from the ground (direct
@@ -956,6 +975,13 @@ namespace KineticEnergy.Player
                 bool upPressed = energyFraction > 0f && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
                 if (upPressed) UpdateStickAimChargeScheme();
                 else UpdateChargeBasedScheme();
+            }
+            else if (mixedFastPacedAir)
+            {
+                // Tutorial2's air phase: the full FastPaced flow (RMB/LT aim in first person,
+                // LMB/RT charge, fire along the look direction) - see mixedFastPacedAir's own
+                // comment.
+                UpdateFastPacedScheme();
             }
             else
             {
@@ -1418,6 +1444,18 @@ namespace KineticEnergy.Player
             {
                 controlsHintLabel.text = controlScheme switch
                 {
+                    ControlScheme.Mixed when mixedFastPacedAir =>
+                        "Move (on the ground): Left Stick / WASD\n" +
+                        "Grounded: Left Trigger to aim+charge, Right Trigger to launch - or hold\n" +
+                        "  South to charge an Up launch (release to fire)\n" +
+                        "Airborne: hold Right Mouse / Left Trigger to aim (first person), then\n" +
+                        "  hold Left Mouse / Right Trigger to charge - release to fire where\n" +
+                        "  you're looking. Release Right Mouse to cancel and return to 3rd person\n" +
+                        stuckLine +
+                        "Camera: Mouse / Right Stick\n" +
+                        trailToggleLine +
+                        switchLine +
+                        "Pause: Start / Options / Esc",
                     ControlScheme.StickAim =>
                         "Move (on the ground): Left Stick\n" +
                         "Nudge (in the air): Left Stick\n" +
@@ -1482,6 +1520,20 @@ namespace KineticEnergy.Player
             {
                 controlsPanelBody.text = controlScheme switch
                 {
+                    ControlScheme.Mixed when mixedFastPacedAir =>
+                        "Left Stick / WASD - Move (on the ground, while not aiming)\n" +
+                        "Grounded - Left Trigger (hold) to aim and charge, Left Stick to adjust\n" +
+                        "  aim, Right Trigger to launch. South (hold) charges an Up launch,\n" +
+                        "  release to fire - tilted toward the Left Stick, straight up centered.\n" +
+                        "Airborne - hold Right Mouse / Left Trigger to aim: first-person view\n" +
+                        "  with the trail-and-reticle preview. Hold Left Mouse / Right Trigger\n" +
+                        "  to charge, release to fire straight along where you're looking.\n" +
+                        "  Release Right Mouse at any time to cancel and return to 3rd person.\n" +
+                        stuckLinePanel +
+                        "Mouse / Right Stick - Camera\n" +
+                        trailToggleLinePanel +
+                        switchLinePanel +
+                        "Start / Options / Esc - Pause",
                     ControlScheme.StickAim =>
                         "Left Stick - Move (on the ground)\n" +
                         "Left Stick (in the air) - Nudge distance / drift sideways\n" +
@@ -1626,16 +1678,24 @@ namespace KineticEnergy.Player
             }
             if (fastPacedAiming)
             {
-                fastPacedAiming = false;
-                fastPacedCharging = false;
-                chargeTime = 0f;
-                landingPreview?.SetVisible(false);
-                cameraOrbit?.SetFirstPersonMode(false);
-                cameraOrbit?.SetAimZoom(0f);
+                CancelFastPacedAim();
             }
             mixedAirAiming = false;
 
             UpdateSchemeLabel();
+        }
+
+        // Cleanly winds down the FastPaced-style aim state: camera back to third person, zoom
+        // reset, any charge discarded without firing. Shared by scheme switches and Tutorial2's
+        // grounded-cancels-the-air-aim rule (see UpdateMixedScheme).
+        void CancelFastPacedAim()
+        {
+            fastPacedAiming = false;
+            fastPacedCharging = false;
+            chargeTime = 0f;
+            landingPreview?.SetVisible(false);
+            cameraOrbit?.SetFirstPersonMode(false);
+            cameraOrbit?.SetAimZoom(0f);
         }
 
         // Hold South/LT/RT to charge a launch in that direction (same charge curve as the

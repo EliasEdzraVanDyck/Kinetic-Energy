@@ -28,6 +28,7 @@ namespace KineticEnergy.EditorSetup
         const string FastPacedLevelScenePath = "Assets/Scenes/FastPacedLevel.unity";
         const string SlowPacedLevelScenePath = "Assets/Scenes/SlowPacedLevel.unity";
         const string TutorialScenePath = "Assets/Scenes/Tutorial.unity";
+        const string Tutorial2ScenePath = "Assets/Scenes/Tutorial2.unity";
         // The crack decal pipeline: SOURCE is the raw 3x3 sheet (procedurally generated if
         // missing; overwrite it with real art any time), PROCESSED is what the decal material
         // actually uses - ProcessCrackSheet keys the source's light background out into alpha.
@@ -49,6 +50,7 @@ namespace KineticEnergy.EditorSetup
             ("Fast Paced", "FastPacedLevel"),
             ("Slow Paced", "SlowPacedLevel"),
             ("Tutorial", "Tutorial"),
+            ("Tutorial 2", "Tutorial2"),
         };
 
         public static void SetupAll()
@@ -1331,7 +1333,8 @@ namespace KineticEnergy.EditorSetup
                 new EditorBuildSettingsScene(Level3ScenePath, true),
                 new EditorBuildSettingsScene(FastPacedLevelScenePath, true),
                 new EditorBuildSettingsScene(SlowPacedLevelScenePath, true),
-                new EditorBuildSettingsScene(TutorialScenePath, true)
+                new EditorBuildSettingsScene(TutorialScenePath, true),
+                new EditorBuildSettingsScene(Tutorial2ScenePath, true)
             };
         }
 
@@ -3208,6 +3211,78 @@ namespace KineticEnergy.EditorSetup
 
             AssetDatabase.SaveAssets();
             Debug.Log("KineticEnergySetup: LaunchButton prefab created OK");
+        }
+
+        // ==================== Tutorial2 ====================
+
+        // "A duplicate of the tutorial scene, but replace the tutorial's midair controls with
+        // the air controls of the FastPaced Level" (direct request). Deliberately NOT a rebuild:
+        // the scene is a byte-for-byte COPY of Tutorial.unity exactly as it currently stands
+        // (including any hand-placed arrangement), and this method then mutates ONLY the copy's
+        // Player overrides (mixedFastPacedAir + the FastPaced input actions + the reticle
+        // unlock) and the air-lesson sign TEXTS - no geometry, no transforms, and the original
+        // Tutorial.unity is never opened for writing. Re-running re-applies the overrides
+        // without re-copying, so later edits to Tutorial2 survive.
+        [MenuItem("Tools/Kinetic Energy/Setup Tutorial2")]
+        public static void SetupTutorial2()
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(Tutorial2ScenePath) == null)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(TutorialScenePath) == null)
+                {
+                    throw new Exception("KineticEnergySetup: Tutorial2 needs Tutorial.unity to duplicate - run SetupTutorial first.");
+                }
+                if (!AssetDatabase.CopyAsset(TutorialScenePath, Tutorial2ScenePath))
+                {
+                    throw new Exception("KineticEnergySetup: failed to copy Tutorial to create Tutorial2.");
+                }
+            }
+
+            EditorSceneManager.OpenScene(Tutorial2ScenePath, OpenSceneMode.Single);
+
+            GameObject playerGo = FindByNameIncludingInactive("Player");
+            KineticCubeController controller = playerGo != null ? playerGo.GetComponent<KineticCubeController>() : null;
+            if (controller == null)
+            {
+                throw new Exception("KineticEnergySetup: Tutorial2 copy has no Player with KineticCubeController.");
+            }
+
+            // The FastPaced air flow's own inputs and reticle - grounded Mixed controls and
+            // every other override (sticky rules, 2-launch limit, tuning) carry over from the
+            // copy untouched.
+            controller.mixedFastPacedAir = true;
+            controller.fastPacedAimAction = FindActionReference("Player", "FastPacedAim");
+            controller.fastPacedLaunchAction = FindActionReference("Player", "FastPacedLaunch");
+            controller.landingPreview.ghostAndCrosshairEnabled = true;
+            EditorUtility.SetDirty(controller);
+            EditorUtility.SetDirty(controller.landingPreview);
+
+            // Re-word the two air-lesson signs for the new controls, wherever they sit. Matched
+            // by distinctive phrases of their CURRENT text (the user has hand-edited these,
+            // dropping the original lesson numbering) - anything unrecognized is left alone.
+            foreach (TextMesh textMesh in UnityEngine.Object.FindObjectsByType<TextMesh>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (textMesh.gameObject.name != "TutorialSign") continue;
+                if (textMesh.text.Contains("West and release"))
+                {
+                    textMesh.text = "Launch forward, then hold Right Mouse / Left Trigger\nin the air to aim, look down, hold Left Mouse / Right\nTrigger and release to launch down";
+                    EditorUtility.SetDirty(textMesh);
+                }
+                else if (textMesh.text.Contains("half charge"))
+                {
+                    textMesh.text = "Launch forward, then aim ahead in the air and\nrelease at about half charge to reach the wall";
+                    EditorUtility.SetDirty(textMesh);
+                }
+            }
+
+            AddSceneToBuildSettings(Tutorial2ScenePath);
+
+            Scene tutorial2Scene = EditorSceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(tutorial2Scene);
+            EditorSceneManager.SaveScene(tutorial2Scene);
+            AssetDatabase.SaveAssets();
+
+            Debug.Log("KineticEnergySetup: Tutorial2 setup complete OK");
         }
 
         // ==================== Breakable crack wall prefab ====================
