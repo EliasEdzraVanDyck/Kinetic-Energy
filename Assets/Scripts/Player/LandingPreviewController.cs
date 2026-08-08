@@ -102,7 +102,10 @@ namespace KineticEnergy.Player
         // mark an actual landing SPOT, which doesn't exist for a miss, so they stay hidden in
         // that case (handled in ApplyModeVisibility). The Trail still shows the arc trailing off,
         // since "here's the path, and it doesn't land anywhere" is still meaningful information.
-        public void SetLandingPoint(Vector3 lineStart, Vector3 landingPoint, Vector3[] trajectory, int trajectoryCount, bool didLand)
+        // landingNormal: the surface normal of the face the shot lands on - the cross-and-ring
+        // marker lies flat against that face (wall, floor, ceiling alike) instead of always
+        // sitting horizontal (direct request). Vector3.zero/omitted falls back to world up.
+        public void SetLandingPoint(Vector3 lineStart, Vector3 landingPoint, Vector3[] trajectory, int trajectoryCount, bool didLand, Vector3 landingNormal = default)
         {
             // Follows didLand directly, no debounce - an earlier version required several
             // consecutive "true" frames before showing, meant to filter single-frame flicker, but
@@ -121,13 +124,18 @@ namespace KineticEnergy.Player
 
             if (hasLanding)
             {
+                Vector3 normal = landingNormal.sqrMagnitude > 0.0001f ? landingNormal.normalized : Vector3.up;
                 if (ghostGroup != null)
                 {
                     MoveSmoothly(ghostGroup.transform, landingPoint + Vector3.up * ghostGroundOffset, ref ghostSmoothVelocity);
                 }
                 if (crosshairGroup != null)
                 {
-                    MoveSmoothly(crosshairGroup.transform, landingPoint + Vector3.up * markerGroundOffset, ref crosshairSmoothVelocity);
+                    // Offset along the LANDING FACE's normal (markerGroundOffset is negative -
+                    // half a cube-height toward the surface from the resting center), and lie
+                    // flat against it.
+                    MoveSmoothly(crosshairGroup.transform, landingPoint + normal * markerGroundOffset, ref crosshairSmoothVelocity);
+                    crosshairGroup.transform.rotation = Quaternion.FromToRotation(Vector3.up, normal);
                 }
             }
 

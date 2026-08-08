@@ -584,6 +584,10 @@ namespace KineticEnergy.Player
         GameObject predictionClone;
         Rigidbody predictionRb;
         BoxCollider predictionCloneCollider;
+        PredictionCloneStopper predictionStopper;
+        // Normal of the face the last prediction landed on (world up when it didn't land) -
+        // orients the cross-and-ring marker flush against that face.
+        Vector3 lastPredictedLandingNormal = Vector3.up;
         Scene predictionScene;
         PhysicsScene predictionPhysicsScene;
         bool predictionSceneReady;
@@ -924,7 +928,7 @@ namespace KineticEnergy.Player
 
                 if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
                 {
-                    landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand);
+                    landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand, lastPredictedLandingNormal);
                 }
 
                 if (launchNow)
@@ -1843,7 +1847,7 @@ namespace KineticEnergy.Player
 
                 if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
                 {
-                    landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand);
+                    landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand, lastPredictedLandingNormal);
                 }
 
                 if (releasedNow)
@@ -1986,7 +1990,7 @@ namespace KineticEnergy.Player
 
                 if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
                 {
-                    landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand);
+                    landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand, lastPredictedLandingNormal);
                 }
 
                 if (releasedNow)
@@ -2123,7 +2127,7 @@ namespace KineticEnergy.Player
 
             if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
             {
-                landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand);
+                landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand, lastPredictedLandingNormal);
             }
 
             if (lmbReleased)
@@ -2335,6 +2339,7 @@ namespace KineticEnergy.Player
                 predictionCloneCollider.size = originalCloneSize;
             }
 
+            predictionStopper?.ClearContact();
             predictionRb.position = spawnPos;
             predictionRb.rotation = transform.rotation;
             predictionRb.linearVelocity = initialVelocity;
@@ -2389,6 +2394,10 @@ namespace KineticEnergy.Player
                 if (pos.y < fallResetY) break;
             }
 
+            lastPredictedLandingNormal = predictionStopper != null && predictionStopper.HasContact
+                ? predictionStopper.LastContactNormal
+                : Vector3.up;
+
             return landing;
         }
 
@@ -2432,7 +2441,7 @@ namespace KineticEnergy.Player
 
             // Any-surface sticking (direct request) - PredictionCloneStopper just stops on the
             // first contact, period, matching the real cube's OnCollisionEnter.
-            predictionClone.AddComponent<PredictionCloneStopper>();
+            predictionStopper = predictionClone.AddComponent<PredictionCloneStopper>();
 
             // Left permanently active rather than toggled per prediction call - reactivating a
             // GameObject and immediately reading its Rigidbody's state in the same call is

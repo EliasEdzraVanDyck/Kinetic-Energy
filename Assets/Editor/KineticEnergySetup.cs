@@ -3312,7 +3312,12 @@ namespace KineticEnergy.EditorSetup
             EditorSceneManager.OpenScene(TutorialScenePath, OpenSceneMode.Single);
             KineticCubeController tutorialController = FindPlayerController("Tutorial");
             tutorialController.mouseAirControls = true;
+            // The cross-and-ring landing marker for the slow-paced (Mixed) scheme too (direct
+            // request) - same combined trail+reticle mode SlowPacedLevel already uses.
+            tutorialController.landingPreview.ghostAndCrosshairEnabled = true;
+            tutorialController.landingPreview.initialMode = PredictionMode.TrailAndCrosshair;
             EditorUtility.SetDirty(tutorialController);
+            EditorUtility.SetDirty(tutorialController.landingPreview);
             ReplaceWinWithNextScene("TestLevel1");
             SaveActiveScene();
 
@@ -3328,6 +3333,9 @@ namespace KineticEnergy.EditorSetup
                 tutorial2Camera.firstPersonMaxPitch = 89f;
                 EditorUtility.SetDirty(tutorial2Camera);
             }
+            KineticCubeController tutorial2Controller = FindPlayerController("Tutorial2");
+            tutorial2Controller.landingPreview.initialMode = PredictionMode.TrailAndCrosshair;
+            EditorUtility.SetDirty(tutorial2Controller.landingPreview);
             ReplaceWinWithNextScene("TestLevel2");
             SaveActiveScene();
 
@@ -3393,6 +3401,12 @@ namespace KineticEnergy.EditorSetup
             DestroyIfExists("TutorialCourse");
             DestroyIfExists("WallHopCourse");
             BuildWallHopCourse(nextSceneName);
+            // Both schemes show the full trail+reticle preview (direct request) - the copies
+            // predate this flag on their sources, so it's (re)applied here.
+            KineticCubeController testController = FindPlayerController(destScenePath);
+            testController.landingPreview.ghostAndCrosshairEnabled = true;
+            testController.landingPreview.initialMode = PredictionMode.TrailAndCrosshair;
+            EditorUtility.SetDirty(testController.landingPreview);
             SaveActiveScene();
             AddSceneToBuildSettings(destScenePath);
         }

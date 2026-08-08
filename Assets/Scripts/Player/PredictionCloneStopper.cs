@@ -11,6 +11,13 @@ namespace KineticEnergy.Player
     // scheme") - matches the real cube's any-surface sticking exactly.
     public class PredictionCloneStopper : MonoBehaviour
     {
+        // The stopping contact's surface normal - read by KineticCubeController after each
+        // prediction so the cross-and-ring marker can lie flat against whatever face the shot
+        // actually lands on (wall, floor, ceiling alike). Cleared via ClearContact before every
+        // prediction run.
+        public Vector3 LastContactNormal { get; private set; } = Vector3.up;
+        public bool HasContact { get; private set; }
+
         Rigidbody rb;
 
         void Awake()
@@ -18,10 +25,21 @@ namespace KineticEnergy.Player
             rb = GetComponent<Rigidbody>();
         }
 
+        public void ClearContact()
+        {
+            HasContact = false;
+            LastContactNormal = Vector3.up;
+        }
+
         void OnCollisionEnter(Collision collision)
         {
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
+            if (collision.contactCount > 0)
+            {
+                LastContactNormal = collision.GetContact(0).normal;
+                HasContact = true;
+            }
         }
     }
 }
