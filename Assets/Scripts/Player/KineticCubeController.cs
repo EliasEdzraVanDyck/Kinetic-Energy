@@ -318,6 +318,14 @@ namespace KineticEnergy.Player
         // fastPacedAimAction/fastPacedLaunchAction wired, same as FastPacedLevel. Also locks
         // the OS cursor for the whole scene, since the air aim is mouse-driven.
         public bool mixedFastPacedAir = false;
+        // Tutorial only (direct request): mouse+keyboard support for the midair charges -
+        // Space also starts/releases the Up charge, E the Down charge (read directly off the
+        // keyboard; those keys' action-asset bindings, Jump/Interact, are unused by this
+        // controller so nothing double-triggers), and a Forward charge with the stick centered
+        // fires along the CAMERA's exact look direction, so the mouse aims it by orbiting the
+        // camera. The air-aim gate (RMB) and forward trigger (LMB) already exist as bindings
+        // on launchAction/fireAction. Off everywhere else.
+        public bool mouseAirControls = false;
 
         [Header("Testing")]
         // Applied to the GLOBAL Physics.gravity every time this changes (Awake + OnValidate, so
@@ -575,6 +583,7 @@ namespace KineticEnergy.Player
 
         GameObject predictionClone;
         Rigidbody predictionRb;
+        BoxCollider predictionCloneCollider;
         Scene predictionScene;
         PhysicsScene predictionPhysicsScene;
         bool predictionSceneReady;
@@ -1355,6 +1364,16 @@ namespace KineticEnergy.Player
             launchesSinceGrounded = 0;   // a crash is a landing - the per-flight launch budget resets
             mixedAirAiming = false;      // defensive - the freeze should prevent crashing mid-aim at all
 
+            // "If you crash onto an object, aiming should be disabled until you pressed it
+            // again" (direct request, all scenes/schemes): a crash closes any aim outright and
+            // demands a genuine release-and-repress of the aim button - a trigger still held
+            // from before the impact must not reopen aiming by itself. waitingForLtRelease is
+            // exactly that one-shot-per-hold latch (honored by the grounded flow AND Mixed's
+            // air-aim gate); the hybrid's FastPaced-style aim gets cancelled here and its own
+            // entry already requires a fresh press.
+            waitingForLtRelease = true;
+            if (mixedFastPacedAir && (fastPacedAiming || fastPacedCharging)) CancelFastPacedAim();
+
             // Fed to flatGroundStickThreshold's check above and to AlignVisualToSurface below -
             // direct request: "the cubes surface should align with the surface it just hit, so
             // they are parallel".
@@ -1757,10 +1776,13 @@ namespace KineticEnergy.Player
                 }
 
                 InputActionReference downAction = DownChargeActionForCurrentScheme();
+                bool keyboardAvailable = mouseAirControls && Keyboard.current != null;
                 bool releasedNow = stickAimChargeType switch
                 {
-                    StickAimChargeType.Up => upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasReleasedThisFrame(),
-                    StickAimChargeType.Down => downAction != null && downAction.action != null && downAction.action.WasReleasedThisFrame(),
+                    StickAimChargeType.Up => (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasReleasedThisFrame())
+                        || (keyboardAvailable && Keyboard.current.spaceKey.wasReleasedThisFrame),
+                    StickAimChargeType.Down => (downAction != null && downAction.action != null && downAction.action.WasReleasedThisFrame())
+                        || (keyboardAvailable && Keyboard.current.eKey.wasReleasedThisFrame),
                     _ => fireAction != null && fireAction.action != null && fireAction.action.WasReleasedThisFrame(),
                 };
 
@@ -1774,12 +1796,24 @@ namespace KineticEnergy.Player
                 }
                 else if (stickAimChargeType == StickAimChargeType.Forward)
                 {
-                    // Forward keeps launching the last direction the stick actually pointed (if
-                    // any), but drops to the shallow neutral angle the instant the stick isn't
-                    // held past stickAimDeadzone anymore - direct request: "the direction should
-                    // be frozen when launching forward but the lower angle should be used".
-                    Vector3 flat = stickAimHasAimed ? stickAimLastFlatDirection : FacingFlatDirection();
-                    dir = TiltedDirection(flat, stickAimForwardNeutralAngle);
+                    if (mouseAirControls && !stickAimHasAimed && cameraTransform != null)
+                    {
+                        // "Aim with your mouse for the midair forward launches" (direct
+                        // request, Tutorial): with the stick untouched, the shot follows the
+                        // camera's exact look direction - orbit the camera with the mouse to
+                        // aim, live until release. Holding the stick past the deadzone still
+                        // takes over with the classic tilted behavior below.
+                        dir = cameraTransform.forward.normalized;
+                    }
+                    else
+                    {
+                        // Forward keeps launching the last direction the stick actually pointed (if
+                        // any), but drops to the shallow neutral angle the instant the stick isn't
+                        // held past stickAimDeadzone anymore - direct request: "the direction should
+                        // be frozen when launching forward but the lower angle should be used".
+                        Vector3 flat = stickAimHasAimed ? stickAimLastFlatDirection : FacingFlatDirection();
+                        dir = TiltedDirection(flat, stickAimForwardNeutralAngle);
+                    }
                 }
                 else
                 {
@@ -1836,8 +1870,11 @@ namespace KineticEnergy.Player
                 bool canLaunch = energyFraction > 0f && CanStartNewLaunch();
 
                 InputActionReference downAction = DownChargeActionForCurrentScheme();
-                bool upPressed = canLaunch && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
-                bool downPressed = canLaunch && downAction != null && downAction.action != null && downAction.action.WasPressedThisFrame();
+                bool keyboardAvailable = mouseAirControls && Keyboard.current != null;
+                bool upPressed = canLaunch && ((upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
+                    || (keyboardAvailable && Keyboard.current.spaceKey.wasPressedThisFrame));
+                bool downPressed = canLaunch && ((downAction != null && downAction.action != null && downAction.action.WasPressedThisFrame())
+                    || (keyboardAvailable && Keyboard.current.eKey.wasPressedThisFrame));
                 bool rtPressed = canLaunch && fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
 
                 if (upPressed) StartStickAimCharge(StickAimChargeType.Up);
@@ -2032,14 +2069,12 @@ namespace KineticEnergy.Player
                 // Same energy gate every other scheme uses to allow STARTING a new aim - see
                 // canStartNewAim/canLaunch's own comments.
                 if (energyFraction <= 0f) return;
-                // Tutorial2's hybrid (mixedFastPacedAir): opening the air aim needs a FRESH
-                // press, not a hold carried over from the grounded launch - Mixed fires its
-                // grounded shot with these same physical buttons still down, and without this
-                // gate the air aim (and, one more press later, the charge zoom) opened itself
-                // the instant the launch left the ground (direct bug report). FastPacedLevel
-                // (mixedFastPacedAir false) keeps its original hold-to-aim behavior.
-                if (mixedFastPacedAir && controlScheme == ControlScheme.Mixed
-                    && !(fastPacedAimAction != null && fastPacedAimAction.action != null && fastPacedAimAction.action.WasPressedThisFrame()))
+                // Opening the aim ALWAYS needs a FRESH press now (direct request: "needing you
+                // to repress it to aim again" after each launch - and the same gate already
+                // fixed Tutorial2's grounded-launch carry-over hold). A held button never
+                // opens the aim, in FastPacedLevel and the Tutorial2 hybrid alike; holding it
+                // still MAINTAINS an open aim as before.
+                if (!(fastPacedAimAction != null && fastPacedAimAction.action != null && fastPacedAimAction.action.WasPressedThisFrame()))
                 {
                     return;
                 }
@@ -2095,15 +2130,11 @@ namespace KineticEnergy.Player
             {
                 QueueLaunch(dir, previewForce, previewDamping);
 
-                fastPacedCharging = false;
-                chargeTime = 0f;
-                landingPreview?.SetVisible(false);
-                // The charge zoom lives exactly as long as the launch button is held (direct
-                // request) - firing lets go of it, so the camera snaps back out here rather
-                // than staying zoomed at the last charge level until the aim itself ends.
-                cameraOrbit?.SetAimZoom(0f);
-                // fastPacedAiming (and the first-person camera) deliberately stay active here -
-                // Right Mouse is still held, ready to charge another shot immediately.
+                // "Disable aim the moment you launch" (direct request, superseding the old
+                // aim-spans-several-shots behavior): the whole aim - first person, zoom,
+                // preview - closes with the shot, and re-aiming needs a genuinely fresh press
+                // of the aim button (see the entry gate above).
+                CancelFastPacedAim();
             }
         }
 
@@ -2264,7 +2295,47 @@ namespace KineticEnergy.Player
             // so it's the correct clearance direction in every orientation; world-up remains the
             // un-stuck fallback (grounded standing, mid-air) where it was already correct.
             Vector3 clearanceDir = isStuck && stuckSurfaceNormal.sqrMagnitude > 0.0001f ? stuckSurfaceNormal : Vector3.up;
-            predictionRb.position = startPos + clearanceDir * 0.15f;
+            Vector3 spawnPos = startPos + clearanceDir * 0.15f;
+
+            // Depenetrate the spawn point from the static geometry: aiming while pressed up
+            // against a wall - e.g. falling down its face right after a non-sticky cling
+            // released, TestLevel1's core loop - would otherwise start the clone OVERLAPPING
+            // that wall, register an instant false "landing", and collapse the dotted line to
+            // nothing (direct bug report). ComputePenetration is purely geometric, so it works
+            // across the physics-scene boundary; the proxies are almost all BoxColliders, which
+            // it fully supports (a non-convex MeshCollider just returns false and is skipped).
+            if (predictionCloneCollider != null)
+            {
+                // Inflated by a skin for the pass: merely TOUCHING a wall (the ~1cm of gap left
+                // while sliding down a face after a cling released) is not penetration, so the
+                // un-inflated check let the clone spawn inside PhysX's contact offset - the
+                // stopper killed its velocity on the first step and the "trail" was just the
+                // clone falling straight down (direct bug report: "it rather points down...
+                // the moment you don't touch the wall anymore it appears correctly"). With the
+                // skin, touching counts as overlapping and gets pushed out to a genuinely
+                // contact-free gap.
+                const float depenetrationSkin = 0.12f;
+                Vector3 originalCloneSize = predictionCloneCollider.size;
+                predictionCloneCollider.size = originalCloneSize + Vector3.one * depenetrationSkin;
+                foreach (PredictionGeometryProxy entry in geometryProxies)
+                {
+                    if (entry.proxy == null || !entry.proxy.activeSelf) continue;
+                    Collider proxyCollider = entry.proxyBox != null ? (Collider)entry.proxyBox : entry.proxyMesh;
+                    if (proxyCollider == null) continue;
+                    // Broad-phase: anything whose bounds sit clearly away from the spawn can't
+                    // be overlapping it.
+                    if (proxyCollider.bounds.SqrDistance(spawnPos) > 2.25f) continue;
+                    if (Physics.ComputePenetration(predictionCloneCollider, spawnPos, transform.rotation,
+                        proxyCollider, entry.proxy.transform.position, entry.proxy.transform.rotation,
+                        out Vector3 pushDirection, out float pushDistance))
+                    {
+                        spawnPos += pushDirection * (pushDistance + 0.02f);
+                    }
+                }
+                predictionCloneCollider.size = originalCloneSize;
+            }
+
+            predictionRb.position = spawnPos;
             predictionRb.rotation = transform.rotation;
             predictionRb.linearVelocity = initialVelocity;
             predictionRb.angularVelocity = Vector3.zero;
@@ -2354,8 +2425,8 @@ namespace KineticEnergy.Player
             predictionRb.interpolation = RigidbodyInterpolation.None;
             predictionRb.collisionDetectionMode = CollisionDetectionMode.Continuous;
 
-            BoxCollider cloneCollider = predictionClone.AddComponent<BoxCollider>();
-            if (boxCollider != null) cloneCollider.size = boxCollider.size;
+            predictionCloneCollider = predictionClone.AddComponent<BoxCollider>();
+            if (boxCollider != null) predictionCloneCollider.size = boxCollider.size;
             // No Physics.IgnoreCollision needed anymore - a separate PhysicsScene means the
             // clone cannot physically collide with the real player's collider at all.
 

@@ -84,6 +84,12 @@ namespace KineticEnergy.Camera
         // spot". Both are no-ops for every other scheme, which never calls them.
         public float normalFov = 60f;
         public float maxZoomFov = 20f;
+        // Pitch limits while first person is active - near-vertical is SAFE there (first person
+        // applies the raw rotation directly, none of the LookRotation-at-target degeneracy the
+        // +/-75 orbit limits guard against). Tutorial2's camera instance sets these to +/-89
+        // (direct request); the defaults keep every other scene exactly as before.
+        public float firstPersonMinPitch = -75f;
+        public float firstPersonMaxPitch = 75f;
 
         UnityEngine.Camera cam;
         bool firstPerson;
@@ -276,7 +282,9 @@ namespace KineticEnergy.Camera
                 yaw += look.x * rotationSpeed * fineAimScale * dt;
             }
             float pitchDelta = (invertY ? look.y : -look.y) * rotationSpeed * fineAimScale * dt;
-            pitch = Mathf.Clamp(pitch + pitchDelta, minPitch, maxPitch);
+            pitch = Mathf.Clamp(pitch + pitchDelta,
+                firstPerson ? firstPersonMinPitch : minPitch,
+                firstPerson ? firstPersonMaxPitch : maxPitch);
 
             // Glide the reference-frame up toward wherever the last crash re-based it (see
             // SetUpVector) - Slerp by a rate*dt fraction gives a fast start that eases out, which

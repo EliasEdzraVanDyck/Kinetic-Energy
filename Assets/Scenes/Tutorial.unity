@@ -1836,17 +1836,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1aa9b145e4577334982c18698a022e4b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Player.EnergyMeterController
---- !u!114 &609016761 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 3412518367669415838, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
-  m_PrefabInstance: {fileID: 609016756}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 726ff5dbdec352940a1643684b24d10f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.UI.PauseController
 --- !u!1 &676393315
 GameObject:
   m_ObjectHideFlags: 0
@@ -2345,6 +2334,10 @@ PrefabInstance:
       objectReference: {fileID: 1619290995}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: stickyWallsOnly
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
+      propertyPath: mouseAirControls
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
@@ -6337,10 +6330,10 @@ MonoBehaviour:
   m_GameObject: {fileID: 1466846894}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c43a1e43f1036fc42a2f2afeb833a41a, type: 3}
+  m_Script: {fileID: 11500000, guid: ff09783b92c400140906ed896ef0355e, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.FinishLineWin
-  pauseController: {fileID: 609016761}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.FinishLineNextScene
+  nextSceneName: TestLevel1
 --- !u!43 &1479267243
 Mesh:
   m_ObjectHideFlags: 0
@@ -9185,7 +9178,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1975514122}
   - component: {fileID: 1975514124}
-  - component: {fileID: 1975514123}
+  - component: {fileID: 1975514125}
   m_Layer: 0
   m_Name: FinishTrigger
   m_TagString: Untagged
@@ -9208,19 +9201,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1466846895}
   m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
---- !u!114 &1975514123
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1975514121}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c43a1e43f1036fc42a2f2afeb833a41a, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.FinishLineWin
-  pauseController: {fileID: 609016761}
 --- !u!65 &1975514124
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -9242,6 +9222,19 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 12, y: 9, z: 2}
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &1975514125
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1975514121}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ff09783b92c400140906ed896ef0355e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.FinishLineNextScene
+  nextSceneName: TestLevel1
 --- !u!43 &2042326045
 Mesh:
   m_ObjectHideFlags: 0

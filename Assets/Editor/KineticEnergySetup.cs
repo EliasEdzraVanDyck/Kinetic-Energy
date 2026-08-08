@@ -29,6 +29,9 @@ namespace KineticEnergy.EditorSetup
         const string SlowPacedLevelScenePath = "Assets/Scenes/SlowPacedLevel.unity";
         const string TutorialScenePath = "Assets/Scenes/Tutorial.unity";
         const string Tutorial2ScenePath = "Assets/Scenes/Tutorial2.unity";
+        const string TestLevel1ScenePath = "Assets/Scenes/TestLevel1.unity";
+        const string TestLevel2ScenePath = "Assets/Scenes/TestLevel2.unity";
+        const string MainMenuScenePath = "Assets/Scenes/MainMenu.unity";
         // The crack decal pipeline: SOURCE is the raw 3x3 sheet (procedurally generated if
         // missing; overwrite it with real art any time), PROCESSED is what the decal material
         // actually uses - ProcessCrackSheet keys the source's light background out into alpha.
@@ -51,6 +54,8 @@ namespace KineticEnergy.EditorSetup
             ("Slow Paced", "SlowPacedLevel"),
             ("Tutorial", "Tutorial"),
             ("Tutorial 2", "Tutorial2"),
+            ("Test Level 1", "TestLevel1"),
+            ("Test Level 2", "TestLevel2"),
         };
 
         public static void SetupAll()
@@ -3283,6 +3288,258 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
 
             Debug.Log("KineticEnergySetup: Tutorial2 setup complete OK");
+        }
+
+        // ==================== Playtest flow ====================
+
+        // One-shot wiring for the two-control-scheme playtest build (direct request):
+        //   MainMenu (boot) -> Tutorial -> TestLevel1 -> Tutorial2 -> TestLevel2 -> MainMenu
+        // - Tutorial gets mouse+keyboard air controls (mouseAirControls) IN PLACE.
+        // - Tutorial2's camera gets the +/-89 first-person aim pitch IN PLACE.
+        // - Both tutorials' finish triggers swap FinishLineWin for FinishLineNextScene.
+        // - TestLevel1/TestLevel2 are COPIES of Tutorial/Tutorial2 as they currently stand, so
+        //   the player carries the exact same controls/variables - only the course is replaced
+        //   with the floating-wall hop (BuildWallHopCourse).
+        // - MainMenu is built fresh and put first in Build Settings.
+        // Tutorial/Tutorial2 are only ever touched with component/flag changes here - never
+        // geometry or transforms. Signs are deliberately NOT touched (the user updates those).
+        // NOTE: re-running rebuilds the WallHopCourse in both test levels from the scripted
+        // layout - fine until someone hand-arranges those two scenes.
+        [MenuItem("Tools/Kinetic Energy/Setup Playtest Flow")]
+        public static void SetupPlaytestFlow()
+        {
+            // 1. Tutorial in place: mouse air controls + finish chains onward.
+            EditorSceneManager.OpenScene(TutorialScenePath, OpenSceneMode.Single);
+            KineticCubeController tutorialController = FindPlayerController("Tutorial");
+            tutorialController.mouseAirControls = true;
+            EditorUtility.SetDirty(tutorialController);
+            ReplaceWinWithNextScene("TestLevel1");
+            SaveActiveScene();
+
+            // 2. TestLevel1: copy of Tutorial (identical player), wall-hop course.
+            BuildTestLevel(TutorialScenePath, TestLevel1ScenePath, "Tutorial2");
+
+            // 3. Tutorial2 in place: +/-89 first-person aim pitch + finish chains onward.
+            EditorSceneManager.OpenScene(Tutorial2ScenePath, OpenSceneMode.Single);
+            ThirdPersonOrbitCamera tutorial2Camera = UnityEngine.Object.FindFirstObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (tutorial2Camera != null)
+            {
+                tutorial2Camera.firstPersonMinPitch = -89f;
+                tutorial2Camera.firstPersonMaxPitch = 89f;
+                EditorUtility.SetDirty(tutorial2Camera);
+            }
+            ReplaceWinWithNextScene("TestLevel2");
+            SaveActiveScene();
+
+            // 4. TestLevel2: copy of Tutorial2 (identical player + camera), same wall-hop
+            // course; its finish returns to the menu.
+            BuildTestLevel(Tutorial2ScenePath, TestLevel2ScenePath, "MainMenu");
+
+            // 5. The boot menu + build order.
+            SetupMainMenu();
+            EnsurePlaytestBuildSettings();
+
+            Debug.Log("KineticEnergySetup: Playtest flow setup complete OK");
+        }
+
+        static KineticCubeController FindPlayerController(string sceneLabel)
+        {
+            GameObject playerGo = FindByNameIncludingInactive("Player");
+            KineticCubeController controller = playerGo != null ? playerGo.GetComponent<KineticCubeController>() : null;
+            if (controller == null)
+            {
+                throw new Exception($"KineticEnergySetup: no Player with KineticCubeController in {sceneLabel}.");
+            }
+            return controller;
+        }
+
+        // Swaps every win-screen finish in the open scene for the next-scene chain trigger (and
+        // retargets any already-swapped one), leaving the trigger object itself - position,
+        // collider, everything - untouched.
+        static void ReplaceWinWithNextScene(string nextSceneName)
+        {
+            foreach (FinishLineWin win in UnityEngine.Object.FindObjectsByType<FinishLineWin>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                GameObject go = win.gameObject;
+                UnityEngine.Object.DestroyImmediate(win);
+                go.AddComponent<FinishLineNextScene>().nextSceneName = nextSceneName;
+                EditorUtility.SetDirty(go);
+            }
+            foreach (FinishLineNextScene next in UnityEngine.Object.FindObjectsByType<FinishLineNextScene>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                next.nextSceneName = nextSceneName;
+                EditorUtility.SetDirty(next);
+            }
+        }
+
+        static void SaveActiveScene()
+        {
+            Scene scene = EditorSceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorSceneManager.SaveScene(scene);
+        }
+
+        static void BuildTestLevel(string sourceScenePath, string destScenePath, string nextSceneName)
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(destScenePath) == null)
+            {
+                if (!AssetDatabase.CopyAsset(sourceScenePath, destScenePath))
+                {
+                    throw new Exception($"KineticEnergySetup: failed to copy {sourceScenePath} to {destScenePath}.");
+                }
+            }
+
+            EditorSceneManager.OpenScene(destScenePath, OpenSceneMode.Single);
+            DestroyIfExists("TutorialCourse");
+            DestroyIfExists("WallHopCourse");
+            BuildWallHopCourse(nextSceneName);
+            SaveActiveScene();
+            AddSceneToBuildSettings(destScenePath);
+        }
+
+        // The floating-wall level from the sketches: a safe start platform, three vertical
+        // walls floating over the void (staggered left/right and climbing, so the path zigzags
+        // wall to wall exactly like the arrows in the drawing), and a safe end platform with
+        // the finish. Walls are thin along the travel axis so their broad face is the crash
+        // target; the scene rules come from whichever tutorial the level was copied from
+        // (brief cling + 2-launch budget - each wall crash refunds energy and resets the
+        // budget, so every wall is a fresh start).
+        static void BuildWallHopCourse(string nextSceneName)
+        {
+            GameObject playerGo = FindByNameIncludingInactive("Player");
+            Transform player = playerGo != null ? playerGo.transform : null;
+            ThirdPersonOrbitCamera orbitCam = UnityEngine.Object.FindFirstObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+
+            Material platformMat = MakeSlowPacedMaterial("TutorialPlatformMaterial", new Color(0.50f, 0.55f, 0.62f));
+            Material wallMat = MakeSlowPacedMaterial("TestLevelWallMaterial", new Color(0.45f, 0.55f, 0.75f));
+
+            GameObject course = new GameObject("WallHopCourse");
+
+            CreateTutorialSlab(course.transform, "StartPlatform", new Vector3(0f, -0.75f, 0f), new Vector3(6f, 1.5f, 6f), platformMat);
+
+            GameObject wall1 = CreateTutorialSlab(course.transform, "FloatWall1", new Vector3(-5f, 5f, 16f), new Vector3(5f, 8f, 1f), wallMat);
+            CreateTutorialSlab(course.transform, "FloatWall2", new Vector3(5f, 9f, 32f), new Vector3(5f, 8f, 1f), wallMat);
+            CreateTutorialSlab(course.transform, "FloatWall3", new Vector3(-5f, 13f, 48f), new Vector3(5f, 8f, 1f), wallMat);
+
+            Vector3 endCenter = new Vector3(0f, 13.25f, 62f); // top face at y=14
+            CreateTutorialSlab(course.transform, "EndPlatform", endCenter, new Vector3(8f, 1.5f, 8f), platformMat);
+
+            GameObject trigger = new GameObject("FinishTrigger");
+            trigger.transform.SetParent(course.transform, true);
+            trigger.transform.position = endCenter + new Vector3(0f, 1.75f, 0f);
+            BoxCollider triggerCollider = trigger.AddComponent<BoxCollider>();
+            triggerCollider.isTrigger = true;
+            triggerCollider.size = new Vector3(8f, 2f, 8f);
+            trigger.AddComponent<FinishLineNextScene>().nextSceneName = nextSceneName;
+
+            if (player != null)
+            {
+                player.position = new Vector3(0f, 0.5f, 0f);
+                BuildCameraStartFacing(player, orbitCam, wall1.transform);
+                BuildPlayerShadow(player);
+            }
+        }
+
+        // The boot menu scene: title, the two-control-schemes note, and Start / Feedback /
+        // Scenes / Quit - the pause menu's visual language with Restart/Resume replaced by
+        // Start (direct request). The Feedback button opens MainMenuController.feedbackUrl,
+        // which the user fills in with their form link.
+        public static void SetupMainMenu()
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(MainMenuScenePath) == null)
+            {
+                Scene created = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
+                EditorSceneManager.SaveScene(created, MainMenuScenePath);
+            }
+
+            EditorSceneManager.OpenScene(MainMenuScenePath, OpenSceneMode.Single);
+            DestroyIfExists("MainMenuUI");
+            DestroyIfExists("EventSystem");
+
+            GameObject root = new GameObject("MainMenuUI");
+
+            GameObject eventSystemGo = new GameObject("EventSystem");
+            eventSystemGo.transform.SetParent(root.transform, false);
+            eventSystemGo.AddComponent<EventSystem>();
+            eventSystemGo.AddComponent<InputSystemUIInputModule>();
+
+            GameObject canvasGo = new GameObject("MenuCanvas");
+            canvasGo.transform.SetParent(root.transform, false);
+            Canvas canvas = canvasGo.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            canvasGo.AddComponent<GraphicRaycaster>();
+
+            Font font = FindBestFont();
+            Color accent = new Color(1f, 0.82f, 0.2f);
+            Color backdrop = new Color(0.06f, 0.07f, 0.1f, 1f);
+
+            GameObject menuPanel = CreatePanel("MenuPanel", canvasGo.transform, backdrop);
+            CreateText("Title", menuPanel.transform, "KINETIC ENERGY", font, 56, new Vector2(0f, 330f), new Vector2(900f, 90f));
+            Text intro = CreateText("Intro", menuPanel.transform,
+                "Playtest build - this tests TWO control schemes:\n" +
+                "the Tutorial and Test Level 1 use the first scheme,\n" +
+                "Tutorial 2 and Test Level 2 the second.\n" +
+                "Each finish line takes you straight to the next stop.\n" +
+                "Please share your thoughts via the Feedback button afterwards!",
+                font, 26, new Vector2(0f, 190f), new Vector2(1000f, 170f));
+            intro.color = new Color(1f, 1f, 1f, 0.9f);
+
+            GameObject startBtn = CreateButton("StartButton", menuPanel.transform, "Start", font, accent, new Vector2(0f, 40f), new Vector2(300f, 70f));
+            GameObject feedbackBtn = CreateButton("FeedbackButton", menuPanel.transform, "Feedback", font, accent, new Vector2(0f, -50f), new Vector2(300f, 70f));
+            GameObject scenesBtn = CreateButton("ScenesButton", menuPanel.transform, "Scenes", font, accent, new Vector2(0f, -140f), new Vector2(300f, 70f));
+            GameObject quitBtn = CreateButton("QuitButton", menuPanel.transform, "Quit", font, accent, new Vector2(0f, -230f), new Vector2(300f, 70f));
+
+            GameObject scenesPanel = CreatePanel("ScenesPanel", canvasGo.transform, backdrop);
+            CreateText("ScenesTitle", scenesPanel.transform, "SCENES", font, 48, new Vector2(0f, 240f), new Vector2(600f, 80f));
+            (string label, string sceneName)[] playtestScenes =
+            {
+                ("Tutorial", "Tutorial"),
+                ("Test Level 1", "TestLevel1"),
+                ("Tutorial 2", "Tutorial2"),
+                ("Test Level 2", "TestLevel2"),
+            };
+            GameObject[] sceneButtons = new GameObject[playtestScenes.Length];
+            float buttonY = 130f;
+            for (int i = 0; i < playtestScenes.Length; i++)
+            {
+                sceneButtons[i] = CreateButton("Scene_" + i + "Button", scenesPanel.transform, playtestScenes[i].label, font, accent, new Vector2(0f, buttonY), new Vector2(300f, 70f));
+                buttonY -= 90f;
+            }
+            GameObject scenesBackBtn = CreateButton("ScenesBackButton", scenesPanel.transform, "Back", font, accent, new Vector2(0f, buttonY - 20f), new Vector2(300f, 70f));
+
+            scenesPanel.SetActive(false);
+
+            MainMenuController controller = root.AddComponent<MainMenuController>();
+            controller.menuPanel = menuPanel;
+            controller.scenesPanel = scenesPanel;
+            controller.startSceneName = "Tutorial";
+
+            WireButton(startBtn, controller.OnStartClicked);
+            WireButton(feedbackBtn, controller.OnFeedbackClicked);
+            WireButton(scenesBtn, controller.OnScenesClicked);
+            WireButton(quitBtn, controller.OnQuitClicked);
+            WireButton(scenesBackBtn, controller.OnScenesBackClicked);
+            for (int i = 0; i < playtestScenes.Length; i++)
+            {
+                WireSceneButton(sceneButtons[i], controller.LoadSceneByName, playtestScenes[i].sceneName);
+            }
+
+            SaveActiveScene();
+            AssetDatabase.SaveAssets();
+        }
+
+        // MainMenu must be scene 0 (the boot scene); the test levels just need to be present.
+        static void EnsurePlaytestBuildSettings()
+        {
+            List<EditorBuildSettingsScene> scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
+            scenes.RemoveAll(s => s.path == MainMenuScenePath);
+            scenes.Insert(0, new EditorBuildSettingsScene(MainMenuScenePath, true));
+            EditorBuildSettings.scenes = scenes.ToArray();
+            AddSceneToBuildSettings(TestLevel1ScenePath);
+            AddSceneToBuildSettings(TestLevel2ScenePath);
         }
 
         // ==================== Breakable crack wall prefab ====================
