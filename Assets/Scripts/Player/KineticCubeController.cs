@@ -333,6 +333,15 @@ namespace KineticEnergy.Player
         // same hand motion doesn't spin the view and the aim arrow together.
         public bool groundedAimWithMouse = false;
         public float groundedMouseAimSensitivity = 0.15f;
+        // WASD-as-camera turns this much faster while Always Mouse is on (direct request:
+        // "say 50% bigger") - key input is all-or-nothing, unlike an analog stick, so it needs
+        // the extra rate to cover the same arcs comfortably.
+        public float wasdCameraTurnMultiplier = 1.5f;
+        // Tutorial3/TestLevel3 (direct request): the AIR uses the exact same aiming flow as the
+        // GROUND - LT aim + RT confirm, Space/South up-charge, everything - instead of the
+        // LT-gated directional air charges. Routed by sending airborne frames through the
+        // grounded branch in UpdateMixedScheme.
+        public bool airUsesGroundedAim = false;
 
         [Header("Testing")]
         // Applied to the GLOBAL Physics.gravity every time this changes (Awake + OnValidate, so
@@ -643,6 +652,34 @@ namespace KineticEnergy.Player
         void Start()
         {
             UpdateSchemeLabel();
+            ApplyGamepadBlock();
+        }
+
+        // Always Mouse blocks ALL gamepad gameplay input (direct request) by masking the shared
+        // action asset down to the Keyboard&Mouse bindings - every action this controller, the
+        // free-move controller, and the camera read comes from that asset, so one mask covers
+        // them all. The MENUS stay controller-usable: the UI input module runs on its own
+        // default actions asset (unmasked), and PauseController reads the Start button directly
+        // as the escape hatch for OPENING the menu. Called from Start (each scene load resets
+        // the runtime mask to that scene's setting) and from GroundedAimToggle on every flip.
+        public void ApplyGamepadBlock()
+        {
+            InputActionAsset actionAsset = moveAction != null && moveAction.action != null && moveAction.action.actionMap != null
+                ? moveAction.action.actionMap.asset
+                : null;
+            if (actionAsset == null) return;
+
+            if (groundedAimWithMouse)
+            {
+                InputControlScheme? keyboardScheme = actionAsset.FindControlScheme("Keyboard&Mouse");
+                actionAsset.bindingMask = keyboardScheme.HasValue
+                    ? InputBinding.MaskByGroup(keyboardScheme.Value.bindingGroup)
+                    : (InputBinding?)null;
+            }
+            else
+            {
+                actionAsset.bindingMask = null;
+            }
         }
 
         void OnDestroy()
@@ -758,6 +795,8 @@ namespace KineticEnergy.Player
                     ? moveAction.action.ReadValue<Vector2>()
                     : Vector2.zero;
                 if (aimStick.sqrMagnitude < aimDeadzone * aimDeadzone) aimStick = Vector2.zero;
+                // WASD camera control runs faster under Always Mouse - see the field's comment.
+                if (groundedAimWithMouse && isAiming && !moveIsGamepadDriven) aimStick *= wasdCameraTurnMultiplier;
                 cameraOrbit.SetAimStickOverride(aimWithMoveStick, aimStick);
 
                 // While the mouse is steering the grounded aim, it must not ALSO orbit the
@@ -1054,8 +1093,12 @@ namespace KineticEnergy.Player
                 if (isGrounded) CancelFastPacedAim();
                 else UpdateFastPacedScheme();
             }
-            else if (isGrounded)
+            else if (isGrounded || airUsesGroundedAim)
             {
+                // airUsesGroundedAim (Tutorial3/TestLevel3) sends AIRBORNE frames through this
+                // same branch - the air-relaunch path inside UpdateChargeBasedScheme already
+                // handles the freeze-and-aim mid-air, so "same controls as on the ground" is
+                // literal here.
                 // South's Up hold-to-charge also works straight from the ground (direct
                 // request) - routing this frame's press into the stick-aim system starts the
                 // charge; every following frame reaches it through the stickAimChargeType
@@ -1819,6 +1862,14 @@ namespace KineticEnergy.Player
             bool stickHeld = stick.sqrMagnitude > stickAimDeadzone * stickAimDeadzone;
             Vector3 stickDirection = stickHeld ? StickWorldDirection(stick) : Vector3.zero;
 
+            // Always Mouse, midair (direct spec): W is the "angled" modifier. No extra code is
+            // needed for the held case - W feeds the move action, and a pure-W stick push
+            // resolves to the camera's flat facing (StickWorldDirection), which the mouse
+            // rotates: Space/E/RT alone = straight up / straight down / straight forward, and
+            // adding W = the tilted 80/60/30-degree variants toward wherever the mouse points.
+            // The one Always-Mouse special case is the forward NEUTRAL heading - see the
+            // Forward branch below.
+
             bool cancelPressed = cancelChargeAction != null && cancelChargeAction.action != null && cancelChargeAction.action.WasPressedThisFrame();
 
             if (stickAimChargeType != StickAimChargeType.None)
@@ -1878,24 +1929,16 @@ namespace KineticEnergy.Player
                 }
                 else if (stickAimChargeType == StickAimChargeType.Forward)
                 {
-                    if (mouseAirControls && !stickAimHasAimed && cameraTransform != null)
-                    {
-                        // "Aim with your mouse for the midair forward launches" (direct
-                        // request, Tutorial): with the stick untouched, the shot follows the
-                        // camera's exact look direction - orbit the camera with the mouse to
-                        // aim, live until release. Holding the stick past the deadzone still
-                        // takes over with the classic tilted behavior below.
-                        dir = cameraTransform.forward.normalized;
-                    }
-                    else
-                    {
-                        // Forward keeps launching the last direction the stick actually pointed (if
-                        // any), but drops to the shallow neutral angle the instant the stick isn't
-                        // held past stickAimDeadzone anymore - direct request: "the direction should
-                        // be frozen when launching forward but the lower angle should be used".
-                        Vector3 flat = stickAimHasAimed ? stickAimLastFlatDirection : FacingFlatDirection();
-                        dir = TiltedDirection(flat, stickAimForwardNeutralAngle);
-                    }
+                    // Forward keeps launching the last direction the stick actually pointed (if
+                    // any), but drops to the shallow neutral angle the instant the stick isn't
+                    // held past stickAimDeadzone anymore - direct request: "the direction should
+                    // be frozen when launching forward but the lower angle should be used".
+                    // Under Always Mouse, "straight forward" follows the camera's (mouse's)
+                    // current flat heading rather than the cube's facing.
+                    Vector3 flat = stickAimHasAimed
+                        ? stickAimLastFlatDirection
+                        : (mouseAirControls && groundedAimWithMouse ? CameraForwardFlat() : FacingFlatDirection());
+                    dir = TiltedDirection(flat, stickAimForwardNeutralAngle);
                 }
                 else
                 {

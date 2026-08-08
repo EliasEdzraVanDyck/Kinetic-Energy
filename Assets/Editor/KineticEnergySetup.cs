@@ -30,6 +30,8 @@ namespace KineticEnergy.EditorSetup
         const string TutorialScenePath = "Assets/Scenes/Tutorial.unity";
         const string Tutorial2ScenePath = "Assets/Scenes/Tutorial2.unity";
         const string TestLevel1ScenePath = "Assets/Scenes/TestLevel1.unity";
+        const string Tutorial3ScenePath = "Assets/Scenes/Tutorial3.unity";
+        const string TestLevel3ScenePath = "Assets/Scenes/TestLevel3.unity";
         const string TestLevel2ScenePath = "Assets/Scenes/TestLevel2.unity";
         const string MainMenuScenePath = "Assets/Scenes/MainMenu.unity";
         // The crack decal pipeline: SOURCE is the raw 3x3 sheet (procedurally generated if
@@ -3218,38 +3220,37 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: LaunchButton prefab created OK");
         }
 
-        // ==================== Tutorial2 ====================
+        // ==================== Tutorial3 (fast-paced air) ====================
 
-        // "A duplicate of the tutorial scene, but replace the tutorial's midair controls with
-        // the air controls of the FastPaced Level" (direct request). Deliberately NOT a rebuild:
-        // the scene is a byte-for-byte COPY of Tutorial.unity exactly as it currently stands
-        // (including any hand-placed arrangement), and this method then mutates ONLY the copy's
-        // Player overrides (mixedFastPacedAir + the FastPaced input actions + the reticle
-        // unlock) and the air-lesson sign TEXTS - no geometry, no transforms, and the original
-        // Tutorial.unity is never opened for writing. Re-running re-applies the overrides
-        // without re-copying, so later edits to Tutorial2 survive.
-        [MenuItem("Tools/Kinetic Energy/Setup Tutorial2")]
-        public static void SetupTutorial2()
+        // The fast-paced-air tutorial - NAMED Tutorial3 since the 2<->3 rename swap (it was
+        // born as Tutorial2): a copy of Tutorial whose midair controls are the FastPaced
+        // Level's. Deliberately NOT a rebuild: the scene is a byte-for-byte COPY of
+        // Tutorial.unity exactly as it currently stands, and this method then mutates ONLY the
+        // copy's Player overrides (mixedFastPacedAir + the FastPaced input actions + the
+        // reticle unlock) and the air-lesson sign TEXTS - no geometry, no transforms. Re-running
+        // re-applies the overrides without re-copying, so later edits survive.
+        [MenuItem("Tools/Kinetic Energy/Setup Tutorial3 (FastPaced Air)")]
+        public static void SetupFastPacedAirTutorial()
         {
-            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(Tutorial2ScenePath) == null)
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(Tutorial3ScenePath) == null)
             {
                 if (AssetDatabase.LoadAssetAtPath<SceneAsset>(TutorialScenePath) == null)
                 {
-                    throw new Exception("KineticEnergySetup: Tutorial2 needs Tutorial.unity to duplicate - run SetupTutorial first.");
+                    throw new Exception("KineticEnergySetup: Tutorial3 needs Tutorial.unity to duplicate - run SetupTutorial first.");
                 }
-                if (!AssetDatabase.CopyAsset(TutorialScenePath, Tutorial2ScenePath))
+                if (!AssetDatabase.CopyAsset(TutorialScenePath, Tutorial3ScenePath))
                 {
-                    throw new Exception("KineticEnergySetup: failed to copy Tutorial to create Tutorial2.");
+                    throw new Exception("KineticEnergySetup: failed to copy Tutorial to create Tutorial3.");
                 }
             }
 
-            EditorSceneManager.OpenScene(Tutorial2ScenePath, OpenSceneMode.Single);
+            EditorSceneManager.OpenScene(Tutorial3ScenePath, OpenSceneMode.Single);
 
             GameObject playerGo = FindByNameIncludingInactive("Player");
             KineticCubeController controller = playerGo != null ? playerGo.GetComponent<KineticCubeController>() : null;
             if (controller == null)
             {
-                throw new Exception("KineticEnergySetup: Tutorial2 copy has no Player with KineticCubeController.");
+                throw new Exception("KineticEnergySetup: Tutorial3 copy has no Player with KineticCubeController.");
             }
 
             // The FastPaced air flow's own inputs and reticle - grounded Mixed controls and
@@ -3280,14 +3281,14 @@ namespace KineticEnergy.EditorSetup
                 }
             }
 
-            AddSceneToBuildSettings(Tutorial2ScenePath);
+            AddSceneToBuildSettings(Tutorial3ScenePath);
 
-            Scene tutorial2Scene = EditorSceneManager.GetActiveScene();
-            EditorSceneManager.MarkSceneDirty(tutorial2Scene);
-            EditorSceneManager.SaveScene(tutorial2Scene);
+            Scene fastPacedTutorialScene = EditorSceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(fastPacedTutorialScene);
+            EditorSceneManager.SaveScene(fastPacedTutorialScene);
             AssetDatabase.SaveAssets();
 
-            Debug.Log("KineticEnergySetup: Tutorial2 setup complete OK");
+            Debug.Log("KineticEnergySetup: Tutorial3 (fast-paced air) setup complete OK");
         }
 
         // ==================== Playtest flow ====================
@@ -3324,24 +3325,34 @@ namespace KineticEnergy.EditorSetup
             // 2. TestLevel1: copy of Tutorial (identical player), wall-hop course.
             BuildTestLevel(TutorialScenePath, TestLevel1ScenePath, "Tutorial2");
 
-            // 3. Tutorial2 in place: +/-89 first-person aim pitch + finish chains onward.
+            // 3+4. The grounded-air pair (Tutorial2/TestLevel2 since the 2<->3 rename swap) -
+            // chain onward; their overrides are maintained by SetupGroundedAirScenes.
             EditorSceneManager.OpenScene(Tutorial2ScenePath, OpenSceneMode.Single);
-            ThirdPersonOrbitCamera tutorial2Camera = UnityEngine.Object.FindFirstObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
-            if (tutorial2Camera != null)
-            {
-                tutorial2Camera.firstPersonMinPitch = -89f;
-                tutorial2Camera.firstPersonMaxPitch = 89f;
-                EditorUtility.SetDirty(tutorial2Camera);
-            }
-            KineticCubeController tutorial2Controller = FindPlayerController("Tutorial2");
-            tutorial2Controller.landingPreview.initialMode = PredictionMode.TrailAndCrosshair;
-            EditorUtility.SetDirty(tutorial2Controller.landingPreview);
             ReplaceWinWithNextScene("TestLevel2");
             SaveActiveScene();
+            EditorSceneManager.OpenScene(TestLevel2ScenePath, OpenSceneMode.Single);
+            ReplaceWinWithNextScene("Tutorial3");
+            SaveActiveScene();
 
-            // 4. TestLevel2: copy of Tutorial2 (identical player + camera), same wall-hop
+            // 5. Tutorial3 (fast-paced air) in place: +/-89 first-person aim pitch + finish
+            // chains onward.
+            EditorSceneManager.OpenScene(Tutorial3ScenePath, OpenSceneMode.Single);
+            ThirdPersonOrbitCamera fastPacedCamera = UnityEngine.Object.FindFirstObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (fastPacedCamera != null)
+            {
+                fastPacedCamera.firstPersonMinPitch = -89f;
+                fastPacedCamera.firstPersonMaxPitch = 89f;
+                EditorUtility.SetDirty(fastPacedCamera);
+            }
+            KineticCubeController fastPacedTutorialController = FindPlayerController("Tutorial3");
+            fastPacedTutorialController.landingPreview.initialMode = PredictionMode.TrailAndCrosshair;
+            EditorUtility.SetDirty(fastPacedTutorialController.landingPreview);
+            ReplaceWinWithNextScene("TestLevel3");
+            SaveActiveScene();
+
+            // 6. TestLevel3: copy of Tutorial3 (identical player + camera), same wall-hop
             // course; its finish returns to the menu.
-            BuildTestLevel(Tutorial2ScenePath, TestLevel2ScenePath, "MainMenu");
+            BuildTestLevel(Tutorial3ScenePath, TestLevel3ScenePath, "MainMenu");
 
             // 5. The boot menu + build order.
             SetupMainMenu();
@@ -3357,7 +3368,7 @@ namespace KineticEnergy.EditorSetup
         [MenuItem("Tools/Kinetic Energy/Setup Grounded Aim Option")]
         public static void SetupGroundedAimOption()
         {
-            foreach (string scenePath in new[] { TutorialScenePath, TestLevel1ScenePath, Tutorial2ScenePath, TestLevel2ScenePath })
+            foreach (string scenePath in new[] { TutorialScenePath, TestLevel1ScenePath, Tutorial2ScenePath, TestLevel2ScenePath, Tutorial3ScenePath, TestLevel3ScenePath })
             {
                 EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
 
@@ -3373,11 +3384,19 @@ namespace KineticEnergy.EditorSetup
 
                 Font font = FindBestFont();
                 Color accent = new Color(1f, 0.82f, 0.2f);
-                GameObject toggleBtn = CreateButton("GroundedAimButton", pausePanel, "Aim: WASD", font, accent, new Vector2(0f, -265f), new Vector2(300f, 70f));
+                GameObject toggleBtn = CreateButton("GroundedAimButton", pausePanel, "Aim: WASD", font, accent, new Vector2(0f, -355f), new Vector2(300f, 70f));
+
+                // Warning shown beside the button only while Always Mouse is on (direct
+                // request) - GroundedAimToggle toggles its visibility.
+                DestroyChildIfExists(pausePanel, "ControllerSupportWarning");
+                Text warning = CreateText("ControllerSupportWarning", pausePanel, "Controller support is disabled", font, 22, new Vector2(340f, -355f), new Vector2(360f, 70f));
+                warning.color = new Color(1f, 0.55f, 0.35f);
+                warning.gameObject.SetActive(false);
 
                 GroundedAimToggle toggle = toggleBtn.AddComponent<GroundedAimToggle>();
                 toggle.controller = controller;
                 toggle.label = toggleBtn.transform.Find("Label")?.GetComponent<Text>();
+                toggle.controllerWarning = warning.gameObject;
                 WireButton(toggleBtn, toggle.Toggle);
                 EditorUtility.SetDirty(toggle);
 
@@ -3385,6 +3404,247 @@ namespace KineticEnergy.EditorSetup
             }
 
             Debug.Log("KineticEnergySetup: grounded aim option setup complete OK");
+        }
+
+        // The grounded-air pair - NAMED Tutorial2/TestLevel2 since the 2<->3 rename swap:
+        // duplicates of Tutorial/TestLevel1 - courses, signs, borders, player and all - whose
+        // AIR aiming is the exact same flow as the GROUNDED aiming (airUsesGroundedAim).
+        // Chained Tutorial2 -> TestLevel2 -> Tutorial3, and added to the build settings.
+        // Copy-once: re-running only re-applies the overrides.
+        [MenuItem("Tools/Kinetic Energy/Setup Tutorial2 (Grounded Air)")]
+        public static void SetupGroundedAirScenes()
+        {
+            (string source, string dest, string next)[] duplicates =
+            {
+                (TutorialScenePath, Tutorial2ScenePath, "TestLevel2"),
+                (TestLevel1ScenePath, TestLevel2ScenePath, "Tutorial3"),
+            };
+
+            foreach ((string source, string dest, string next) in duplicates)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(dest) == null)
+                {
+                    if (AssetDatabase.LoadAssetAtPath<SceneAsset>(source) == null)
+                    {
+                        throw new Exception($"KineticEnergySetup: {dest} needs {source} to duplicate.");
+                    }
+                    if (!AssetDatabase.CopyAsset(source, dest))
+                    {
+                        throw new Exception($"KineticEnergySetup: failed to copy {source} to {dest}.");
+                    }
+                }
+
+                EditorSceneManager.OpenScene(dest, OpenSceneMode.Single);
+                KineticCubeController controller = FindPlayerController(dest);
+                controller.airUsesGroundedAim = true;
+                EditorUtility.SetDirty(controller);
+                ReplaceWinWithNextScene(next);
+                SaveActiveScene();
+                AddSceneToBuildSettings(dest);
+            }
+
+            Debug.Log("KineticEnergySetup: Tutorial3/TestLevel3 setup complete OK");
+        }
+
+        // One-shot for the 2<->3 rename (direct request): swaps the Tutorial2/Tutorial3 and
+        // TestLevel2/TestLevel3 scene ASSETS (GUID-preserving renames via a temp name), then
+        // rewires the finish chain for the six-stop loop
+        //   Tutorial -> TestLevel1 -> Tutorial2 -> TestLevel2 -> Tutorial3 -> TestLevel3 -> MainMenu
+        // and refreshes the main menu (new intro text; the scene buttons load by name, so they
+        // pick up the swapped scenes automatically).
+        [MenuItem("Tools/Kinetic Energy/Swap Tutorial 2-3 Names")]
+        public static void SwapTutorial23Names()
+        {
+            SwapSceneAssets(Tutorial2ScenePath, Tutorial3ScenePath);
+            SwapSceneAssets(TestLevel2ScenePath, TestLevel3ScenePath);
+
+            (string scenePath, string next)[] chain =
+            {
+                (Tutorial2ScenePath, "TestLevel2"),
+                (TestLevel2ScenePath, "Tutorial3"),
+                (Tutorial3ScenePath, "TestLevel3"),
+                (TestLevel3ScenePath, "MainMenu"),
+            };
+            foreach ((string scenePath, string next) in chain)
+            {
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                ReplaceWinWithNextScene(next);
+                SaveActiveScene();
+                AddSceneToBuildSettings(scenePath);
+            }
+
+            SetupMainMenu();
+            Debug.Log("KineticEnergySetup: Tutorial 2-3 name swap complete OK");
+        }
+
+        static void SwapSceneAssets(string pathA, string pathB)
+        {
+            string nameA = Path.GetFileNameWithoutExtension(pathA);
+            string nameB = Path.GetFileNameWithoutExtension(pathB);
+            ThrowIfRenameFailed(AssetDatabase.RenameAsset(pathA, nameA + "_swaptmp"), pathA);
+            string tmpPath = pathA.Replace(nameA + ".unity", nameA + "_swaptmp.unity");
+            ThrowIfRenameFailed(AssetDatabase.RenameAsset(pathB, nameA), pathB);
+            ThrowIfRenameFailed(AssetDatabase.RenameAsset(tmpPath, nameB), tmpPath);
+            AssetDatabase.SaveAssets();
+        }
+
+        static void ThrowIfRenameFailed(string error, string path)
+        {
+            if (!string.IsNullOrEmpty(error))
+            {
+                throw new Exception($"KineticEnergySetup: rename of {path} failed - {error}");
+            }
+        }
+
+        // The fast-paced two-scene build (direct request): MainMenu + Tutorial3 + TestLevel3
+        // only. Same treatment as the four-scene build - trimmed build list, main menu
+        // referencing just the pair (Start boots Tutorial3), pause menus listing just the pair
+        // plus the Main Menu button, chain Tutorial3 -> TestLevel3 -> MainMenu. Run "Setup
+        // Four-Scene Build Menus" to switch back to the other build configuration.
+        [MenuItem("Tools/Kinetic Energy/Setup FastPaced Two-Scene Build Menus")]
+        public static void SetupFastPacedBuildMenus()
+        {
+            (string label, string sceneName)[] buildScenes =
+            {
+                ("Tutorial 3", "Tutorial3"),
+                ("Test Level 3", "TestLevel3"),
+            };
+
+            ConfigurePauseMenuForBuild(Tutorial3ScenePath, buildScenes, "TestLevel3");
+            ConfigurePauseMenuForBuild(TestLevel3ScenePath, buildScenes, "MainMenu");
+
+            BuildMainMenuScene(buildScenes, "Tutorial3",
+                "Playtest build - this tests the fast-paced control scheme:\n" +
+                "Tutorial 3 teaches it, Test Level 3 puts it to the test.\n" +
+                "Each finish line takes you straight to the next stop.\n" +
+                "Note: enabling 'Aim: Always Mouse' in the pause menu DISABLES\n" +
+                "all controller inputs (outside the menus) until you turn it off.\n" +
+                "Please share your thoughts via the Feedback button afterwards!");
+
+            EditorBuildSettings.scenes = new[]
+            {
+                new EditorBuildSettingsScene(MainMenuScenePath, true),
+                new EditorBuildSettingsScene(Tutorial3ScenePath, true),
+                new EditorBuildSettingsScene(TestLevel3ScenePath, true),
+            };
+
+            Debug.Log("KineticEnergySetup: fast-paced two-scene build menus setup complete OK");
+        }
+
+        // Shared per-scene pause-menu configuration for a build variant: hides the shared
+        // prefab's legacy scene buttons (per-instance), clears any previous variant's buttons,
+        // lists exactly the given scenes, adds the Main Menu button, and retargets the finish.
+        static void ConfigurePauseMenuForBuild(string scenePath, (string label, string sceneName)[] buildScenes, string finishNextScene)
+        {
+            Font font = FindBestFont();
+            Color accent = new Color(1f, 0.82f, 0.2f);
+
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            GameObject pauseSystem = FindByNameIncludingInactive("PauseSystem");
+            Transform pausePanel = pauseSystem != null ? pauseSystem.transform.Find("PauseCanvas/PausePanel") : null;
+            Transform scenesPanel = pauseSystem != null ? pauseSystem.transform.Find("PauseCanvas/ScenesPanel") : null;
+            PauseController pauseController = pauseSystem != null ? pauseSystem.transform.Find("PauseController")?.GetComponent<PauseController>() : null;
+            if (pausePanel == null || scenesPanel == null || pauseController == null)
+            {
+                throw new Exception($"KineticEnergySetup: pause menu pieces missing in {scenePath}.");
+            }
+
+            DestroyChildIfExists(pausePanel, "MainMenuButton");
+            GameObject mainMenuBtn = CreateButton("MainMenuButton", pausePanel, "Main Menu", font, accent, new Vector2(0f, -265f), new Vector2(300f, 70f));
+            WireSceneButton(mainMenuBtn, pauseController.LoadSceneByName, "MainMenu");
+
+            for (int i = 0; i < 10; i++)
+            {
+                Transform legacyButton = scenesPanel.Find("Scene_" + i + "Button");
+                if (legacyButton != null && legacyButton.gameObject.activeSelf) legacyButton.gameObject.SetActive(false);
+                DestroyChildIfExists(scenesPanel, "PlaytestScene_" + i + "Button");
+            }
+            float buttonY = 100f;
+            for (int i = 0; i < buildScenes.Length; i++)
+            {
+                GameObject sceneBtn = CreateButton("PlaytestScene_" + i + "Button", scenesPanel, buildScenes[i].label, font, accent, new Vector2(0f, buttonY), new Vector2(300f, 70f));
+                WireSceneButton(sceneBtn, pauseController.LoadSceneByName, buildScenes[i].sceneName);
+                buttonY -= 90f;
+            }
+
+            if (!string.IsNullOrEmpty(finishNextScene))
+            {
+                ReplaceWinWithNextScene(finishNextScene);
+            }
+
+            SaveActiveScene();
+        }
+
+        // The four-scene build's pause menus (direct request): in each playtest scene, the
+        // pause menu's Scenes panel lists ONLY the four build scenes (the shared prefab's old
+        // Sandbox/Level buttons are deactivated per instance - the prefab itself is untouched),
+        // and the pause panel gains a "Main Menu" button back to the start screen. Also caps
+        // the finish chain at TestLevel2 -> MainMenu (Tutorial3 is out of the build), rebuilds
+        // the main menu, sets the four-scene build list, and repositions the aim toggle below
+        // the new button.
+        [MenuItem("Tools/Kinetic Energy/Setup Four-Scene Build Menus")]
+        public static void SetupFourSceneBuildMenus()
+        {
+            (string label, string sceneName)[] buildScenes =
+            {
+                ("Tutorial", "Tutorial"),
+                ("Test Level 1", "TestLevel1"),
+                ("Tutorial 2", "Tutorial2"),
+                ("Test Level 2", "TestLevel2"),
+            };
+
+            Font font = FindBestFont();
+            Color accent = new Color(1f, 0.82f, 0.2f);
+
+            foreach (string scenePath in new[] { TutorialScenePath, TestLevel1ScenePath, Tutorial2ScenePath, TestLevel2ScenePath })
+            {
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                GameObject pauseSystem = FindByNameIncludingInactive("PauseSystem");
+                Transform pausePanel = pauseSystem != null ? pauseSystem.transform.Find("PauseCanvas/PausePanel") : null;
+                Transform scenesPanel = pauseSystem != null ? pauseSystem.transform.Find("PauseCanvas/ScenesPanel") : null;
+                PauseController pauseController = pauseSystem != null ? pauseSystem.transform.Find("PauseController")?.GetComponent<PauseController>() : null;
+                if (pausePanel == null || scenesPanel == null || pauseController == null)
+                {
+                    throw new Exception($"KineticEnergySetup: pause menu pieces missing in {scenePath}.");
+                }
+
+                // Back to the start screen straight from the pause panel (direct request).
+                DestroyChildIfExists(pausePanel, "MainMenuButton");
+                GameObject mainMenuBtn = CreateButton("MainMenuButton", pausePanel, "Main Menu", font, accent, new Vector2(0f, -265f), new Vector2(300f, 70f));
+                WireSceneButton(mainMenuBtn, pauseController.LoadSceneByName, "MainMenu");
+
+                // Hide the shared prefab's legacy scene buttons (per-instance override), then
+                // add the four build scenes in their slots.
+                for (int i = 0; i < 10; i++)
+                {
+                    Transform legacyButton = scenesPanel.Find("Scene_" + i + "Button");
+                    if (legacyButton != null && legacyButton.gameObject.activeSelf) legacyButton.gameObject.SetActive(false);
+                }
+                float buttonY = 100f;
+                for (int i = 0; i < buildScenes.Length; i++)
+                {
+                    DestroyChildIfExists(scenesPanel, "PlaytestScene_" + i + "Button");
+                    GameObject sceneBtn = CreateButton("PlaytestScene_" + i + "Button", scenesPanel, buildScenes[i].label, font, accent, new Vector2(0f, buttonY), new Vector2(300f, 70f));
+                    WireSceneButton(sceneBtn, pauseController.LoadSceneByName, buildScenes[i].sceneName);
+                    buttonY -= 90f;
+                }
+
+                // The chain ends inside the four-scene build: TestLevel2 returns to the menu.
+                if (scenePath == TestLevel2ScenePath)
+                {
+                    ReplaceWinWithNextScene("MainMenu");
+                }
+
+                SaveActiveScene();
+            }
+
+            SetupMainMenu();
+            EnsurePlaytestBuildSettings();
+            SetupGroundedAimOption();
+
+            Debug.Log("KineticEnergySetup: four-scene build menus setup complete OK");
         }
 
         static KineticCubeController FindPlayerController(string sceneLabel)
@@ -3497,6 +3757,27 @@ namespace KineticEnergy.EditorSetup
         // which the user fills in with their form link.
         public static void SetupMainMenu()
         {
+            // Default: the four-scene build's menu.
+            BuildMainMenuScene(
+                new (string label, string sceneName)[]
+                {
+                    ("Tutorial", "Tutorial"),
+                    ("Test Level 1", "TestLevel1"),
+                    ("Tutorial 2", "Tutorial2"),
+                    ("Test Level 2", "TestLevel2"),
+                },
+                "Tutorial",
+                "Playtest build - this tests two control schemes:\n" +
+                "Tutorial + Test Level 1 use the first scheme,\n" +
+                "Tutorial 2 + Test Level 2 the second.\n" +
+                "Each finish line takes you straight to the next stop.\n" +
+                "Note: enabling 'Aim: Always Mouse' in the pause menu DISABLES\n" +
+                "all controller inputs (outside the menus) until you turn it off.\n" +
+                "Please share your thoughts via the Feedback button afterwards!");
+        }
+
+        static void BuildMainMenuScene((string label, string sceneName)[] menuScenes, string startSceneName, string introText)
+        {
             if (AssetDatabase.LoadAssetAtPath<SceneAsset>(MainMenuScenePath) == null)
             {
                 Scene created = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
@@ -3536,13 +3817,8 @@ namespace KineticEnergy.EditorSetup
 
             GameObject menuPanel = CreatePanel("MenuPanel", canvasGo.transform, backdrop);
             CreateText("Title", menuPanel.transform, "KINETIC ENERGY", font, 56, new Vector2(0f, 330f), new Vector2(900f, 90f));
-            Text intro = CreateText("Intro", menuPanel.transform,
-                "Playtest build - this tests TWO control schemes:\n" +
-                "the Tutorial and Test Level 1 use the first scheme,\n" +
-                "Tutorial 2 and Test Level 2 the second.\n" +
-                "Each finish line takes you straight to the next stop.\n" +
-                "Please share your thoughts via the Feedback button afterwards!",
-                font, 26, new Vector2(0f, 190f), new Vector2(1000f, 170f));
+            Text intro = CreateText("Intro", menuPanel.transform, introText,
+                font, 26, new Vector2(0f, 180f), new Vector2(1000f, 200f));
             intro.color = new Color(1f, 1f, 1f, 0.9f);
 
             GameObject startBtn = CreateButton("StartButton", menuPanel.transform, "Start", font, accent, new Vector2(0f, 40f), new Vector2(300f, 70f));
@@ -3552,18 +3828,11 @@ namespace KineticEnergy.EditorSetup
 
             GameObject scenesPanel = CreatePanel("ScenesPanel", canvasGo.transform, backdrop);
             CreateText("ScenesTitle", scenesPanel.transform, "SCENES", font, 48, new Vector2(0f, 240f), new Vector2(600f, 80f));
-            (string label, string sceneName)[] playtestScenes =
-            {
-                ("Tutorial", "Tutorial"),
-                ("Test Level 1", "TestLevel1"),
-                ("Tutorial 2", "Tutorial2"),
-                ("Test Level 2", "TestLevel2"),
-            };
-            GameObject[] sceneButtons = new GameObject[playtestScenes.Length];
+            GameObject[] sceneButtons = new GameObject[menuScenes.Length];
             float buttonY = 130f;
-            for (int i = 0; i < playtestScenes.Length; i++)
+            for (int i = 0; i < menuScenes.Length; i++)
             {
-                sceneButtons[i] = CreateButton("Scene_" + i + "Button", scenesPanel.transform, playtestScenes[i].label, font, accent, new Vector2(0f, buttonY), new Vector2(300f, 70f));
+                sceneButtons[i] = CreateButton("Scene_" + i + "Button", scenesPanel.transform, menuScenes[i].label, font, accent, new Vector2(0f, buttonY), new Vector2(300f, 70f));
                 buttonY -= 90f;
             }
             GameObject scenesBackBtn = CreateButton("ScenesBackButton", scenesPanel.transform, "Back", font, accent, new Vector2(0f, buttonY - 20f), new Vector2(300f, 70f));
@@ -3573,7 +3842,7 @@ namespace KineticEnergy.EditorSetup
             MainMenuController controller = root.AddComponent<MainMenuController>();
             controller.menuPanel = menuPanel;
             controller.scenesPanel = scenesPanel;
-            controller.startSceneName = "Tutorial";
+            controller.startSceneName = startSceneName;
             controller.feedbackUrl = preservedFeedbackUrl;
             // Gamepad navigation (direct request) - focus these when their panel opens, so
             // Dpad/stick + Submit work exactly like the pause menu's.
@@ -3585,24 +3854,27 @@ namespace KineticEnergy.EditorSetup
             WireButton(scenesBtn, controller.OnScenesClicked);
             WireButton(quitBtn, controller.OnQuitClicked);
             WireButton(scenesBackBtn, controller.OnScenesBackClicked);
-            for (int i = 0; i < playtestScenes.Length; i++)
+            for (int i = 0; i < menuScenes.Length; i++)
             {
-                WireSceneButton(sceneButtons[i], controller.LoadSceneByName, playtestScenes[i].sceneName);
+                WireSceneButton(sceneButtons[i], controller.LoadSceneByName, menuScenes[i].sceneName);
             }
 
             SaveActiveScene();
             AssetDatabase.SaveAssets();
         }
 
-        // MainMenu must be scene 0 (the boot scene); the test levels just need to be present.
+        // The build contains EXACTLY the four playtest scenes plus the boot menu (direct
+        // request) - every other scene stays in the project but out of the build.
         static void EnsurePlaytestBuildSettings()
         {
-            List<EditorBuildSettingsScene> scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
-            scenes.RemoveAll(s => s.path == MainMenuScenePath);
-            scenes.Insert(0, new EditorBuildSettingsScene(MainMenuScenePath, true));
-            EditorBuildSettings.scenes = scenes.ToArray();
-            AddSceneToBuildSettings(TestLevel1ScenePath);
-            AddSceneToBuildSettings(TestLevel2ScenePath);
+            EditorBuildSettings.scenes = new[]
+            {
+                new EditorBuildSettingsScene(MainMenuScenePath, true),
+                new EditorBuildSettingsScene(TutorialScenePath, true),
+                new EditorBuildSettingsScene(TestLevel1ScenePath, true),
+                new EditorBuildSettingsScene(Tutorial2ScenePath, true),
+                new EditorBuildSettingsScene(TestLevel2ScenePath, true),
+            };
         }
 
         // ==================== Breakable crack wall prefab ====================

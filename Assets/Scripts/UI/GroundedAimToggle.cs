@@ -14,6 +14,8 @@ namespace KineticEnergy.UI
     {
         public KineticCubeController controller;
         public Text label;
+        // Shown next to the button only while Always Mouse is active (direct request).
+        public GameObject controllerWarning;
 
         void Start()
         {
@@ -25,15 +27,23 @@ namespace KineticEnergy.UI
         {
             if (controller == null) return;
             controller.groundedAimWithMouse = !controller.groundedAimWithMouse;
+            // Masks/unmasks every gamepad gameplay binding - menus stay controller-usable
+            // (their input runs on a separate asset, and pause has a direct Start-button read).
+            controller.ApplyGamepadBlock();
             RefreshLabel();
         }
 
         void RefreshLabel()
         {
-            if (label == null || controller == null) return;
-            // "Always Mouse" (direct rename) - on controller the joystick still aims in this
-            // mode; the option governs the mouse/WASD split, not gamepads.
-            label.text = controller.groundedAimWithMouse ? "Aim: Always Mouse" : "Aim: WASD";
+            if (controller == null) return;
+            if (label != null)
+            {
+                label.text = controller.groundedAimWithMouse ? "Aim: Always Mouse" : "Aim: WASD";
+            }
+            if (controllerWarning != null)
+            {
+                controllerWarning.SetActive(controller.groundedAimWithMouse);
+            }
         }
     }
 }

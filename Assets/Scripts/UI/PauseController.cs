@@ -66,7 +66,13 @@ namespace KineticEnergy.UI
 
         void Update()
         {
-            if (pauseAction != null && pauseAction.action != null && pauseAction.action.WasPressedThisFrame())
+            // The direct Start-button read is the Always Mouse escape hatch: that mode masks
+            // every gamepad binding on the shared action asset (KineticCubeController.
+            // ApplyGamepadBlock), but the MENUS must stay controller-usable - including
+            // OPENING this one to turn the mode back off. Same frame as an unmasked action
+            // press it's still a single toggle (one if).
+            bool startPressed = Gamepad.current != null && Gamepad.current.startButton.wasPressedThisFrame;
+            if (startPressed || (pauseAction != null && pauseAction.action != null && pauseAction.action.WasPressedThisFrame()))
             {
                 TogglePause();
             }
