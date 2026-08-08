@@ -54,11 +54,20 @@ namespace KineticEnergy.Camera
         // unaffected - the substitution only applies when the look action isn't mouse-driven.
         bool aimStickOverrideActive;
         Vector2 aimStickOverrideValue;
+        // While the grounded aim's "Aim: Mouse" option is steering the launch direction with
+        // mouse delta (KineticCubeController.groundedAimWithMouse), mouse-driven look input is
+        // ignored so one hand motion doesn't rotate the camera and the aim arrow together.
+        bool mouseLookSuppressed;
 
         public void SetAimStickOverride(bool active, Vector2 stick)
         {
             aimStickOverrideActive = active;
             aimStickOverrideValue = active ? stick : Vector2.zero;
+        }
+
+        public void SetMouseLookSuppressed(bool suppressed)
+        {
+            mouseLookSuppressed = suppressed;
         }
 
         [Header("Fine Aim")]
@@ -221,15 +230,17 @@ namespace KineticEnergy.Camera
                 ? lookAction.action.ReadValue<Vector2>()
                 : Vector2.zero;
 
+            bool lookIsMouseDriven = lookAction != null && lookAction.action != null
+                && lookAction.action.activeControl != null
+                && lookAction.action.activeControl.device is Mouse;
+
             // Left-stick aim substitution (see SetAimStickOverride) - replaces stick-driven
             // look input only; a mouse-driven frame keeps the mouse delta untouched.
-            if (aimStickOverrideActive)
-            {
-                bool lookIsMouseDriven = lookAction != null && lookAction.action != null
-                    && lookAction.action.activeControl != null
-                    && lookAction.action.activeControl.device is Mouse;
-                if (!lookIsMouseDriven) look = aimStickOverrideValue;
-            }
+            if (aimStickOverrideActive && !lookIsMouseDriven) look = aimStickOverrideValue;
+
+            // Mouse-driven look is dropped while the mouse is busy steering the grounded aim -
+            // see SetMouseLookSuppressed.
+            if (mouseLookSuppressed && lookIsMouseDriven) look = Vector2.zero;
 
             // Unscaled, not Time.deltaTime - Time.deltaTime already shrinks 1:1 with
             // Time.timeScale, which would otherwise make the camera merely ride along with

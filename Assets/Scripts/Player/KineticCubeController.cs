@@ -326,6 +326,13 @@ namespace KineticEnergy.Player
         // camera. The air-aim gate (RMB) and forward trigger (LMB) already exist as bindings
         // on launchAction/fireAction. Off everywhere else.
         public bool mouseAirControls = false;
+        // Fast-paced scenes' pause-menu option (GroundedAimToggle): when on, the grounded
+        // LT-aim's direction is adjusted with raw MOUSE DELTA instead of the stick/WASD - the
+        // two input styles are being playtested against each other, so the switch is exclusive
+        // rather than both-at-once. While aiming this way, the camera ignores mouse look so the
+        // same hand motion doesn't spin the view and the aim arrow together.
+        public bool groundedAimWithMouse = false;
+        public float groundedMouseAimSensitivity = 0.15f;
 
         [Header("Testing")]
         // Applied to the GLOBAL Physics.gravity every time this changes (Awake + OnValidate, so
@@ -448,6 +455,14 @@ namespace KineticEnergy.Player
         // releasing LT (cancels any charge in progress without firing), by firing, or by a
         // scheme switch.
         bool mixedAirAiming;
+        // True for the whole flight after a hybrid (mixedFastPacedAir) air launch: WASD is the
+        // CAMERA control during that aim, so it's routinely still held on the release frame -
+        // and a held stick instantly became the airborne nudge force, bending the real flight
+        // away from the predicted dotted line (direct bug report: "the line should show the
+        // exact path"). Locking the nudge out for these flights makes the trajectory match the
+        // prediction exactly; cleared on any crash/landing. FastPacedLevel's own scheme keeps
+        // its documented WASD-nudge behavior.
+        bool fastPacedFlightExact;
         float chargeTime;
         float aimYaw;
         float aimPitch;
@@ -523,7 +538,9 @@ namespace KineticEnergy.Player
             && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None && !fastPacedCharging
             // Tutorial2's midair aim repurposes the left stick for AIMING (see the camera's
             // SetAimStickOverride) - the same stick must not simultaneously nudge the flight.
-            && !(mixedFastPacedAir && fastPacedAiming);
+            && !(mixedFastPacedAir && fastPacedAiming)
+            // A hybrid fast-paced launch flies the predicted line EXACTLY - see the flag's own comment.
+            && !fastPacedFlightExact;
 
         bool launchQueued;
         Vector3 queuedDirection;
@@ -674,20 +691,13 @@ namespace KineticEnergy.Player
             // this sits ABOVE the timeScale early-return below (that return firing is exactly the
             // paused case this must react to). Every other scheme is gamepad-driven and never
             // locks, preserving their existing behavior untouched.
-            if (controlScheme == ControlScheme.FastPaced || (controlScheme == ControlScheme.Mixed && mixedFastPacedAir))
+            // The cursor is locked in EVERY scene now (direct request), releasing only while
+            // paused (the pause/win menus need a visible, free cursor - and MainMenu has no
+            // player, so its own controller unlocks there).
             {
                 bool paused = Time.timeScale <= 0f;
                 Cursor.lockState = paused ? CursorLockMode.None : CursorLockMode.Locked;
                 Cursor.visible = paused;
-            }
-            else if (Cursor.lockState == CursorLockMode.Locked)
-            {
-                // Only ever true after arriving FROM FastPacedLevel (nothing else in this project
-                // locks the cursor) - the scene menu can jump straight from that scene to any
-                // other, whose own Player instance would otherwise inherit a locked cursor it
-                // never asked for and has no code path to release.
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
             }
 
             // Time.timeScale freezes deltaTime-scaled logic (like charge accumulation) for free,
@@ -734,12 +744,25 @@ namespace KineticEnergy.Player
             // unaffected (the camera only substitutes non-mouse look input).
             if (cameraOrbit != null)
             {
-                bool aimWithMoveStick = mixedFastPacedAir && controlScheme == ControlScheme.Mixed && (fastPacedAiming || fastPacedCharging);
+                // Two users of the left-stick/WASD -> camera substitution: Tutorial2's midair
+                // aim, and the "Aim: Mouse" grounded option - there the mouse steers the aim
+                // arrow, so WASD takes over the CAMERA (direct request), while mouse look is
+                // suppressed below.
+                bool moveIsGamepadDriven = moveAction != null && moveAction.action != null
+                    && moveAction.action.activeControl != null && moveAction.action.activeControl.device is Gamepad;
+                bool aimWithMoveStick = (mixedFastPacedAir && controlScheme == ControlScheme.Mixed && (fastPacedAiming || fastPacedCharging))
+                    // Grounded mouse-aim hands WASD to the camera - but a GAMEPAD stick keeps
+                    // aiming instead (see UpdateChargeBasedScheme), so it must not be captured.
+                    || (groundedAimWithMouse && isAiming && !moveIsGamepadDriven);
                 Vector2 aimStick = aimWithMoveStick && moveAction != null && moveAction.action != null
                     ? moveAction.action.ReadValue<Vector2>()
                     : Vector2.zero;
                 if (aimStick.sqrMagnitude < aimDeadzone * aimDeadzone) aimStick = Vector2.zero;
                 cameraOrbit.SetAimStickOverride(aimWithMoveStick, aimStick);
+
+                // While the mouse is steering the grounded aim, it must not ALSO orbit the
+                // camera - see groundedAimWithMouse's own comment.
+                cameraOrbit.SetMouseLookSuppressed(groundedAimWithMouse && isAiming);
             }
 
             // Yellow energy / blue charge-preview meter - updated unconditionally every frame
@@ -901,7 +924,20 @@ namespace KineticEnergy.Player
                 // chargeTimeScale is slowing everything else while charging (direct request:
                 // "the speed of aiming shouldn't be affected").
                 float aimDt = Time.unscaledDeltaTime;
-                if (stick.sqrMagnitude > aimDeadzone * aimDeadzone)
+                if (groundedAimWithMouse && Mouse.current != null)
+                {
+                    // The pause-menu "Aim: Always Mouse" option - raw mouse delta adjusts the
+                    // aim (already per-frame, no dt).
+                    Vector2 mouseDelta = Mouse.current.delta.ReadValue();
+                    aimYaw = Mathf.Repeat(aimYaw + mouseDelta.x * groundedMouseAimSensitivity, 360f);
+                    aimPitch = Mathf.Clamp(aimPitch - mouseDelta.y * groundedMouseAimSensitivity, minAimPitch, maxAimPitch);
+                }
+                // In mouse mode only KEYBOARD (WASD) input is repurposed for the camera - a
+                // GAMEPAD stick still aims like always (direct request: "you should still be
+                // able to aim with your joystick if you are on controller").
+                bool moveIsGamepad = moveAction != null && moveAction.action != null
+                    && moveAction.action.activeControl != null && moveAction.action.activeControl.device is Gamepad;
+                if ((!groundedAimWithMouse || moveIsGamepad) && stick.sqrMagnitude > aimDeadzone * aimDeadzone)
                 {
                     aimYaw = Mathf.Repeat(aimYaw + stick.x * aimRotationSpeed * aimDt, 360f);
                     aimPitch = Mathf.Clamp(aimPitch - stick.y * aimRotationSpeed * aimDt, minAimPitch, maxAimPitch);
@@ -985,6 +1021,23 @@ namespace KineticEnergy.Player
         {
             if (isAiming)
             {
+                // The grounded LT-aim also converts into the Up hold-to-charge when the up
+                // button is pressed mid-aim (direct request) - the accumulated charge carries
+                // over, and the launch then fires on the up button's release. LT is still
+                // physically held, so the one-shot latch stops it from reopening the old aim
+                // the moment this charge ends.
+                bool upConvertPressed = (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
+                    || (mouseAirControls && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame);
+                if (upConvertPressed)
+                {
+                    float carriedCharge = chargeTime;
+                    isAiming = false;
+                    waitingForLtRelease = true;
+                    StartStickAimCharge(StickAimChargeType.Up);
+                    chargeTime = carriedCharge;
+                    UpdateStickAimChargeScheme();
+                    return;
+                }
                 UpdateChargeBasedScheme();
             }
             else if (stickAimChargeType != StickAimChargeType.None)
@@ -1007,7 +1060,10 @@ namespace KineticEnergy.Player
                 // request) - routing this frame's press into the stick-aim system starts the
                 // charge; every following frame reaches it through the stickAimChargeType
                 // branch above. Everything else grounded stays the LT-aim/RT-confirm flow.
-                bool upPressed = energyFraction > 0f && upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame();
+                // Space joins South here in the mouse-controls scenes (direct request) - the
+                // release path already listens for Space via the same mouseAirControls flag.
+                bool upPressed = energyFraction > 0f && ((upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
+                    || (mouseAirControls && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame));
                 if (upPressed) UpdateStickAimChargeScheme();
                 else UpdateChargeBasedScheme();
             }
@@ -1162,7 +1218,11 @@ namespace KineticEnergy.Player
             // Standing (or walking) on the ground with no flight in progress restores the full
             // per-flight launch budget - hasLaunched must be false so the brief grounded window
             // right after firing (launch grace) can't refund the launch that just spent it.
-            if (isGrounded && !hasLaunched) launchesSinceGrounded = 0;
+            if (isGrounded && !hasLaunched)
+            {
+                launchesSinceGrounded = 0;
+                fastPacedFlightExact = false;
+            }
 
             // A slam fired from ZERO clearance (already resting on the exact surface it's aimed
             // at) never actually leaves that surface - PhysX's contact solver absorbs a downward
@@ -1367,6 +1427,7 @@ namespace KineticEnergy.Player
             defyGravityFlightTimer = 0f; // interrupt an in-progress forced flight if the crash happens mid-flight
             launchesSinceGrounded = 0;   // a crash is a landing - the per-flight launch budget resets
             mixedAirAiming = false;      // defensive - the freeze should prevent crashing mid-aim at all
+            fastPacedFlightExact = false; // the exact-line flight ended in this crash
 
             // "If you crash onto an object, aiming should be disabled until you pressed it
             // again" (direct request, all scenes/schemes): a crash closes any aim outright and
@@ -1781,6 +1842,23 @@ namespace KineticEnergy.Player
 
                 InputActionReference downAction = DownChargeActionForCurrentScheme();
                 bool keyboardAvailable = mouseAirControls && Keyboard.current != null;
+
+                // Mixed: pressing a DIFFERENT direction button mid-charge switches the charge
+                // to that direction (direct request) - the accumulated charge carries over, and
+                // firing then happens on the NEW button's release. Checked before releasedNow
+                // below so the release test always tracks whichever direction is now active.
+                if (controlScheme == ControlScheme.Mixed)
+                {
+                    bool upSwitch = (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
+                        || (keyboardAvailable && Keyboard.current.spaceKey.wasPressedThisFrame);
+                    bool downSwitch = (downAction != null && downAction.action != null && downAction.action.WasPressedThisFrame())
+                        || (keyboardAvailable && Keyboard.current.eKey.wasPressedThisFrame);
+                    bool forwardSwitch = fireAction != null && fireAction.action != null && fireAction.action.WasPressedThisFrame();
+                    if (upSwitch && stickAimChargeType != StickAimChargeType.Up) stickAimChargeType = StickAimChargeType.Up;
+                    else if (downSwitch && stickAimChargeType != StickAimChargeType.Down) stickAimChargeType = StickAimChargeType.Down;
+                    else if (forwardSwitch && stickAimChargeType != StickAimChargeType.Forward) stickAimChargeType = StickAimChargeType.Forward;
+                }
+
                 bool releasedNow = stickAimChargeType switch
                 {
                     StickAimChargeType.Up => (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasReleasedThisFrame())
@@ -2133,6 +2211,8 @@ namespace KineticEnergy.Player
             if (lmbReleased)
             {
                 QueueLaunch(dir, previewForce, previewDamping);
+                // Hybrid flights follow the predicted line exactly - see fastPacedFlightExact.
+                if (mixedFastPacedAir && controlScheme == ControlScheme.Mixed) fastPacedFlightExact = true;
 
                 // "Disable aim the moment you launch" (direct request, superseding the old
                 // aim-spans-several-shots behavior): the whole aim - first person, zoom,
@@ -2156,6 +2236,7 @@ namespace KineticEnergy.Player
             launchQueued = true;
             hasLaunched = true;
             launchesSinceGrounded++;
+            fastPacedFlightExact = false; // re-armed by the hybrid fire path right after this call
             currentFlightIsDownward = Vector3.Dot(direction.normalized, Vector3.down) >= slamDownwardThreshold;
             // Every launch spends the charge fraction it took to build, straight out of the
             // shared energy tank - "no more time/energy/speed can be added... when you reach the

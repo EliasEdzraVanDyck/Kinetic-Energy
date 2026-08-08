@@ -3350,6 +3350,43 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Playtest flow setup complete OK");
         }
 
+        // Adds the "Aim: WASD / Aim: Mouse" toggle button to the pause menus of all four
+        // playtest scenes (direct request - both control schemes' grounded aim supports it) -
+        // a per-instance ADDITION on each scene's PauseSystem, so the shared prefab and every
+        // other scene's menu stay untouched. In-place: nothing existing is moved or modified.
+        [MenuItem("Tools/Kinetic Energy/Setup Grounded Aim Option")]
+        public static void SetupGroundedAimOption()
+        {
+            foreach (string scenePath in new[] { TutorialScenePath, TestLevel1ScenePath, Tutorial2ScenePath, TestLevel2ScenePath })
+            {
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                KineticCubeController controller = FindPlayerController(scenePath);
+                GameObject pauseSystem = FindByNameIncludingInactive("PauseSystem");
+                Transform pausePanel = pauseSystem != null ? pauseSystem.transform.Find("PauseCanvas/PausePanel") : null;
+                if (pausePanel == null)
+                {
+                    throw new Exception($"KineticEnergySetup: no PauseSystem/PauseCanvas/PausePanel in {scenePath}.");
+                }
+
+                DestroyChildIfExists(pausePanel, "GroundedAimButton");
+
+                Font font = FindBestFont();
+                Color accent = new Color(1f, 0.82f, 0.2f);
+                GameObject toggleBtn = CreateButton("GroundedAimButton", pausePanel, "Aim: WASD", font, accent, new Vector2(0f, -265f), new Vector2(300f, 70f));
+
+                GroundedAimToggle toggle = toggleBtn.AddComponent<GroundedAimToggle>();
+                toggle.controller = controller;
+                toggle.label = toggleBtn.transform.Find("Label")?.GetComponent<Text>();
+                WireButton(toggleBtn, toggle.Toggle);
+                EditorUtility.SetDirty(toggle);
+
+                SaveActiveScene();
+            }
+
+            Debug.Log("KineticEnergySetup: grounded aim option setup complete OK");
+        }
+
         static KineticCubeController FindPlayerController(string sceneLabel)
         {
             GameObject playerGo = FindByNameIncludingInactive("Player");
@@ -3467,6 +3504,13 @@ namespace KineticEnergy.EditorSetup
             }
 
             EditorSceneManager.OpenScene(MainMenuScenePath, OpenSceneMode.Single);
+
+            // The rebuild below replaces MainMenuUI wholesale - carry the user-entered
+            // feedback link across so re-running this never silently drops it.
+            string preservedFeedbackUrl = "";
+            MainMenuController existingController = UnityEngine.Object.FindFirstObjectByType<MainMenuController>(FindObjectsInactive.Include);
+            if (existingController != null) preservedFeedbackUrl = existingController.feedbackUrl;
+
             DestroyIfExists("MainMenuUI");
             DestroyIfExists("EventSystem");
 
@@ -3530,6 +3574,11 @@ namespace KineticEnergy.EditorSetup
             controller.menuPanel = menuPanel;
             controller.scenesPanel = scenesPanel;
             controller.startSceneName = "Tutorial";
+            controller.feedbackUrl = preservedFeedbackUrl;
+            // Gamepad navigation (direct request) - focus these when their panel opens, so
+            // Dpad/stick + Submit work exactly like the pause menu's.
+            controller.firstMenuButton = startBtn;
+            controller.firstScenesButton = sceneButtons.Length > 0 ? sceneButtons[0] : scenesBackBtn;
 
             WireButton(startBtn, controller.OnStartClicked);
             WireButton(feedbackBtn, controller.OnFeedbackClicked);

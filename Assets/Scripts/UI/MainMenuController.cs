@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 
 namespace KineticEnergy.UI
@@ -13,6 +14,14 @@ namespace KineticEnergy.UI
         [Header("Panels (wired by setup)")]
         public GameObject menuPanel;
         public GameObject scenesPanel;
+
+        [Header("Controller Navigation (wired by setup)")]
+        // Gamepad support (direct request): the Dpad/stick navigates between Buttons via
+        // Unity's automatic navigation, but only once something is SELECTED - these are the
+        // buttons focused whenever their panel opens, same pattern as PauseController's
+        // firstPauseButton and friends.
+        public GameObject firstMenuButton;
+        public GameObject firstScenesButton;
 
         [Header("Flow")]
         [Tooltip("Scene the Start button loads - the first stop of the playtest chain.")]
@@ -30,6 +39,14 @@ namespace KineticEnergy.UI
 
             if (menuPanel != null) menuPanel.SetActive(true);
             if (scenesPanel != null) scenesPanel.SetActive(false);
+            Select(firstMenuButton);
+        }
+
+        static void Select(GameObject button)
+        {
+            if (EventSystem.current == null || button == null) return;
+            EventSystem.current.SetSelectedGameObject(null);
+            EventSystem.current.SetSelectedGameObject(button);
         }
 
         public void OnStartClicked()
@@ -51,12 +68,14 @@ namespace KineticEnergy.UI
         {
             if (menuPanel != null) menuPanel.SetActive(false);
             if (scenesPanel != null) scenesPanel.SetActive(true);
+            Select(firstScenesButton);
         }
 
         public void OnScenesBackClicked()
         {
             if (scenesPanel != null) scenesPanel.SetActive(false);
             if (menuPanel != null) menuPanel.SetActive(true);
+            Select(firstMenuButton);
         }
 
         public void OnQuitClicked()
