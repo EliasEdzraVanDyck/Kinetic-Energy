@@ -3647,6 +3647,82 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: four-scene build menus setup complete OK");
         }
 
+        // The four EnergyRegulation scenes (user-made duplicates of the fast-paced tutorial):
+        // tags each scene's Player instance with its EnergyControlMode, adds the crank UI
+        // component where needed, and builds the PositioningObject prefab. In-place - nothing
+        // else in the scenes is touched, and no other scene changes at all (Standard mode is
+        // the default everywhere).
+        [MenuItem("Tools/Kinetic Energy/Setup Energy Regulation Scenes")]
+        public static void SetupEnergyRegulationScenes()
+        {
+            CreatePositioningObjectPrefab();
+
+            (string path, EnergyControlMode mode)[] energyScenes =
+            {
+                ("Assets/Scenes/EnergyRegulation/Automatic Energy.unity", EnergyControlMode.Automatic),
+                ("Assets/Scenes/EnergyRegulation/Circle Cranking.unity", EnergyControlMode.CircleCrank),
+                ("Assets/Scenes/EnergyRegulation/Dedicated Buttons.unity", EnergyControlMode.DedicatedButtons),
+                ("Assets/Scenes/EnergyRegulation/Reverse Direction.unity", EnergyControlMode.ReverseDirection),
+            };
+
+            foreach ((string path, EnergyControlMode mode) in energyScenes)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(path) == null)
+                {
+                    throw new Exception($"KineticEnergySetup: energy regulation scene missing - {path}");
+                }
+                EditorSceneManager.OpenScene(path, OpenSceneMode.Single);
+
+                KineticCubeController controller = FindPlayerController(path);
+                controller.energyControlMode = mode;
+                EditorUtility.SetDirty(controller);
+
+                if (mode == EnergyControlMode.CircleCrank && controller.GetComponent<EnergyCrankUI>() == null)
+                {
+                    EnergyCrankUI crankUI = controller.gameObject.AddComponent<EnergyCrankUI>();
+                    EditorUtility.SetDirty(crankUI);
+                }
+
+                SaveActiveScene();
+            }
+
+            Debug.Log("KineticEnergySetup: energy regulation scenes setup complete OK");
+        }
+
+        // The Automatic Energy mode's aim-target sphere (direct request): blue, a bit
+        // transparent, trigger collider so the player passes straight through, and carrying
+        // PositioningTarget so the auto-aim ray accepts it as a landing location. Prefab asset
+        // only - place instances wherever you like.
+        public static void CreatePositioningObjectPrefab()
+        {
+            Material sphereMat = new Material(FindBestShader());
+            Color blue = new Color(0.25f, 0.5f, 1f, 0.4f);
+            sphereMat.color = blue;
+            MakeTransparent(sphereMat, blue.a);
+            sphereMat = SaveMaterialAsset(sphereMat, "PositioningObjectMaterial");
+
+            if (!AssetDatabase.IsValidFolder(PrefabFolder))
+            {
+                AssetDatabase.CreateFolder("Assets", "Prefabs");
+            }
+
+            GameObject root = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            try
+            {
+                root.name = "PositioningObject";
+                root.transform.localScale = Vector3.one * 1.5f;
+                root.GetComponent<Renderer>().sharedMaterial = sphereMat;
+                root.GetComponent<SphereCollider>().isTrigger = true;
+                root.AddComponent<PositioningTarget>();
+                PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/PositioningObject.prefab");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+            }
+            AssetDatabase.SaveAssets();
+        }
+
         static KineticCubeController FindPlayerController(string sceneLabel)
         {
             GameObject playerGo = FindByNameIncludingInactive("Player");

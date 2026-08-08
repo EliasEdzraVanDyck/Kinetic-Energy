@@ -4,9 +4,22 @@ using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using KineticEnergy.Level;
+using KineticEnergy.UI;
 
 namespace KineticEnergy.Player
 {
+    // How the FastPaced-style charge's ENERGY amount is controlled (the EnergyRegulation
+    // playtest scenes - each scene's Player instance picks one; Standard everywhere else, which
+    // is the untouched hold-to-charge-over-time behavior).
+    public enum EnergyControlMode
+    {
+        Standard,          // hold the launch button, charge grows with time (unchanged)
+        Automatic,         // charge solved automatically to reach whatever the aim points at
+        CircleCrank,       // crank the stick/WASD in circles: clockwise adds, ccw subtracts
+        DedicatedButtons,  // stick up/down (and mouse wheel) add/subtract
+        ReverseDirection,  // standard, but RB/MMB jumps to max and drains at the same rate
+    }
+
     public enum ControlScheme
     {
         LaunchInstantly, // West: LT aims+charges over time together, RT press = instant launch (the original system)
@@ -149,6 +162,24 @@ namespace KineticEnergy.Player
         public float fastPacedFlightTimeScale = 1.5f;
         public InputActionReference fastPacedAimAction;
         public InputActionReference fastPacedLaunchAction;
+
+        [Header("Energy Control (EnergyRegulation scenes)")]
+        // See the EnergyControlMode enum - Standard everywhere except the four EnergyRegulation
+        // scenes, whose Player instances each carry their own mode.
+        public EnergyControlMode energyControlMode = EnergyControlMode.Standard;
+        // CircleCrank: one full crank revolution changes the charge by this fraction of a full
+        // charge; input only counts while deflected at least crankDeadzone.
+        public float crankChargePerRevolution = 0.5f;
+        [Range(0f, 1f)] public float crankDeadzone = 0.9f;
+        // DedicatedButtons: stick-held rate (full-charge fractions per second) and per-wheel-
+        // notch step.
+        public float buttonChargeRate = 0.5f;
+        public float wheelChargeStep = 0.05f;
+        // Automatic: how far the aim ray looks for a target, and how many ternary-search
+        // iterations refine the solved charge each frame (each iteration costs two trajectory
+        // simulations - lower this if aiming ever feels heavy).
+        public float autoAimMaxDistance = 400f;
+        public int autoSearchIterations = 6;
 
         // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
         // punchier-feeling launch, but a faster exit speed alone would also fly further - linear
@@ -472,6 +503,15 @@ namespace KineticEnergy.Player
         // prediction exactly; cleared on any crash/landing. FastPacedLevel's own scheme keeps
         // its documented WASD-nudge behavior.
         bool fastPacedFlightExact;
+        // Energy-control state: the crank's last input angle (degrees, math convention),
+        // whether it was valid last frame, and ReverseDirection's current draining flag.
+        float crankPreviousAngle;
+        bool crankHasPreviousAngle;
+        bool reverseChargingDown;
+        // Automatic mode: the aimed shot needs more energy than is stored - drives the meter's
+        // red charge bar.
+        bool chargeDisplayInsufficient;
+        EnergyCrankUI energyCrankUI;
         float chargeTime;
         float aimYaw;
         float aimPitch;
@@ -629,6 +669,7 @@ namespace KineticEnergy.Player
             // Same Player object as KineticCubeControllerFreeMove - used to snap the visual to
             // instantly face the launch direction the moment a launch fires (see FixedUpdate).
             freeMoveController = GetComponent<KineticCubeControllerFreeMove>();
+            energyCrankUI = GetComponent<EnergyCrankUI>(); // present only in the CircleCrank scene
             ApplyGravity();
             energyFraction = startingEnergyFraction;
             // Defensive - OnCollisionEnter turns this off while stuck; a scene saved mid-stuck (or
@@ -785,9 +826,18 @@ namespace KineticEnergy.Player
                 // aim, and the "Aim: Mouse" grounded option - there the mouse steers the aim
                 // arrow, so WASD takes over the CAMERA (direct request), while mouse look is
                 // suppressed below.
+                // The energy-control modes that repurpose the sticks: CircleCrank owns BOTH
+                // sticks/WASD for the whole aim (the crank), DedicatedButtons owns the right
+                // stick while the charge is live - the camera must ignore stick look then
+                // (mouse look still works; SetAimStickOverride only substitutes non-mouse input).
+                bool energyModeOwnsSticks =
+                    (energyControlMode == EnergyControlMode.CircleCrank && (fastPacedAiming || fastPacedCharging))
+                    || (energyControlMode == EnergyControlMode.DedicatedButtons && fastPacedCharging);
+
                 bool moveIsGamepadDriven = moveAction != null && moveAction.action != null
                     && moveAction.action.activeControl != null && moveAction.action.activeControl.device is Gamepad;
-                bool aimWithMoveStick = (mixedFastPacedAir && controlScheme == ControlScheme.Mixed && (fastPacedAiming || fastPacedCharging))
+                bool aimWithMoveStick = energyModeOwnsSticks
+                    || (mixedFastPacedAir && controlScheme == ControlScheme.Mixed && (fastPacedAiming || fastPacedCharging))
                     // Grounded mouse-aim hands WASD to the camera - but a GAMEPAD stick keeps
                     // aiming instead (see UpdateChargeBasedScheme), so it must not be captured.
                     || (groundedAimWithMouse && isAiming && !moveIsGamepadDriven);
@@ -797,6 +847,15 @@ namespace KineticEnergy.Player
                 if (aimStick.sqrMagnitude < aimDeadzone * aimDeadzone) aimStick = Vector2.zero;
                 // WASD camera control runs faster under Always Mouse - see the field's comment.
                 if (groundedAimWithMouse && isAiming && !moveIsGamepadDriven) aimStick *= wasdCameraTurnMultiplier;
+                // The LEFT stick keeps adjusting the midair aim in every energy mode (direct
+                // request) - the modes only claim what they actually use: CircleCrank takes the
+                // right stick and KEYBOARD WASD (so keyboard input must not also steer the
+                // aim), DedicatedButtons just the right stick. The override being active is
+                // what blocks the right stick's normal camera look either way.
+                if (energyControlMode == EnergyControlMode.CircleCrank && (fastPacedAiming || fastPacedCharging) && !moveIsGamepadDriven)
+                {
+                    aimStick = Vector2.zero;
+                }
                 cameraOrbit.SetAimStickOverride(aimWithMoveStick, aimStick);
 
                 // While the mouse is steering the grounded aim, it must not ALSO orbit the
@@ -810,8 +869,12 @@ namespace KineticEnergy.Player
             if (energyMeter != null)
             {
                 energyMeter.SetEnergy(energyFraction);
-                bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || fastPacedCharging;
+                bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || fastPacedCharging
+                    // The energy modes' charge is live for the whole aim - the bar shows it
+                    // from the first aim frame (direct request).
+                    || (fastPacedAiming && energyControlMode != EnergyControlMode.Standard);
                 energyMeter.SetCharge(ChargeFraction(), charging);
+                energyMeter.SetChargeWarning(chargeDisplayInsufficient);
             }
 
             switch (controlScheme)
@@ -835,12 +898,21 @@ namespace KineticEnergy.Player
 
         void ApplyChargeTimeScale()
         {
-            // Tutorial2's midair aim slows the game like Tutorial's LT-aim does (direct
-            // request) - the hybrid can only ever be aiming while airborne (grounded cancels
-            // it, see UpdateMixedScheme), so this never slows grounded play. FastPacedLevel's
-            // own aiming (mixedFastPacedAir false) deliberately stays full speed.
-            bool charging = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || fastPacedCharging || mixedAirAiming
-                || (mixedFastPacedAir && controlScheme == ControlScheme.Mixed && fastPacedAiming);
+            // Slow-mo starts the moment AIMING starts, in every scheme (direct request: "time
+            // goes slower the moment you aim" - pressing LT/Right Mouse, not the launch
+            // button): isAiming covers the grounded aim, mixedAirAiming the slow-paced air aim,
+            // fastPacedAiming EVERY FastPaced-style aim (FastPacedLevel and the hybrids alike -
+            // this supersedes the old FastPacedLevel full-speed-while-aiming behavior), and the
+            // hold-to-charge states double as their own aim.
+            // Aim-driven slow-mo is MIDAIR-ONLY (direct request: "time shouldn't be slowed
+            // when aiming while grounded") - the raw-button read stays (slow from the physical
+            // LT/RMB press onward, covering carried-over holds, energy-gated frames, and the
+            // instant after firing), but only while airborne. Grounded aiming runs at full
+            // speed; the hold-to-charge states below still slow whenever active.
+            bool airborneAimSlow = !isGrounded && (isAiming || fastPacedAiming || mixedAirAiming || AimButtonHeld());
+            bool charging = airborneAimSlow
+                || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None
+                || fastPacedCharging;
             // Charging's bullet-time wins over the flight speed-up - starting a mid-air charge
             // freezes the cube anyway (the "flight" is suspended), so the slow-down is the state
             // that matches what's on screen. hasLaunched clears on crash (RegisterCrash), which
@@ -850,6 +922,16 @@ namespace KineticEnergy.Player
             // Every other scheme's in-flight speed-up - see launchFlightTimeScale's own comment.
             float flightScale = fastPacedInFlight ? fastPacedFlightTimeScale : (hasLaunched ? launchFlightTimeScale : 1f);
             Time.timeScale = charging ? chargeTimeScale : flightScale;
+        }
+
+        // The physical aim buttons, read raw: launchAction is Left Trigger (with the Right
+        // Mouse binding), fastPacedAimAction the FastPaced aim where wired. IsPressed, not any
+        // aim-state flag - see ApplyChargeTimeScale's use.
+        bool AimButtonHeld()
+        {
+            if (launchAction != null && launchAction.action != null && launchAction.action.IsPressed()) return true;
+            if (fastPacedAimAction != null && fastPacedAimAction.action != null && fastPacedAimAction.action.IsPressed()) return true;
+            return false;
         }
 
         // Shared by LaunchInstantly/HoldRelease/AnalogPressure (standalone) and Mixed's grounded
@@ -1779,6 +1861,10 @@ namespace KineticEnergy.Player
             // toggle switches between - a stray Right Bumper press (a gamepad plugged in
             // alongside mouse/keyboard) would otherwise silently stomp it to Trail or None mid-aim.
             if (controlScheme == ControlScheme.FastPaced) return;
+            // Reverse Direction repurposes RB as the charge-direction flip while its charge is
+            // live - which is now the whole AIM (direct request: the flip is available while
+            // aiming) - a flip must not also toggle the trail.
+            if (energyControlMode == EnergyControlMode.ReverseDirection && (fastPacedAiming || fastPacedCharging)) return;
             if (trailToggleAction == null || trailToggleAction.action == null || !trailToggleAction.action.WasPressedThisFrame()) return;
             if (landingPreview == null) return;
 
@@ -1842,9 +1928,229 @@ namespace KineticEnergy.Player
             fastPacedAiming = false;
             fastPacedCharging = false;
             chargeTime = 0f;
+            reverseChargingDown = false;
+            crankHasPreviousAngle = false;
+            chargeDisplayInsufficient = false;
+            energyCrankUI?.SetVisible(false);
             landingPreview?.SetVisible(false);
             cameraOrbit?.SetFirstPersonMode(false);
             cameraOrbit?.SetAimZoom(0f);
+        }
+
+        // ==================== Energy control modes (EnergyRegulation scenes) ====================
+
+        // The right stick's raw value, gamepad-only - the look action carries mouse deltas too,
+        // and those must never leak into the crank/buttons charge input.
+        Vector2 GamepadLookValue()
+        {
+            InputActionReference look = cameraOrbit != null ? cameraOrbit.lookAction : null;
+            if (look == null || look.action == null) return Vector2.zero;
+            if (look.action.activeControl == null || !(look.action.activeControl.device is Gamepad)) return Vector2.zero;
+            return look.action.ReadValue<Vector2>();
+        }
+
+        // Circle Crank: the popup dot follows the input direction along the ring; cranking
+        // CLOCKWISE (angle decreasing, at >= crankDeadzone deflection) adds charge, counter-
+        // clockwise subtracts - right stick and WASD alike (direct spec).
+        void UpdateCrankCharge()
+        {
+            energyCrankUI?.SetVisible(true);
+
+            Vector2 input = GamepadLookValue();
+            if (input.magnitude < crankDeadzone && Keyboard.current != null)
+            {
+                Vector2 keys = Vector2.zero;
+                if (Keyboard.current.wKey.isPressed) keys.y += 1f;
+                if (Keyboard.current.sKey.isPressed) keys.y -= 1f;
+                if (Keyboard.current.dKey.isPressed) keys.x += 1f;
+                if (Keyboard.current.aKey.isPressed) keys.x -= 1f;
+                if (keys != Vector2.zero) input = keys.normalized;
+            }
+
+            if (input.magnitude >= crankDeadzone)
+            {
+                float angle = Mathf.Atan2(input.y, input.x) * Mathf.Rad2Deg;
+                energyCrankUI?.SetDotAngle(angle);
+                if (crankHasPreviousAngle)
+                {
+                    float delta = Mathf.DeltaAngle(crankPreviousAngle, angle);
+                    // Negative delta = clockwise in this convention = ADD energy.
+                    chargeTime = Mathf.Clamp(chargeTime + (-delta / 360f) * crankChargePerRevolution * maxChargeTime,
+                        0f, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
+                }
+                crankPreviousAngle = angle;
+                crankHasPreviousAngle = true;
+            }
+            else
+            {
+                crankHasPreviousAngle = false;
+            }
+        }
+
+        // Dedicated Buttons: right stick up adds / down subtracts at buttonChargeRate; mouse
+        // wheel notches step by wheelChargeStep (direct spec).
+        void UpdateDedicatedButtonsCharge()
+        {
+            float delta = 0f;
+            float stickY = GamepadLookValue().y;
+            if (Mathf.Abs(stickY) > 0.5f)
+            {
+                delta += Mathf.Sign(stickY) * buttonChargeRate * maxChargeTime * Time.unscaledDeltaTime;
+            }
+            if (Mouse.current != null)
+            {
+                float scroll = Mouse.current.scroll.ReadValue().y;
+                if (Mathf.Abs(scroll) > 0.01f) delta += Mathf.Sign(scroll) * wheelChargeStep * maxChargeTime;
+            }
+            if (delta != 0f)
+            {
+                chargeTime = Mathf.Clamp(chargeTime + delta, 0f, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
+            }
+        }
+
+        // Reverse Direction: standard time-charging, but RB / middle mouse flips it - the meter
+        // jumps to the maximum the CURRENT energy allows and drains at the same rate charging
+        // adds; pressing again flips back to adding from wherever it is (direct spec).
+        void UpdateReverseCharge()
+        {
+            bool flipPressed = (trailToggleAction != null && trailToggleAction.action != null && trailToggleAction.action.WasPressedThisFrame())
+                || (Mouse.current != null && Mouse.current.middleButton.wasPressedThisFrame);
+            if (flipPressed)
+            {
+                reverseChargingDown = !reverseChargingDown;
+                if (reverseChargingDown) chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
+            }
+
+            if (reverseChargingDown)
+            {
+                chargeTime = Mathf.Max(chargeTime - Time.deltaTime * chargeAccumulationRate, 0f);
+            }
+            else
+            {
+                AccumulateCharge();
+            }
+        }
+
+        // The non-Standard energy modes' whole aim phase (direct request): the trail+reticle
+        // preview is live from the first aim frame, the mode's energy input is adjustable the
+        // entire time, and the launch button is purely a CONFIRM - one fresh press fires the
+        // previewed shot; both aim and launch need genuine re-presses afterwards. No freeze:
+        // the shot is computed from the CURRENT motion (the launch impulse adds to it) - which
+        // is also what fixed Automatic's short mid-air shots: the old solver assumed a
+        // standing start, so any launch fired while already flying got the wrong charge.
+        void UpdateEnergyModeAim(bool firePressed)
+        {
+            Vector3 dir = cameraOrbit != null ? cameraOrbit.AimForward : transform.forward;
+
+            landingPreview?.SetVisible(true);
+            landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
+
+            switch (energyControlMode)
+            {
+                case EnergyControlMode.Automatic:
+                    // Wherever the aim points - surface or PositioningObject sphere - the
+                    // EXACT required charge is solved over the FULL range (not capped by
+                    // stored energy): the meter shows the true requirement, red when it
+                    // exceeds what's stored (direct request).
+                    if (!TryGetAutoAimTarget(dir, out Vector3 target))
+                    {
+                        target = (cameraTransform != null ? cameraTransform.position : transform.position) + dir * autoAimMaxDistance;
+                    }
+                    float required = SolveChargeForTarget(dir, target);
+                    chargeTime = required * maxChargeTime;
+                    chargeDisplayInsufficient = required * energyCostPerFullCharge > energyFraction + 0.0001f;
+                    break;
+                case EnergyControlMode.CircleCrank:
+                    UpdateCrankCharge();
+                    break;
+                case EnergyControlMode.DedicatedButtons:
+                    UpdateDedicatedButtonsCharge();
+                    break;
+                case EnergyControlMode.ReverseDirection:
+                    UpdateReverseCharge();
+                    break;
+            }
+
+            // What actually fires: the dialed/required charge capped by what the tank can pay.
+            float fireFraction = Mathf.Min(ChargeFraction(), energyCostPerFullCharge > 0f ? energyFraction / energyCostPerFullCharge : 1f);
+            float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, fireFraction);
+            float damping = Mathf.Lerp(fastPacedMinDamping, fastPacedMaxDamping, fireFraction);
+
+            Vector3 initialVelocity = rb.linearVelocity + dir * force / rb.mass;
+            Vector3 lineStart = transform.position + Vector3.up * previewLineHeight;
+            Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, damping, out int stepCount, out bool didLand);
+            lastPredictedLanding = landingPoint;
+            hasPredictedLanding = true;
+            if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
+            {
+                landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand, lastPredictedLandingNormal);
+            }
+
+            if (firePressed && energyFraction > 0f && CanStartNewLaunch())
+            {
+                chargeTime = fireFraction * maxChargeTime; // pay exactly for what fires
+                QueueLaunch(dir, force, damping);
+                if (mixedFastPacedAir && controlScheme == ControlScheme.Mixed) fastPacedFlightExact = true;
+                CancelFastPacedAim();
+            }
+        }
+
+        bool TryGetAutoAimTarget(Vector3 dir, out Vector3 target)
+        {
+            Vector3 origin = cameraTransform != null ? cameraTransform.position : transform.position;
+            RaycastHit[] hits = Physics.RaycastAll(origin, dir, autoAimMaxDistance, ~0, QueryTriggerInteraction.Collide);
+            float bestDistance = float.MaxValue;
+            target = default;
+            bool found = false;
+            foreach (RaycastHit hit in hits)
+            {
+                if (hit.collider == boxCollider || hit.collider.transform.IsChildOf(transform)) continue;
+                // Triggers only count when they're genuine aim targets (PositioningObject) -
+                // finish/restart volumes and the like stay invisible to the aim.
+                if (hit.collider.isTrigger && hit.collider.GetComponentInParent<PositioningTarget>() == null) continue;
+                if (hit.distance < bestDistance)
+                {
+                    bestDistance = hit.distance;
+                    target = hit.point;
+                    found = true;
+                }
+            }
+            return found;
+        }
+
+        // Ternary search over the charge fraction (capped by stored energy) minimizing the
+        // trajectory's closest approach to the target - closest-approach handles both surface
+        // targets (landing on them) and floating PositioningObject spheres (flying through).
+        float SolveChargeForTarget(Vector3 dir, Vector3 target)
+        {
+            // Full range on purpose - the TRUE requirement, not what's affordable; the caller
+            // caps the actual firing charge and warns via the red bar.
+            float lo = 0f;
+            float hi = 1f;
+            for (int i = 0; i < Mathf.Max(autoSearchIterations, 1); i++)
+            {
+                float m1 = Mathf.Lerp(lo, hi, 1f / 3f);
+                float m2 = Mathf.Lerp(lo, hi, 2f / 3f);
+                if (TrajectoryDistanceToPoint(dir, m1, target) <= TrajectoryDistanceToPoint(dir, m2, target)) hi = m2;
+                else lo = m1;
+            }
+            return (lo + hi) * 0.5f;
+        }
+
+        float TrajectoryDistanceToPoint(Vector3 dir, float chargeFraction, Vector3 target)
+        {
+            float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
+            float damping = Mathf.Lerp(fastPacedMinDamping, fastPacedMaxDamping, chargeFraction);
+            // CURRENT velocity included - the launch impulse adds to it (no freeze during the
+            // energy modes' aim), and solving from a standing start was exactly why far mid-air
+            // shots undershot.
+            PredictLandingPoint(transform.position, rb.linearVelocity + dir * force / rb.mass, damping, out int stepCount, out bool _);
+            float best = float.MaxValue;
+            for (int i = 0; i < stepCount; i++)
+            {
+                best = Mathf.Min(best, (trajectoryBuffer[i] - target).sqrMagnitude);
+            }
+            return best;
         }
 
         // Hold South/LT/RT to charge a launch in that direction (same charge curve as the
@@ -2205,10 +2511,27 @@ namespace KineticEnergy.Player
                 }
                 fastPacedAiming = true;
                 cameraOrbit?.SetFirstPersonMode(true);
+                // Energy modes: each fresh aim starts from a clean dial.
+                if (energyControlMode != EnergyControlMode.Standard)
+                {
+                    chargeTime = 0f;
+                    reverseChargingDown = false;
+                    chargeDisplayInsufficient = false;
+                }
             }
 
             bool lmbPressed = fastPacedLaunchAction != null && fastPacedLaunchAction.action != null && fastPacedLaunchAction.action.WasPressedThisFrame();
             bool lmbReleased = fastPacedLaunchAction != null && fastPacedLaunchAction.action != null && fastPacedLaunchAction.action.WasReleasedThisFrame();
+
+            // Every non-Standard energy mode: the AIM PHASE is the energy phase (direct
+            // request: "while aiming the energy input for your launches should start changing
+            // and be able to be interacted with, so that the firing button is basically only
+            // to confirm the launch").
+            if (energyControlMode != EnergyControlMode.Standard)
+            {
+                UpdateEnergyModeAim(lmbPressed);
+                return;
+            }
 
             if (!fastPacedCharging)
             {
