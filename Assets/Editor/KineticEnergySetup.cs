@@ -3534,6 +3534,61 @@ namespace KineticEnergy.EditorSetup
         // Shared per-scene pause-menu configuration for a build variant: hides the shared
         // prefab's legacy scene buttons (per-instance), clears any previous variant's buttons,
         // lists exactly the given scenes, adds the Main Menu button, and retargets the finish.
+        // The energy-regulation build (direct request): MainMenu + the four EnergyRegulation
+        // scenes, played in sequence with AUTOMATIC ENERGY LAST -
+        //   MainMenu -> Circle Cranking -> Dedicated Buttons -> Reverse Direction ->
+        //   Automatic Energy -> MainMenu
+        // Same treatment as the other build variants: trimmed build list, main menu listing
+        // exactly these four (Start boots the first), pause menus listing the four plus the
+        // Main Menu button, and each finish chaining to the next stop. Run one of the other
+        // "Setup ... Build Menus" items to switch build configurations.
+        [MenuItem("Tools/Kinetic Energy/Setup Energy Regulation Build Menus")]
+        public static void SetupEnergyRegulationBuildMenus()
+        {
+            const string energyFolder = "Assets/Scenes/EnergyRegulation/";
+            // Order IS the playtest sequence - Automatic Energy deliberately last.
+            (string label, string sceneName)[] buildScenes =
+            {
+                ("Circle Cranking", "Circle Cranking"),
+                ("Dedicated Buttons", "Dedicated Buttons"),
+                ("Reverse Direction", "Reverse Direction"),
+                ("Automatic Energy", "Automatic Energy"),
+            };
+
+            for (int i = 0; i < buildScenes.Length; i++)
+            {
+                string scenePath = energyFolder + buildScenes[i].sceneName + ".unity";
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+                {
+                    throw new Exception($"KineticEnergySetup: energy regulation scene missing - {scenePath}");
+                }
+                // The last stop returns to the menu; every other one leads to the next.
+                string next = i + 1 < buildScenes.Length ? buildScenes[i + 1].sceneName : "MainMenu";
+                ConfigurePauseMenuForBuild(scenePath, buildScenes, next);
+            }
+
+            BuildMainMenuScene(buildScenes, buildScenes[0].sceneName,
+                "Playtest build - this tests four ways to control your launch ENERGY:\n" +
+                "Circle Cranking, Dedicated Buttons, Reverse Direction, and\n" +
+                "Automatic Energy - one per level, played in that order.\n" +
+                "Each finish line takes you straight to the next stop.\n" +
+                "Note: enabling 'Aim: Always Mouse' in the pause menu DISABLES\n" +
+                "all controller inputs (outside the menus) until you turn it off.\n" +
+                "Please share your thoughts via the Feedback button afterwards!");
+
+            List<EditorBuildSettingsScene> buildList = new List<EditorBuildSettingsScene>
+            {
+                new EditorBuildSettingsScene(MainMenuScenePath, true),
+            };
+            foreach ((string label, string sceneName) in buildScenes)
+            {
+                buildList.Add(new EditorBuildSettingsScene(energyFolder + sceneName + ".unity", true));
+            }
+            EditorBuildSettings.scenes = buildList.ToArray();
+
+            Debug.Log("KineticEnergySetup: energy regulation build menus setup complete OK");
+        }
+
         static void ConfigurePauseMenuForBuild(string scenePath, (string label, string sceneName)[] buildScenes, string finishNextScene)
         {
             Font font = FindBestFont();

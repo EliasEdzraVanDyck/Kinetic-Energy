@@ -180,6 +180,10 @@ namespace KineticEnergy.Player
         // simulations - lower this if aiming ever feels heavy).
         public float autoAimMaxDistance = 400f;
         public int autoSearchIterations = 6;
+        // Added on top of the solved minimum charge (direct request: "the minimum energy
+        // needed to reach it + a small failsafe like 5%") - a slight overshoot beats clipping
+        // the near edge.
+        [Range(0f, 0.5f)] public float autoChargeFailsafe = 0.05f;
 
         // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
         // punchier-feeling launch, but a faster exit speed alone would also fly further - linear
@@ -511,6 +515,17 @@ namespace KineticEnergy.Player
         // Automatic mode: the aimed shot needs more energy than is stored - drives the meter's
         // red charge bar.
         bool chargeDisplayInsufficient;
+        // Automatic mode: a PositioningObject touched mid-flight force-opens the aim without
+        // any button held (a mid-air re-aim checkpoint) - stays open until the player fires,
+        // takes over by pressing the aim button, or the aim cancels. Once per launch.
+        bool autoAimForced;
+        bool positioningAimUsedThisFlight;
+        // After a launch (or any aim cancel), a still-HELD aim button counts for nothing -
+        // no aim, and no raw-button slow-mo either (direct request: "aim shouldn't be
+        // registered still if you held on to it... only reactivated if you let go and then
+        // repress") - until genuinely released once. Cleared in Update the frame both aim
+        // buttons are up.
+        bool aimButtonSpent;
         EnergyCrankUI energyCrankUI;
         float chargeTime;
         float aimYaw;
@@ -573,7 +588,10 @@ namespace KineticEnergy.Player
         // Also blocked while charging any of the three hold-to-charge systems, same reasoning as
         // isAiming - the cube needs to stay put while charging, ground or air.
         public bool AllowGroundedMovement => !isAiming && !hasLaunched && !isStuck && !mixedAirAiming
-            && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None && !fastPacedCharging;
+            && stickAimChargeType == StickAimChargeType.None && defyGravityChargeType == DefyGravityFlightType.None && !fastPacedCharging
+            // "While aiming you shouldn't be able to move" (direct request) - a grounded
+            // FastPaced-style aim (Automatic's grounded auto-aim especially) locks walking too.
+            && !fastPacedAiming;
 
         // AllowAirborneNudge: safe for FreeMove to apply a small, ADDITIVE force (air control,
         // leaning) while genuinely airborne. Only needs to wait out the brief post-launch grace
@@ -651,6 +669,19 @@ namespace KineticEnergy.Player
         Rigidbody predictionRb;
         BoxCollider predictionCloneCollider;
         PredictionCloneStopper predictionStopper;
+        // Per-frame caches (performance): geometry sync and spawn depenetration are identical
+        // for every prediction within one frame, so they run once - the Automatic solver fires
+        // ~19 predictions per frame and was paying both costs every single time.
+        int predictionSyncFrame = -1;
+        int spawnCacheFrame = -1;
+        Vector3 spawnCacheStart;
+        Vector3 spawnCacheResult;
+        // Automatic solve cache: re-solving 19 simulations every frame was the main perf sink -
+        // the result only changes when the TARGET moves, so it's reused until it does (or a
+        // periodic refresh).
+        Vector3 lastAutoTarget;
+        float lastAutoSolvedCharge = -1f;
+        int lastAutoSolveFrame = -1000;
         // Normal of the face the last prediction landed on (world up when it didn't land) -
         // orients the cross-and-ring marker flush against that face.
         Vector3 lastPredictedLandingNormal = Vector3.up;
@@ -783,6 +814,10 @@ namespace KineticEnergy.Player
             // still start or complete while the pause menu is up.
             if (Time.timeScale <= 0f) return;
 
+            // The spent-aim-button latch re-arms only once the buttons are genuinely up - see
+            // aimButtonSpent's own comment.
+            if (aimButtonSpent && !AimButtonHeld()) aimButtonSpent = false;
+
             if (transform.position.y < fallResetY)
             {
                 Time.timeScale = 1f;
@@ -909,7 +944,7 @@ namespace KineticEnergy.Player
             // LT/RMB press onward, covering carried-over holds, energy-gated frames, and the
             // instant after firing), but only while airborne. Grounded aiming runs at full
             // speed; the hold-to-charge states below still slow whenever active.
-            bool airborneAimSlow = !isGrounded && (isAiming || fastPacedAiming || mixedAirAiming || AimButtonHeld());
+            bool airborneAimSlow = !isGrounded && (isAiming || fastPacedAiming || mixedAirAiming || (AimButtonHeld() && !aimButtonSpent));
             bool charging = airborneAimSlow
                 || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None
                 || fastPacedCharging;
@@ -1171,12 +1206,22 @@ namespace KineticEnergy.Player
                 // (direct request: "should only happen if you aim when midair, not when you are
                 // grounded") - the moment the cube is grounded again, the aim cancels cleanly
                 // and the ordinary grounded Mixed controls take over, even if the aim button is
-                // still held.
-                if (isGrounded) CancelFastPacedAim();
+                // still held. EXCEPTION: Automatic Energy, whose grounded aim is the same
+                // auto-solve (direct request), so its aim survives being grounded.
+                if (isGrounded && energyControlMode != EnergyControlMode.Automatic) CancelFastPacedAim();
                 else UpdateFastPacedScheme();
             }
             else if (isGrounded || airUsesGroundedAim)
             {
+                // Automatic Energy: grounded aiming uses the SAME auto-solve flow as midair
+                // (direct request: "aiming while grounded follows the same principle of
+                // calculating how much energy you need"), replacing the build-up-over-time
+                // grounded aim entirely in that scene.
+                if (mixedFastPacedAir && energyControlMode == EnergyControlMode.Automatic)
+                {
+                    UpdateFastPacedScheme();
+                    return;
+                }
                 // airUsesGroundedAim (Tutorial3/TestLevel3) sends AIRBORNE frames through this
                 // same branch - the air-relaunch path inside UpdateChargeBasedScheme already
                 // handles the freeze-and-aim mid-air, so "same controls as on the ground" is
@@ -1268,7 +1313,12 @@ namespace KineticEnergy.Player
             // Defy Gravity charges frozen in place for their whole duration, not just their
             // opening frame - and, now, also what keeps a crashed/isStuck cube pinned exactly
             // where it crashed (direct request: "stop all movement and stick to that location").
-            if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || isStuck || fastPacedCharging || mixedAirAiming)
+            if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || isStuck || fastPacedCharging || mixedAirAiming
+                // Automatic Energy: the WHOLE aim freezes (direct bug report - falling during
+                // the aim kept changing the solved requirement every frame, reading as energy
+                // building over time, and drifted the shot). Frozen, the required energy is a
+                // stable function of the aim point alone, and the launch matches the preview.
+                || (fastPacedAiming && energyControlMode == EnergyControlMode.Automatic))
             {
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
@@ -1455,11 +1505,41 @@ namespace KineticEnergy.Player
             velocityBeforePhysicsStep = rb.linearVelocity;
         }
 
+        // Trigger volumes: RestartWall frames (the FloatingWallBorder prefab's strips are
+        // triggers on purpose - solid borders registered contacts through the wall face), and
+        // Automatic Energy's PositioningObject checkpoints.
+        void OnTriggerEnter(Collider other)
+        {
+            if (other.GetComponentInParent<RestartWall>() != null)
+            {
+                Time.timeScale = 1f;
+                SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+                return;
+            }
+
+            // Automatic Energy: the FIRST PositioningObject touched after a launch freezes the
+            // flight right there and opens the aim automatically (direct request) - a mid-air
+            // re-aim checkpoint. Once per launch; the next launch re-arms it.
+            if (mixedFastPacedAir && energyControlMode == EnergyControlMode.Automatic
+                && hasLaunched && !positioningAimUsedThisFlight
+                && other.GetComponentInParent<PositioningTarget>() != null)
+            {
+                positioningAimUsedThisFlight = true;
+                autoAimForced = true;
+                aimButtonSpent = false;
+                if (!fastPacedAiming)
+                {
+                    fastPacedAiming = true;
+                    cameraOrbit?.SetFirstPersonMode(!isGrounded);
+                }
+            }
+        }
+
         void OnCollisionEnter(Collision collision)
         {
             // RestartWall: any touch reloads the level - checked before every guard below, so a
             // grounded walk-in restarts just as reliably as a mid-flight crash. Same reload the
-            // fall-reset uses.
+            // fall-reset uses. (The TRIGGER variant below serves the FloatingWallBorder frames.)
             if (collision.collider.GetComponentInParent<RestartWall>() != null)
             {
                 Time.timeScale = 1f;
@@ -1931,6 +2011,9 @@ namespace KineticEnergy.Player
             reverseChargingDown = false;
             crankHasPreviousAngle = false;
             chargeDisplayInsufficient = false;
+            autoAimForced = false;
+            lastAutoSolvedCharge = -1f; // next aim starts with a fresh solve
+            aimButtonSpent = true; // closing the aim spends the hold - release before re-aiming
             energyCrankUI?.SetVisible(false);
             landingPreview?.SetVisible(false);
             cameraOrbit?.SetFirstPersonMode(false);
@@ -2021,13 +2104,17 @@ namespace KineticEnergy.Player
                 if (reverseChargingDown) chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
             }
 
+            // UNSCALED time both ways (direct request): the midair aim's slow-mo scales
+            // Time.deltaTime, which made the meter fill/drain 25% slower in the air than
+            // grounded - real-time rates keep the speed identical wherever you aim, and the
+            // add and subtract directions symmetric by construction.
             if (reverseChargingDown)
             {
-                chargeTime = Mathf.Max(chargeTime - Time.deltaTime * chargeAccumulationRate, 0f);
+                chargeTime = Mathf.Max(chargeTime - Time.unscaledDeltaTime * chargeAccumulationRate, 0f);
             }
             else
             {
-                AccumulateCharge();
+                chargeTime = Mathf.Min(chargeTime + Time.unscaledDeltaTime * chargeAccumulationRate, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
             }
         }
 
@@ -2045,6 +2132,14 @@ namespace KineticEnergy.Player
             landingPreview?.SetVisible(true);
             landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
 
+            // "While grounded you shouldn't zoom in" (direct request): Automatic's grounded
+            // aim stays third-person - first person only midair, switching live if the aim
+            // spans both.
+            if (energyControlMode == EnergyControlMode.Automatic)
+            {
+                cameraOrbit?.SetFirstPersonMode(!isGrounded);
+            }
+
             switch (energyControlMode)
             {
                 case EnergyControlMode.Automatic:
@@ -2056,9 +2151,34 @@ namespace KineticEnergy.Player
                     {
                         target = (cameraTransform != null ? cameraTransform.position : transform.position) + dir * autoAimMaxDistance;
                     }
-                    float required = SolveChargeForTarget(dir, target);
-                    chargeTime = required * maxChargeTime;
-                    chargeDisplayInsufficient = required * energyCostPerFullCharge > energyFraction + 0.0001f;
+                    // FIRE DIRECTION: from the PLAYER toward the target - NOT the camera's
+                    // forward. In third person (the grounded aim) the camera looks DOWN past
+                    // the player, and firing along that tilted direction needed absurd charge
+                    // to reach anything - the routinely-way-too-much-energy bug. Player-to-
+                    // target is the direction whose arc family reaches the spot with the
+                    // minimum charge; in first person (midair) the two nearly coincide.
+                    Vector3 toTarget = target - transform.position;
+                    if (toTarget.sqrMagnitude > 0.01f) dir = toTarget.normalized;
+                    // Amortized solve (performance): at most one search per
+                    // autoSolveIntervalFrames, re-run only when the target has actually moved
+                    // (with a slower periodic refresh) - a moving aim no longer pays the full
+                    // search cost every single frame. The meter lags the aim by at most ~0.1s.
+                    bool solveDue = lastAutoSolvedCharge < 0f
+                        || (Time.frameCount - lastAutoSolveFrame >= 5
+                            && ((target - lastAutoTarget).sqrMagnitude > 0.25f || Time.frameCount - lastAutoSolveFrame >= 20));
+                    if (solveDue)
+                    {
+                        lastAutoSolvedCharge = SolveChargeForTarget(dir, target);
+                        lastAutoTarget = target;
+                        lastAutoSolveFrame = Time.frameCount;
+                    }
+                    // The solved minimum plus the failsafe margin - see autoChargeFailsafe.
+                    float required = Mathf.Clamp01(lastAutoSolvedCharge + autoChargeFailsafe);
+                    // Meter AND launch intake CAP at what's stored (direct request) - the red
+                    // bar sits at the current level and flags that the true need is higher.
+                    float affordable = energyCostPerFullCharge > 0f ? Mathf.Clamp01(energyFraction / energyCostPerFullCharge) : 1f;
+                    chargeDisplayInsufficient = required > affordable + 0.0001f;
+                    chargeTime = Mathf.Min(required, affordable) * maxChargeTime;
                     break;
                 case EnergyControlMode.CircleCrank:
                     UpdateCrankCharge();
@@ -2098,12 +2218,16 @@ namespace KineticEnergy.Player
         bool TryGetAutoAimTarget(Vector3 dir, out Vector3 target)
         {
             Vector3 origin = cameraTransform != null ? cameraTransform.position : transform.position;
+            // In third person the camera sits behind the player - anything the ray crosses
+            // BEFORE reaching the player's depth is behind/beside the cube, not aimable.
+            float minDistance = Vector3.Distance(origin, transform.position) - 1f;
             RaycastHit[] hits = Physics.RaycastAll(origin, dir, autoAimMaxDistance, ~0, QueryTriggerInteraction.Collide);
             float bestDistance = float.MaxValue;
             target = default;
             bool found = false;
             foreach (RaycastHit hit in hits)
             {
+                if (hit.distance < minDistance) continue;
                 if (hit.collider == boxCollider || hit.collider.transform.IsChildOf(transform)) continue;
                 // Triggers only count when they're genuine aim targets (PositioningObject) -
                 // finish/restart volumes and the like stay invisible to the aim.
@@ -2118,39 +2242,61 @@ namespace KineticEnergy.Player
             return found;
         }
 
-        // Ternary search over the charge fraction (capped by stored energy) minimizing the
-        // trajectory's closest approach to the target - closest-approach handles both surface
-        // targets (landing on them) and floating PositioningObject spheres (flying through).
+        // Finds the charge whose LANDING point is nearest the target ("the minimum energy
+        // needed to get there"). Deliberately a coarse GRID SCAN plus a fine local scan, not a
+        // ternary search: on this game's platform courses the objective has a NARROW valley -
+        // an undershoot and an overshoot both fall into the void and score nearly identically
+        // far - and a ternary search's probes usually both land on that plateau, converging
+        // essentially anywhere (the routinely-overspending bug, direct report). A grid cannot
+        // miss a valley wider than one cell; the fine pass then pins the minimum down to a few
+        // percent.
         float SolveChargeForTarget(Vector3 dir, Vector3 target)
         {
-            // Full range on purpose - the TRUE requirement, not what's affordable; the caller
-            // caps the actual firing charge and warns via the red bar.
-            float lo = 0f;
-            float hi = 1f;
-            for (int i = 0; i < Mathf.Max(autoSearchIterations, 1); i++)
+            const int coarseSamples = 8;
+            float bestCharge = 0f;
+            float bestDistance = float.MaxValue;
+            for (int i = 0; i < coarseSamples; i++)
             {
-                float m1 = Mathf.Lerp(lo, hi, 1f / 3f);
-                float m2 = Mathf.Lerp(lo, hi, 2f / 3f);
-                if (TrajectoryDistanceToPoint(dir, m1, target) <= TrajectoryDistanceToPoint(dir, m2, target)) hi = m2;
-                else lo = m1;
+                float candidate = i / (float)(coarseSamples - 1);
+                float distance = LandingDistanceToPoint(dir, candidate, target);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestCharge = candidate;
+                }
             }
-            return (lo + hi) * 0.5f;
+
+            float cell = 1f / (coarseSamples - 1);
+            float lo = Mathf.Clamp01(bestCharge - cell);
+            float hi = Mathf.Clamp01(bestCharge + cell);
+            int fineSamples = Mathf.Max(autoSearchIterations, 2);
+            for (int i = 0; i <= fineSamples; i++)
+            {
+                float candidate = Mathf.Lerp(lo, hi, i / (float)fineSamples);
+                float distance = LandingDistanceToPoint(dir, candidate, target);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestCharge = candidate;
+                }
+            }
+            return bestCharge;
         }
 
-        float TrajectoryDistanceToPoint(Vector3 dir, float chargeFraction, Vector3 target)
+        // Solver probes run on a short step budget (150 steps = 3 simulated seconds) - a
+        // landing decides itself well within that at this game's speeds, and the full
+        // 3000-step budget made each of the search's probes vastly more expensive than it
+        // needed to be.
+        const int AutoSolveStepLimit = 150;
+
+        float LandingDistanceToPoint(Vector3 dir, float chargeFraction, Vector3 target)
         {
             float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
             float damping = Mathf.Lerp(fastPacedMinDamping, fastPacedMaxDamping, chargeFraction);
-            // CURRENT velocity included - the launch impulse adds to it (no freeze during the
-            // energy modes' aim), and solving from a standing start was exactly why far mid-air
-            // shots undershot.
-            PredictLandingPoint(transform.position, rb.linearVelocity + dir * force / rb.mass, damping, out int stepCount, out bool _);
-            float best = float.MaxValue;
-            for (int i = 0; i < stepCount; i++)
-            {
-                best = Mathf.Min(best, (trajectoryBuffer[i] - target).sqrMagnitude);
-            }
-            return best;
+            // rb velocity is ~zero here (the Automatic aim freezes the cube), included anyway
+            // so a grounded aim with residual motion still solves correctly.
+            Vector3 landing = PredictLandingPoint(transform.position, rb.linearVelocity + dir * force / rb.mass, damping, out int _, out bool _, 0f, AutoSolveStepLimit);
+            return (landing - target).sqrMagnitude;
         }
 
         // Hold South/LT/RT to charge a launch in that direction (same charge curve as the
@@ -2479,7 +2625,15 @@ namespace KineticEnergy.Player
         // own field comments for why the freeze lives on the charge flag, not the aim flag.
         void UpdateFastPacedScheme()
         {
-            bool rmbHeld = fastPacedAimAction != null && fastPacedAimAction.action != null && fastPacedAimAction.action.IsPressed();
+            // autoAimForced keeps the aim alive with no button held (PositioningObject
+            // checkpoint); a genuine fresh press of the aim button hands control back to the
+            // ordinary hold-to-maintain rule.
+            if (autoAimForced && fastPacedAimAction != null && fastPacedAimAction.action != null && fastPacedAimAction.action.WasPressedThisFrame())
+            {
+                autoAimForced = false;
+            }
+            bool rmbHeld = autoAimForced
+                || (fastPacedAimAction != null && fastPacedAimAction.action != null && fastPacedAimAction.action.IsPressed());
 
             if (!rmbHeld)
             {
@@ -2603,6 +2757,8 @@ namespace KineticEnergy.Player
             hasLaunched = true;
             launchesSinceGrounded++;
             fastPacedFlightExact = false; // re-armed by the hybrid fire path right after this call
+            aimButtonSpent = true;        // a held aim button does nothing further until released
+            positioningAimUsedThisFlight = false; // the new flight gets its checkpoint again
             currentFlightIsDownward = Vector3.Dot(direction.normalized, Vector3.down) >= slamDownwardThreshold;
             // Every launch spends the charge fraction it took to build, straight out of the
             // shared energy tank - "no more time/energy/speed can be added... when you reach the
@@ -2701,13 +2857,21 @@ namespace KineticEnergy.Player
         // fixed one real trail-accuracy bug from the prediction clone drifting from what the real
         // cube does (see the 0.15f start-offset comment below) - matching the real per-tick
         // override technique exactly, not approximating it, is what keeps this one accurate too.
-        Vector3 PredictLandingPoint(Vector3 startPos, Vector3 initialVelocity, float damping, out int stepCount, out bool didLand, float gravityFreeDuration = 0f)
+        // stepLimit > 0 caps the simulation budget (the Automatic solver's probes use a short
+        // budget - a landing decides itself within a few seconds of simulated flight); 0 means
+        // the full maxPredictionSteps as always.
+        Vector3 PredictLandingPoint(Vector3 startPos, Vector3 initialVelocity, float damping, out int stepCount, out bool didLand, float gravityFreeDuration = 0f, int stepLimit = 0)
         {
             EnsurePredictionClone();
             // Keeps the isolated physics scene's geometry matching the live scene before this
             // frame's simulation - active-state flips (launch buttons), moves, resizes,
-            // rotations all land here. See SyncPredictionGeometry's own comment.
-            SyncPredictionGeometry();
+            // rotations all land here. Once per FRAME (see the perf caches) - every prediction
+            // in the same frame sees identical geometry anyway.
+            if (predictionSyncFrame != Time.frameCount)
+            {
+                SyncPredictionGeometry();
+                predictionSyncFrame = Time.frameCount;
+            }
 
             // Damping now varies by charge level (see the Launch Force header comment) - set
             // fresh every call to match whatever shot is currently being aimed, rather than the
@@ -2745,8 +2909,12 @@ namespace KineticEnergy.Player
             // The stuck surface's normal always points away from whatever the cube is stuck to,
             // so it's the correct clearance direction in every orientation; world-up remains the
             // un-stuck fallback (grounded standing, mid-air) where it was already correct.
+            // Same start point within one frame -> the depenetrated spawn is identical, and
+            // recomputing it per prediction was a real cost with the Automatic solver's many
+            // predictions per frame.
+            bool spawnCached = spawnCacheFrame == Time.frameCount && spawnCacheStart == startPos;
             Vector3 clearanceDir = isStuck && stuckSurfaceNormal.sqrMagnitude > 0.0001f ? stuckSurfaceNormal : Vector3.up;
-            Vector3 spawnPos = startPos + clearanceDir * 0.15f;
+            Vector3 spawnPos = spawnCached ? spawnCacheResult : startPos + clearanceDir * 0.15f;
 
             // Depenetrate the spawn point from the static geometry: aiming while pressed up
             // against a wall - e.g. falling down its face right after a non-sticky cling
@@ -2755,7 +2923,7 @@ namespace KineticEnergy.Player
             // nothing (direct bug report). ComputePenetration is purely geometric, so it works
             // across the physics-scene boundary; the proxies are almost all BoxColliders, which
             // it fully supports (a non-convex MeshCollider just returns false and is skipped).
-            if (predictionCloneCollider != null)
+            if (!spawnCached && predictionCloneCollider != null)
             {
                 // Inflated by a skin for the pass: merely TOUCHING a wall (the ~1cm of gap left
                 // while sliding down a face after a cling released) is not penetration, so the
@@ -2786,6 +2954,13 @@ namespace KineticEnergy.Player
                 predictionCloneCollider.size = originalCloneSize;
             }
 
+            if (!spawnCached)
+            {
+                spawnCacheFrame = Time.frameCount;
+                spawnCacheStart = startPos;
+                spawnCacheResult = spawnPos;
+            }
+
             predictionStopper?.ClearContact();
             predictionRb.position = spawnPos;
             predictionRb.rotation = transform.rotation;
@@ -2800,7 +2975,8 @@ namespace KineticEnergy.Player
             stepCount = 0;
             didLand = false;
 
-            for (int i = 0; i < maxPredictionSteps; i++)
+            int stepBudget = stepLimit > 0 ? Mathf.Min(stepLimit, maxPredictionSteps) : maxPredictionSteps;
+            for (int i = 0; i < stepBudget; i++)
             {
                 // Same continuous per-tick override the real cube uses while a Defy Gravity
                 // flight is still forcing its velocity (see FixedUpdate) - applied BEFORE this
