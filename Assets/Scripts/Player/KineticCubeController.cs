@@ -402,6 +402,14 @@ namespace KineticEnergy.Player
         // fastPacedFlightTimeScale.
         public float launchFlightTimeScale = 2f;
 
+        [Header("FastPacedLevel Tweaks")]
+        // Scene-scoped (FastPacedLevel only, direct request): no midair nudging at all - a
+        // launch flies exactly as fired.
+        public bool disableAirNudge = false;
+        // Scene-scoped: EITHER stick aims. The left stick is free once nudging is off, so
+        // whenever the right stick is idle the left one drives the camera (= the aim) instead.
+        public bool aimWithEitherStick = false;
+
         [Header("Stick Aim Scheme")]
         // Right Bumper - shows/hides the landing-preview trail, for every scheme, and does NOT
         // switch the control scheme anymore (direct request - see HandleTrailToggle and
@@ -552,6 +560,16 @@ namespace KineticEnergy.Player
         // movement direction while walking (StickAim only - see its FixedUpdate).
         public ControlScheme CurrentScheme => controlScheme;
 
+        // Read-only state for companion components (OutOfEnergyRestart) - no behavior of their
+        // own, just visibility into what the controller already tracks.
+        public float EnergyFraction => energyFraction;
+        public bool IsStuck => isStuck;
+        public bool IsGrounded => isGrounded;
+        // Any aim/charge state - all of them deliberately hold velocity at zero, so a
+        // stranded-check based on "not moving" has to exclude them (see OutOfEnergyRestart).
+        public bool IsAimingOrCharging => isAiming || fastPacedAiming || fastPacedCharging || mixedAirAiming
+            || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None;
+
         // Editor-script-only setter (controlScheme itself stays private/encapsulated, only ever
         // changed internally by SwitchToScheme/HandlePreviewModeSwitch at runtime) - needed
         // so KineticEnergySetup can explicitly (re)assign the default scheme on every run, the
@@ -607,7 +625,9 @@ namespace KineticEnergy.Player
             // SetAimStickOverride) - the same stick must not simultaneously nudge the flight.
             && !(mixedFastPacedAir && fastPacedAiming)
             // A hybrid fast-paced launch flies the predicted line EXACTLY - see the flag's own comment.
-            && !fastPacedFlightExact;
+            && !fastPacedFlightExact
+            // FastPacedLevel: nudging disabled outright - see the field's own comment.
+            && !disableAirNudge;
 
         bool launchQueued;
         Vector3 queuedDirection;
@@ -891,6 +911,22 @@ namespace KineticEnergy.Player
                 {
                     aimStick = Vector2.zero;
                 }
+                // FastPacedLevel: either stick aims (direct request) - with the right stick
+                // idle, the left one (free, since nudging is off there) drives the camera,
+                // which IS the aim in that scheme. Gamepad only; the mouse keeps its own path.
+                if (aimWithEitherStick && !aimWithMoveStick && moveIsGamepadDriven
+                    && GamepadLookValue().sqrMagnitude < aimDeadzone * aimDeadzone)
+                {
+                    Vector2 leftStick = moveAction != null && moveAction.action != null
+                        ? moveAction.action.ReadValue<Vector2>()
+                        : Vector2.zero;
+                    if (leftStick.sqrMagnitude > aimDeadzone * aimDeadzone)
+                    {
+                        aimWithMoveStick = true;
+                        aimStick = leftStick;
+                    }
+                }
+
                 cameraOrbit.SetAimStickOverride(aimWithMoveStick, aimStick);
 
                 // While the mouse is steering the grounded aim, it must not ALSO orbit the

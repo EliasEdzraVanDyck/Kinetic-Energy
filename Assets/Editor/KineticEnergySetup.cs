@@ -3589,6 +3589,30 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: energy regulation build menus setup complete OK");
         }
 
+        // Adds the stranded-player restart countdown to FastPacedLevel (direct request) - a
+        // per-instance component on that scene's Player only. In-place: nothing else in the
+        // scene is touched, and no other scene changes.
+        [MenuItem("Tools/Kinetic Energy/Setup FastPacedLevel Restart Countdown")]
+        public static void SetupFastPacedRestartCountdown()
+        {
+            EditorSceneManager.OpenScene(FastPacedLevelScenePath, OpenSceneMode.Single);
+
+            KineticCubeController controller = FindPlayerController(FastPacedLevelScenePath);
+            OutOfEnergyRestart restart = controller.GetComponent<OutOfEnergyRestart>();
+            if (restart == null) restart = controller.gameObject.AddComponent<OutOfEnergyRestart>();
+            restart.restartDelay = 3f;
+            EditorUtility.SetDirty(restart);
+
+            // Scene-scoped control tweaks (direct request) - no midair nudging, and either
+            // stick aims.
+            controller.disableAirNudge = true;
+            controller.aimWithEitherStick = true;
+            EditorUtility.SetDirty(controller);
+
+            SaveActiveScene();
+            Debug.Log("KineticEnergySetup: FastPacedLevel player setup complete OK");
+        }
+
         static void ConfigurePauseMenuForBuild(string scenePath, (string label, string sceneName)[] buildScenes, string finishNextScene)
         {
             Font font = FindBestFont();
