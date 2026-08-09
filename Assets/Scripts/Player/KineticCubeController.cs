@@ -100,7 +100,7 @@ namespace KineticEnergy.Player
         // see hasUsedForwardLaunch/hasUsedUpLaunch). When on, the player may hold LT once more
         // while airborne to aim and fire a second launch; the allowance resets only when the cube
         // genuinely lands (the same debounced re-arm that clears hasLaunched).
-        public bool allowMidairRelaunch = true;
+        public bool allowMidairRelaunch = false;
         // Aiming from the ground works because the cube is already sitting still. Midair it would
         // keep falling (and keep accelerating) for the whole time LT is held, which makes both the
         // aim and the landing preview meaningless by the time RT is pressed - the preview is
@@ -152,9 +152,10 @@ namespace KineticEnergy.Player
         public bool alternateSchemesEnabled = false;
 
         [Header("Stick Aim Scheme")]
-        // RB toggles directly between LaunchInstantly and StickAim - always reachable regardless
-        // of alternateSchemesEnabled above, since both of these two specifically need to stay
-        // switchable during play, unlike Hold-Release/Analog.
+        // StickAim kept in the project but not reachable while this is false - the RB toggle in
+        // HandleSchemeSwitch is gated on it, and no controls text mentions the scheme while it's
+        // off. Same disable-without-deleting pattern as alternateSchemesEnabled above.
+        public bool stickAimSchemeEnabled = false;
         public InputActionReference switchSchemeAction;
         // Same "much faster / launch further despite stronger gravity" re-tuning as the Launch
         // Force header above, since scaled back down 20% per direct feedback that it launched
@@ -689,15 +690,15 @@ namespace KineticEnergy.Player
                       "Switch Scheme: Right Bumper\n" +
                       "Pause: Start / Options / Esc"
 
-                    : 
-                      
+                    :
+
                       "Move (on the ground): Left Stick\n" +
                       "Nudge (in the air): Left Stick\n" +
-                      "Aim: Left Trigger (hold; once on the ground, once more in the air)\n" +
+                      "Aim: Left Trigger (hold)\n" +
                       "Adjust Aim: Left Stick (while aiming)\n" +
                       "Launch: Right Trigger\n" +
                       "Camera: Right Stick\n" +
-                      "Switch Scheme: Right Bumper\n" +
+                      (stickAimSchemeEnabled ? "Switch Scheme: Right Bumper\n" : "") +
                       "Pause: Start / Options / Esc";
             }
 
@@ -716,23 +717,26 @@ namespace KineticEnergy.Player
                       "Start / Options / Esc - Pause"
                     : "Left Stick - Move (on the ground, while not aiming)\n" +
                       "Left Stick (in the air) - Nudge distance / drift sideways\n" +
-                      "Left Trigger - Aim (hold; the cube stays put). Once from the ground, then\n" +
-                      "  once more in mid-air - the cube hangs in place while you line it up.\n" +
+                      "Left Trigger - Aim (hold; the cube stays put)\n" +
+                      (allowMidairRelaunch
+                          ? "  Once from the ground, then once more in mid-air - the cube hangs in\n" +
+                            "  place while you line it up.\n"
+                          : "  One launch per flight - land before you can aim again.\n") +
                       "Left Stick (while aiming) - Adjust aim direction\n" +
                       "Right Trigger - Launch\n" +
                       "South - Show/hide the landing preview\n" +
                       "Right Stick - Camera\n" +
-                      "Right Bumper - Switch to the Stick Aim scheme\n" +
-                      "Start / Options / Esc - Pause" +
-                      (alternateSchemesEnabled ? "" : "\n\n(Hold-Release and Analog launch schemes are still in the project, just disabled)");
+                      (stickAimSchemeEnabled ? "Right Bumper - Switch to the Stick Aim scheme\n" : "") +
+                      "Start / Options / Esc - Pause";
             }
         }
 
-        // RB always toggles between exactly these two schemes, regardless of which one is
-        // currently active or of alternateSchemesEnabled (that flag only governs whether
-        // West/North/East can reach Hold-Release/Analog - it has no bearing on this toggle).
+        // RB toggles between exactly these two schemes - but only while stickAimSchemeEnabled is
+        // true (alternateSchemesEnabled has no bearing on this toggle; it only governs whether
+        // West/North/East can reach Hold-Release/Analog).
         void HandleSchemeSwitch()
         {
+            if (!stickAimSchemeEnabled) return;
             if (switchSchemeAction == null || switchSchemeAction.action == null || !switchSchemeAction.action.WasPressedThisFrame()) return;
 
             controlScheme = controlScheme == ControlScheme.StickAim ? ControlScheme.LaunchInstantly : ControlScheme.StickAim;
