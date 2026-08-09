@@ -95,6 +95,20 @@ namespace KineticEnergy.Player
         public Text controlsHintLabel;
         public Text controlsPanelBody;
 
+        [Header("Midair Relaunch")]
+        // Charge-based schemes only (StickAim already has its own one-per-flight LT/RT limiters -
+        // see hasUsedForwardLaunch/hasUsedUpLaunch). When on, the player may hold LT once more
+        // while airborne to aim and fire a second launch; the allowance resets only when the cube
+        // genuinely lands (the same debounced re-arm that clears hasLaunched).
+        public bool allowMidairRelaunch = true;
+        // Aiming from the ground works because the cube is already sitting still. Midair it would
+        // keep falling (and keep accelerating) for the whole time LT is held, which makes both the
+        // aim and the landing preview meaningless by the time RT is pressed - the preview is
+        // computed from the CURRENT position/velocity every frame. Holding the cube frozen in
+        // place for the duration of the aim keeps the previewed trajectory the one you actually
+        // get, and reads as a deliberate "hang time to line up the second shot" beat.
+        public bool freezeWhileAimingMidair = true;
+
         [Header("Fall Reset")]
         public float fallResetY = -30f;
 
@@ -219,6 +233,13 @@ namespace KineticEnergy.Player
         // ltAllowed for the actual gating logic (grounded from rest, OR airborne specifically as
         // a follow-up to an already-used forward launch).
         bool hasUsedUpLaunch;
+        // Charge-scheme equivalent of the two flags above: the single midair re-aim/relaunch is
+        // spent for this flight. Reset in the exact same "genuinely landed" block, so it can never
+        // re-arm at a shot's apex the way a plain isGrounded check could.
+        bool hasUsedMidairLaunch;
+        // True only while an aim that STARTED airborne is in progress - remembers that gravity was
+        // switched off by AimHold so every exit path (fire, cancel, scheme switch) restores it.
+        bool aimingMidair;
 
         Vector3[] trajectoryBuffer;
 
@@ -311,17 +332,32 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // Only one launch allowed per landing (hasLaunched), AND launching only ever starts
-            // from a currently-grounded state (isGrounded, the same real-time raycast check
-            // FixedUpdate uses) - checking both directly here, rather than trusting hasLaunched
-            // alone to have been reset at the right moment, is what actually guarantees you can
-            // never begin aiming/firing while airborne.
-            bool ltHeld = !hasLaunched && isGrounded && launchAction != null && launchAction.action != null && launchAction.action.IsPressed();
+            // Two ways to be allowed to aim, and no third:
+            //  - Grounded and not yet launched: the normal first shot of a flight. Still checks
+            //    isGrounded directly (the same real-time BoxCast FixedUpdate does) rather than
+            //    trusting hasLaunched to have been cleared at the right moment.
+            //  - Already launched and still airborne: the single midair re-aim. Spent for the rest
+            //    of the flight the moment it fires (hasUsedMidairLaunch), and cleared only by the
+            //    debounced genuine-landing check in FixedUpdate - so it is strictly one extra
+            //    launch per landing, not a repeatable air-hop.
+            // Once an aim is underway, keep the same allowance for as long as LT stays held
+            // (isAiming): a grounded aim that drifts off an edge, or a midair aim that falls close
+            // enough to the ground for isGrounded's proximity band to trip, must not have its aim
+            // yanked away mid-hold.
+            bool canStartAim = (isGrounded && !hasLaunched)
+                || (allowMidairRelaunch && hasLaunched && !isGrounded && !hasUsedMidairLaunch);
+            bool ltPressed = launchAction != null && launchAction.action != null && launchAction.action.IsPressed();
+            bool ltHeld = (canStartAim || isAiming) && ltPressed;
 
-            // One-shot-per-hold: once a launch fires, LT must be fully released before it can gate another.
+            // One-shot-per-hold: once a launch fires, LT must be fully released before it can gate
+            // another. Deliberately checks the RAW button, not ltHeld - ltHeld is false for the
+            // moment right after firing while the cube is still grounded (canStartAim needs
+            // airborne to allow the midair aim), so clearing this on ltHeld would count a trigger
+            // that was never released as released, and a continuously-held LT would then flow
+            // straight into a midair aim the instant the cube left the ground.
             if (waitingForLtRelease)
             {
-                if (!ltHeld) waitingForLtRelease = false;
+                if (!ltPressed) waitingForLtRelease = false;
                 return;
             }
 
@@ -338,6 +374,11 @@ namespace KineticEnergy.Player
                     // already there).
                     rb.linearVelocity = Vector3.zero;
                     rb.angularVelocity = Vector3.zero;
+                    // Zeroing velocity is enough on the ground, but not in the air - gravity would
+                    // start rebuilding it again the very next physics step. See
+                    // freezeWhileAimingMidair.
+                    aimingMidair = !isGrounded;
+                    if (aimingMidair && freezeWhileAimingMidair) rb.useGravity = false;
                     SeedAimFromCamera();
                     aimArrow?.SetVisible(true);
                     landingPreview?.SetVisible(true);
@@ -431,10 +472,7 @@ namespace KineticEnergy.Player
                     // itself gets applied.
                     launchGraceTimer = launchGraceDuration;
 
-                    isAiming = false;
-                    chargeTime = 0f;
-                    aimArrow?.SetVisible(false);
-                    landingPreview?.SetVisible(false);
+                    EndAim(true);
                     waitingForLtRelease = true;
                 }
             }
@@ -467,11 +505,28 @@ namespace KineticEnergy.Player
                     waitingForLtRelease = true;
                 }
 
-                isAiming = false;
-                chargeTime = 0f;
-                aimArrow?.SetVisible(false);
-                landingPreview?.SetVisible(false);
+                EndAim(analogLaunch);
             }
+        }
+
+        // Single exit point for an aim, whether it ended by firing or by cancelling - the midair
+        // allowance and the gravity that freezeWhileAimingMidair switched off both have to be
+        // settled on EVERY path out (fire, plain LT release, scheme switch), and three copies of
+        // that bookkeeping is exactly how one of them ends up missing a line.
+        void EndAim(bool fired)
+        {
+            // Only a shot actually FIRED in the air spends the allowance. Cancelling a midair aim
+            // costs nothing but the hang time - the player is still falling and may line it up
+            // again on the way down.
+            if (fired && aimingMidair) hasUsedMidairLaunch = true;
+
+            if (aimingMidair && freezeWhileAimingMidair) rb.useGravity = true;
+            aimingMidair = false;
+
+            isAiming = false;
+            chargeTime = 0f;
+            aimArrow?.SetVisible(false);
+            landingPreview?.SetVisible(false);
         }
 
         void FixedUpdate()
@@ -525,6 +580,7 @@ namespace KineticEnergy.Player
                     hasLaunched = false;
                     hasUsedForwardLaunch = false;
                     hasUsedUpLaunch = false;
+                    hasUsedMidairLaunch = false;
                 }
             }
             else
@@ -637,7 +693,7 @@ namespace KineticEnergy.Player
                       
                       "Move (on the ground): Left Stick\n" +
                       "Nudge (in the air): Left Stick\n" +
-                      "Aim: Left Trigger (hold)\n" +
+                      "Aim: Left Trigger (hold; once on the ground, once more in the air)\n" +
                       "Adjust Aim: Left Stick (while aiming)\n" +
                       "Launch: Right Trigger\n" +
                       "Camera: Right Stick\n" +
@@ -660,7 +716,8 @@ namespace KineticEnergy.Player
                       "Start / Options / Esc - Pause"
                     : "Left Stick - Move (on the ground, while not aiming)\n" +
                       "Left Stick (in the air) - Nudge distance / drift sideways\n" +
-                      "Left Trigger - Aim (hold; the cube stays put)\n" +
+                      "Left Trigger - Aim (hold; the cube stays put). Once from the ground, then\n" +
+                      "  once more in mid-air - the cube hangs in place while you line it up.\n" +
                       "Left Stick (while aiming) - Adjust aim direction\n" +
                       "Right Trigger - Launch\n" +
                       "South - Show/hide the landing preview\n" +
@@ -684,13 +741,7 @@ namespace KineticEnergy.Player
             // normal LT release would do - once StickAim's own Update() branch takes over
             // (see the early return above), the ltHeld/isAiming branch below is never reached
             // again to do this itself, so isAiming would otherwise stay stuck true forever.
-            if (isAiming)
-            {
-                isAiming = false;
-                chargeTime = 0f;
-                aimArrow?.SetVisible(false);
-                landingPreview?.SetVisible(false);
-            }
+            if (isAiming) EndAim(false);
 
             UpdateSchemeLabel();
         }
