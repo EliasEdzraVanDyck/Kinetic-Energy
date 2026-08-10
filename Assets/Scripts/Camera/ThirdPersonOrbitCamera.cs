@@ -103,6 +103,11 @@ namespace KineticEnergy.Camera
         // the landing point MOVES (new target, changed energy), which is what stops the
         // violent whipping when a target jumps (direct request).
         public float framingTurnSpeed = 300f;
+        // How far the framed view may ever deviate from the actual AIM direction. Without this
+        // a steeply-up shot - which arcs over and lands BELOW you - swung the camera round to
+        // look down while you were aiming up (direct report). Inside the cap the cursor still
+        // centres normally; past it the view stays with the aim.
+        public float framingMaxDeviation = 45f;
 
         bool framingActive;
         Vector3 framingPoint;
@@ -379,9 +384,15 @@ namespace KineticEnergy.Camera
             if (firstPerson)
             {
                 Vector3 framingDir = framingPoint - transform.position;
-                Quaternion targetRotation = framingActive && framingDir.sqrMagnitude > 0.0001f
-                    ? Quaternion.LookRotation(framingDir, currentUp)
-                    : rotation;
+                Quaternion targetRotation = rotation;
+                if (framingActive && framingDir.sqrMagnitude > 0.0001f)
+                {
+                    // Toward the cursor, but never further than framingMaxDeviation off the
+                    // aim - so an up-aimed shot that lands behind/below you can't spin the
+                    // view downward.
+                    targetRotation = Quaternion.RotateTowards(rotation,
+                        Quaternion.LookRotation(framingDir, currentUp), framingMaxDeviation);
+                }
 
                 if (framingJustStarted)
                 {
