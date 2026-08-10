@@ -3598,9 +3598,10 @@ namespace KineticEnergy.EditorSetup
             EditorSceneManager.OpenScene(FastPacedLevelScenePath, OpenSceneMode.Single);
 
             KineticCubeController controller = FindPlayerController(FastPacedLevelScenePath);
+            // Component added if missing; its numbers are NOT (re)assigned - the user tunes
+            // them in the Inspector.
             OutOfEnergyRestart restart = controller.GetComponent<OutOfEnergyRestart>();
             if (restart == null) restart = controller.gameObject.AddComponent<OutOfEnergyRestart>();
-            restart.restartDelay = 3f;
             EditorUtility.SetDirty(restart);
 
             // Scene-scoped control tweaks (direct request) - no midair nudging, and either
@@ -3611,6 +3612,75 @@ namespace KineticEnergy.EditorSetup
 
             SaveActiveScene();
             Debug.Log("KineticEnergySetup: FastPacedLevel player setup complete OK");
+        }
+
+        // EnergyEconomy1 (direct request): the last-launch-based refund economy + the West
+        // midair down-launch on the Player, and the energy meter divided into 10 equal cells
+        // by white divider lines matching the meter's 3px border. All per-instance, in place -
+        // the shared PauseSystem prefab and every other scene stay untouched.
+        [MenuItem("Tools/Kinetic Energy/Setup EnergyEconomy1")]
+        public static void SetupEnergyEconomy1()
+        {
+            const string scenePath = "Assets/Scenes/EnergyEconomy/EnergyEconomy1.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+            {
+                throw new Exception($"KineticEnergySetup: scene missing - {scenePath}");
+            }
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            KineticCubeController controller = FindPlayerController(scenePath);
+            // WIRING flags only - NO numeric tunables are (re)assigned here anymore (direct
+            // request: "do not change any values in the editor, I set them how I want them") -
+            // groundPoundRefundMultiplier, groundPoundMinRefund and friends are the user's.
+            controller.lastLaunchRefundEconomy = true;
+            controller.westAirDownLaunch = true;
+            // Keyboard: Space = up-launch, E = ground pound (the shared flag the keyboard
+            // unions already key off).
+            controller.mouseAirControls = true;
+            EditorUtility.SetDirty(controller);
+
+            // The finish trigger came in broken from the scene copy - one FinishLineNextScene
+            // still pointed at the source scene's chain, another had an EMPTY scene name (a
+            // silent no-op). Both now return to the menu, which is in every build.
+            ReplaceWinWithNextScene("MainMenu");
+
+            // The meter's 10 divider cells: 9 white lines, 3px wide like the border, laid over
+            // the fill area (inset 3px on every side, so inner width = 320 - 6 = 314). Added
+            // as the container's LAST child so they render on top of both fill bars.
+            GameObject pauseSystem = FindByNameIncludingInactive("PauseSystem");
+            Transform meter = pauseSystem != null ? pauseSystem.transform.Find("PauseCanvas/EnergyMeter") : null;
+            if (meter == null)
+            {
+                throw new Exception($"KineticEnergySetup: no PauseCanvas/EnergyMeter in {scenePath}.");
+            }
+            DestroyChildIfExists(meter, "MeterDividers");
+
+            GameObject dividers = new GameObject("MeterDividers", typeof(RectTransform));
+            dividers.transform.SetParent(meter, false);
+            RectTransform dividersRt = dividers.GetComponent<RectTransform>();
+            dividersRt.anchorMin = Vector2.zero;
+            dividersRt.anchorMax = Vector2.one;
+            dividersRt.offsetMin = Vector2.zero;
+            dividersRt.offsetMax = Vector2.zero;
+
+            const float inset = 3f;        // meterOutlineThickness in BuildPauseSystem
+            const float meterWidth = 320f; // the meter container's fixed width
+            float innerWidth = meterWidth - inset * 2f;
+            for (int i = 1; i <= 9; i++)
+            {
+                GameObject line = new GameObject("Divider" + i, typeof(RectTransform));
+                line.transform.SetParent(dividers.transform, false);
+                RectTransform lineRt = line.GetComponent<RectTransform>();
+                lineRt.anchorMin = new Vector2(0f, 0f);
+                lineRt.anchorMax = new Vector2(0f, 1f);
+                lineRt.pivot = new Vector2(0.5f, 0.5f);
+                lineRt.sizeDelta = new Vector2(inset, -inset * 2f); // 3px wide, inset from top/bottom
+                lineRt.anchoredPosition = new Vector2(inset + innerWidth * i / 10f, 0f);
+                line.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.9f); // the Outline's own color
+            }
+
+            SaveActiveScene();
+            Debug.Log("KineticEnergySetup: EnergyEconomy1 setup complete OK");
         }
 
         static void ConfigurePauseMenuForBuild(string scenePath, (string label, string sceneName)[] buildScenes, string finishNextScene)

@@ -70,6 +70,30 @@ namespace KineticEnergy.Camera
             mouseLookSuppressed = suppressed;
         }
 
+        // EnergyEconomy1's straight-up/ground-pound charges: the camera keeps FULL speed while
+        // the game runs slow ("the camera should not be bound to the gamespeed" - direct
+        // request) - set per frame by KineticCubeController.
+        bool ignoreSlowMo;
+
+        public void SetIgnoreSlowMo(bool ignore)
+        {
+            ignoreSlowMo = ignore;
+        }
+
+        // While a launch is aimed MIDAIR the orbit frames the TRAJECTORY instead of the player
+        // (direct request: "the visual line should be in the middle of the screen") - the focus
+        // point becomes the line's midpoint outright, so the line is genuinely centered and the
+        // player simply falls out of frame on a long arc, which is the intent. Distance from
+        // the focus is unchanged. All transitions keep the ordinary SmoothDamp easing.
+        bool framingActive;
+        Vector3 framingPoint;
+
+        public void SetTrajectoryFraming(bool active, Vector3 worldPoint)
+        {
+            framingActive = active;
+            framingPoint = worldPoint;
+        }
+
         [Header("Fine Aim")]
         // "Slow down the speed of aiming if you make fine adjustments with your mouse or stick,
         // if you make wider less fine movements, the speed should be the same as now" (direct
@@ -260,7 +284,7 @@ namespace KineticEnergy.Camera
             // (plausible right after falling or hitting Restart) could snap yaw/pitch to a
             // garbage value in one frame, making the camera look broken/unresponsive afterward -
             // still a risk with unscaled time, so the clamp stays.
-            bool gameRunningSlow = Time.timeScale < 1f;
+            bool gameRunningSlow = Time.timeScale < 1f && !ignoreSlowMo;
             float dt = Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime) * (gameRunningSlow ? 0.5f : 1f);
 
             // Fine-aim scaling (see the Fine Aim header comment): a gentle input rotates at
@@ -315,13 +339,25 @@ namespace KineticEnergy.Camera
             // crashed platform's frame of reference, not the world's (see currentUp above).
             Quaternion rotation = tilt * Quaternion.Euler(pitch, yaw, 0f);
             Vector3 focusPoint = target.position + currentUp * height;
+
+            // Camera POSITION is never affected by framing - third person keeps its ordinary
+            // player-centred orbit, first person stays at the player. Framing only redirects
+            // where first person LOOKS (below).
             Vector3 desiredPosition = firstPerson ? focusPoint : focusPoint - rotation * Vector3.forward * distance;
 
             transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, positionSmoothTime);
 
             if (firstPerson)
             {
-                transform.rotation = rotation;
+                // Framing (see SetTrajectoryFraming): look AT the cursor at the end of the
+                // dotted line so it sits at screen centre, instead of along the raw launch
+                // direction - the arc drops under gravity, which is exactly why the cursor
+                // used to hang below centre. AimForward is built from pitch/yaw, NOT from
+                // this rotation, so the shot itself is unchanged.
+                Vector3 framingDir = framingPoint - transform.position;
+                transform.rotation = framingActive && framingDir.sqrMagnitude > 0.0001f
+                    ? Quaternion.LookRotation(framingDir, currentUp)
+                    : rotation;
             }
             else
             {

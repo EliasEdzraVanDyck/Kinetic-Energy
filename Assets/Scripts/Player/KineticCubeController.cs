@@ -99,6 +99,12 @@ namespace KineticEnergy.Player
         // happen - this guarantees every crash that reaches GainEnergyFromCrash refunds at least
         // this much regardless of how gentle it was.
         [Range(0f, 1f)] public float minEnergyGainPerCrash = 0.05f;
+        // Reserve floor (direct request): GROUNDED launches may never spend below this, and a
+        // crash refund never leaves you under it. MIDAIR is exempt - see SpendableEnergy - so
+        // an airborne launch can commit the entire tank. Enforced via EnergyChargeCeiling (a
+        // charge can't grow past what's spendable), QueueLaunch's deduction, and
+        // ClampEnergyFloor (the post-crash failsafe).
+        [Range(0f, 1f)] public float minEnergyReserve = 0.05f;
         // Yellow energy / blue charge-preview meter, top-right corner - wired by KineticEnergySetup.
         public EnergyMeterController energyMeter;
         // Multiplies Time.deltaTime in AccumulateCharge, so a second of real holding doesn't turn
@@ -184,6 +190,31 @@ namespace KineticEnergy.Player
         // needed to reach it + a small failsafe like 5%") - a slight overshoot beats clipping
         // the near edge.
         [Range(0f, 0.5f)] public float autoChargeFailsafe = 0.05f;
+
+        [Header("Energy Economy (EnergyEconomy1)")]
+        // Scene-scoped (EnergyEconomy1, direct request): crash refunds derive ONLY from the
+        // last launch's own spend - ground launch pays back exactly its cost, a midair launch
+        // pays spend * (1.01 + 0.01 * X) with X = full tank / spend (smaller launches earn a
+        // proportionally bigger bonus), and the West straight-down air launch pays a flat 1.2x.
+        public bool lastLaunchRefundEconomy = false;
+        // Scene-scoped: West starts a straight-down hold-to-charge MIDAIR ONLY - the South
+        // up-launch mirrored downward (hold to charge, release to fire, stick tilts it);
+        // grounded West stays inert.
+        public bool westAirDownLaunch = false;
+        // The ground pound's crash refund: spend * this (direct request - editor-tunable).
+        public float groundPoundRefundMultiplier = 1.2f;
+        // ... but never less than this fraction of the full tank (direct request: "at least
+        // 10% of the max energy").
+        public float groundPoundMinRefund = 0.1f;
+        // Straight-up / ground-pound charges fill this much faster than a regular grounded
+        // launch charge (direct request: 1.5x). Those charges also run on UNSCALED time, so
+        // this is a clean multiple of the grounded reference rate in both cases.
+        public float upDownChargeSpeedMultiplier = 1.5f;
+        // Midair-launch refund curve (direct request): refund = spend * (factor * X + 1), with
+        // X = spend / full tank - so the multiplier RISES with how much was committed (a 10%
+        // launch pays 1.3x at factor 3, a 50% launch 2.5x). Exposed so the slope is tunable
+        // without touching code; the reserve floor and the 100% cap bound it either way.
+        public float midairRefundSpendFactor = 3f;
 
         // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
         // punchier-feeling launch, but a faster exit speed alone would also fly further - linear
@@ -555,6 +586,9 @@ namespace KineticEnergy.Player
         // FastPaced refund can never fabricate energy a nearly-empty tank didn't really spend.
         // See fastPacedRefundMultiplier.
         float lastLaunchEnergySpent;
+        // Where/how the last launch fired - drives lastLaunchRefundEconomy's per-launch rules.
+        bool lastLaunchWasGrounded;
+        bool lastLaunchWasAirDown;
 
         // Read by KineticCubeControllerFreeMove to know whether it should instantly face
         // movement direction while walking (StickAim only - see its FixedUpdate).
@@ -684,6 +718,9 @@ namespace KineticEnergy.Player
 
         Vector3 lastPredictedLanding;
         bool hasPredictedLanding;
+        // Whether that prediction actually LANDED on something (as opposed to trailing off
+        // into open air) - the camera only frames a real landing spot, see framingAim.
+        bool hasValidPredictedLanding;
 
         GameObject predictionClone;
         Rigidbody predictionRb;
@@ -932,6 +969,22 @@ namespace KineticEnergy.Player
                 // While the mouse is steering the grounded aim, it must not ALSO orbit the
                 // camera - see groundedAimWithMouse's own comment.
                 cameraOrbit.SetMouseLookSuppressed(groundedAimWithMouse && isAiming);
+
+                // EnergyEconomy1's up/ground-pound charges: the camera keeps full speed
+                // through the bullet-time (direct request).
+                cameraOrbit.SetIgnoreSlowMo(westAirDownLaunch
+                    && (stickAimChargeType == StickAimChargeType.Up || stickAimChargeType == StickAimChargeType.Down));
+
+                // Center the cursor at the end of the dotted line while aiming MIDAIR (direct
+                // request). Scoped to the FIRST-PERSON aim only - every charge type keeps its
+                // camera behaviour completely untouched, which is what the earlier
+                // third-person meddling got wrong. In first person the view normally points
+                // along the launch DIRECTION, but the shot arcs under gravity, so the landing
+                // cursor hangs well below screen centre; the camera now aims at the cursor
+                // itself instead (rotation only - the launch direction still comes from
+                // pitch/yaw, so aiming is unaffected and there's no feedback loop).
+                bool framingAim = !isGrounded && hasValidPredictedLanding && (fastPacedAiming || fastPacedCharging);
+                cameraOrbit.SetTrajectoryFraming(framingAim, lastPredictedLanding);
             }
 
             // Yellow energy / blue charge-preview meter - updated unconditionally every frame
@@ -1153,6 +1206,7 @@ namespace KineticEnergy.Player
                 Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, previewDamping, out int stepCount, out bool didLand);
                 lastPredictedLanding = landingPoint;
                 hasPredictedLanding = true;
+                hasValidPredictedLanding = didLand;
 
                 if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
                 {
@@ -1275,6 +1329,20 @@ namespace KineticEnergy.Player
             }
             else if (mixedFastPacedAir)
             {
+                // EnergyEconomy1: West starts the straight-down hold-to-charge, MIDAIR ONLY
+                // (direct request - South's up-launch mirrored downward; the charge then runs
+                // through the ordinary stick-aim branch above until release fires it).
+                bool groundPoundPressed = (selectClassicSchemeAction != null && selectClassicSchemeAction.action != null
+                        && selectClassicSchemeAction.action.WasPressedThisFrame())
+                    // E on keyboard (direct request) - the release path already listens for E
+                    // via the same mouseAirControls flag.
+                    || (mouseAirControls && Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame);
+                if (westAirDownLaunch && energyFraction > 0f && CanStartNewLaunch() && groundPoundPressed)
+                {
+                    StartStickAimCharge(StickAimChargeType.Down);
+                    return;
+                }
+
                 // Tutorial2's air phase: the full FastPaced flow (RMB/LT aim in first person,
                 // LMB/RT charge, fire along the look direction) - see mixedFastPacedAir's own
                 // comment.
@@ -1433,6 +1501,7 @@ namespace KineticEnergy.Player
             {
                 launchesSinceGrounded = 0;
                 fastPacedFlightExact = false;
+                ClampEnergyFloor(); // landed with 5% or less -> topped back up to 5%
             }
 
             // A slam fired from ZERO clearance (already resting on the exact surface it's aimed
@@ -1712,7 +1781,13 @@ namespace KineticEnergy.Player
                 cameraOrbit?.SetUpVector(stuckSurfaceNormal);
             }
 
-            GainEnergyFromCrash(crashSpeed);
+            // Breakable crack panes never refund energy (direct request) - they exist to be
+            // smashed through, not farmed. A non-downward crash still stops/clings exactly as
+            // before; it just pays nothing.
+            if (surface == null || surface.GetComponentInParent<BreakableCrackWall>() == null)
+            {
+                GainEnergyFromCrash(crashSpeed);
+            }
         }
 
         // West/North/East pick the control scheme (see ControlScheme) rather than the visual
@@ -2212,7 +2287,7 @@ namespace KineticEnergy.Player
                     float required = Mathf.Clamp01(lastAutoSolvedCharge + autoChargeFailsafe);
                     // Meter AND launch intake CAP at what's stored (direct request) - the red
                     // bar sits at the current level and flags that the true need is higher.
-                    float affordable = energyCostPerFullCharge > 0f ? Mathf.Clamp01(energyFraction / energyCostPerFullCharge) : 1f;
+                    float affordable = energyCostPerFullCharge > 0f ? Mathf.Clamp01(SpendableEnergy() / energyCostPerFullCharge) : 1f;
                     chargeDisplayInsufficient = required > affordable + 0.0001f;
                     chargeTime = Mathf.Min(required, affordable) * maxChargeTime;
                     break;
@@ -2228,7 +2303,7 @@ namespace KineticEnergy.Player
             }
 
             // What actually fires: the dialed/required charge capped by what the tank can pay.
-            float fireFraction = Mathf.Min(ChargeFraction(), energyCostPerFullCharge > 0f ? energyFraction / energyCostPerFullCharge : 1f);
+            float fireFraction = Mathf.Min(ChargeFraction(), energyCostPerFullCharge > 0f ? SpendableEnergy() / energyCostPerFullCharge : 1f);
             float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, fireFraction);
             float damping = Mathf.Lerp(fastPacedMinDamping, fastPacedMaxDamping, fireFraction);
 
@@ -2237,6 +2312,7 @@ namespace KineticEnergy.Player
             Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, damping, out int stepCount, out bool didLand);
             lastPredictedLanding = landingPoint;
             hasPredictedLanding = true;
+            hasValidPredictedLanding = didLand;
             if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
             {
                 landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand, lastPredictedLandingNormal);
@@ -2407,7 +2483,20 @@ namespace KineticEnergy.Player
                     _ => fireAction != null && fireAction.action != null && fireAction.action.WasReleasedThisFrame(),
                 };
 
-                AccumulateCharge();
+                // EnergyEconomy1 (westAirDownLaunch is that scene's marker): the straight-up
+                // and ground-pound charges fill in REAL time - "the energy meter should not be
+                // bound to the gamespeed" while charging them (direct request). Every other
+                // charge keeps breathing with the bullet-time as before.
+                if (westAirDownLaunch && (stickAimChargeType == StickAimChargeType.Up || stickAimChargeType == StickAimChargeType.Down))
+                {
+                    chargeTime = Mathf.Min(
+                        chargeTime + Time.unscaledDeltaTime * chargeAccumulationRate * upDownChargeSpeedMultiplier,
+                        maxChargeTime, EnergyChargeCeiling());
+                }
+                else
+                {
+                    AccumulateCharge();
+                }
                 Vector3 dir;
                 if (stickHeld)
                 {
@@ -2453,6 +2542,7 @@ namespace KineticEnergy.Player
                 Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, previewDamping, out int stepCount, out bool didLand);
                 lastPredictedLanding = landingPoint;
                 hasPredictedLanding = true;
+                hasValidPredictedLanding = didLand;
 
                 if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
                 {
@@ -2462,7 +2552,14 @@ namespace KineticEnergy.Player
                 if (releasedNow)
                 {
                     QueueLaunch(dir, previewForce, previewDamping);
-                    RecenterCameraForStickAimLaunch(dir);
+                    // The West air-down launch's flat 1.2x refund keys off this (economy
+                    // scenes) - checked AFTER QueueLaunch, which resets it.
+                    if (stickAimChargeType == StickAimChargeType.Down && !isGrounded) lastLaunchWasAirDown = true;
+                    // Only a FORWARD launch swings the camera back behind the player - an
+                    // up/down launch leaves it exactly where you left it (direct request).
+                    // Those fire dead vertical now anyway, so there is no new horizontal
+                    // heading to swing to; recentering just yanked the view for nothing.
+                    if (stickAimChargeType == StickAimChargeType.Forward) RecenterCameraForStickAimLaunch(dir);
 
                     stickAimChargeType = StickAimChargeType.None;
                     chargeTime = 0f;
@@ -2523,13 +2620,14 @@ namespace KineticEnergy.Player
             switch (type)
             {
                 case StickAimChargeType.Up:
-                    return stickHeld ? TiltedDirection(stickDirection, stickAimUpAngle) : Vector3.up;
+                    // ALWAYS straight up (direct request - the stick-tilted 80-degree variant
+                    // is retired; stickAimUpAngle stays as a field for the serialized scenes
+                    // but is no longer read here).
+                    return Vector3.up;
                 case StickAimChargeType.Down:
-                    // Negative angle reuses TiltedDirection unchanged - cos is even (same
-                    // magnitude either sign) and sin flips sign, so this mirrors the tilt
-                    // downward through horizontal instead of duplicating the method for one sign
-                    // flip.
-                    return stickHeld ? TiltedDirection(stickDirection, -stickAimDownAngle) : Vector3.down;
+                    // ALWAYS straight down, same request - the ground pound and every other
+                    // down-launch fire dead vertical regardless of the stick.
+                    return Vector3.down;
                 default: // Forward
                     // A shallower, separate angle when the stick is centered (toward facing)
                     // than when it's actually held (toward the stick) - see
@@ -2596,6 +2694,7 @@ namespace KineticEnergy.Player
                 Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, defyGravityFallDamping, out int stepCount, out bool didLand, flightDuration);
                 lastPredictedLanding = landingPoint;
                 hasPredictedLanding = true;
+                hasValidPredictedLanding = didLand;
 
                 if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
                 {
@@ -2758,6 +2857,7 @@ namespace KineticEnergy.Player
             Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, previewDamping, out int stepCount, out bool didLand);
             lastPredictedLanding = landingPoint;
             hasPredictedLanding = true;
+            hasValidPredictedLanding = didLand;
 
             if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
             {
@@ -2795,6 +2895,8 @@ namespace KineticEnergy.Player
             fastPacedFlightExact = false; // re-armed by the hybrid fire path right after this call
             aimButtonSpent = true;        // a held aim button does nothing further until released
             positioningAimUsedThisFlight = false; // the new flight gets its checkpoint again
+            lastLaunchWasGrounded = isGrounded;   // ground vs midair origin, for the refund economy
+            lastLaunchWasAirDown = false;         // re-set by the West down-launch's own fire path
             currentFlightIsDownward = Vector3.Dot(direction.normalized, Vector3.down) >= slamDownwardThreshold;
             // Every launch spends the charge fraction it took to build, straight out of the
             // shared energy tank - "no more time/energy/speed can be added... when you reach the
@@ -2803,8 +2905,11 @@ namespace KineticEnergy.Player
             // Remembered as the amount ACTUALLY deducted (the Min with what's available), not the
             // raw ChargeFraction cost - feeds the FastPaced crash refund, see
             // fastPacedRefundMultiplier's own comment.
-            lastLaunchEnergySpent = Mathf.Min(energyFraction, ChargeFraction() * energyCostPerFullCharge);
+            lastLaunchEnergySpent = Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge);
             energyFraction = Mathf.Clamp01(energyFraction - lastLaunchEnergySpent);
+            // No failsafe at launch time, in either state (direct request: the 5% failsafe
+            // applies only ONCE YOU LAND) - a launch may leave the tank as empty as the
+            // player committed it to be.
             // Armed here already (not just when FixedUpdate actually applies the impulse) so
             // AllowGroundedMovement/AllowAirborneNudge are already correct the instant firing is
             // decided - closes a script-execution-order edge case where
@@ -3225,7 +3330,24 @@ namespace KineticEnergy.Player
 
         float EnergyChargeCeiling()
         {
-            return energyCostPerFullCharge > 0f ? (energyFraction / energyCostPerFullCharge) * maxChargeTime : maxChargeTime;
+            return energyCostPerFullCharge > 0f ? (SpendableEnergy() / energyCostPerFullCharge) * maxChargeTime : maxChargeTime;
+        }
+
+        // What may actually be spent. MIDAIR: the whole tank - no reserve at all (direct
+        // request), so a save-throw launch can dump everything. GROUNDED: the reserve holds,
+        // so you can never strand yourself while standing still.
+        float SpendableEnergy()
+        {
+            return isGrounded ? Mathf.Max(energyFraction - minEnergyReserve, 0f) : energyFraction;
+        }
+
+        // The failsafe: ON LANDING ONLY (direct request) - land with 5% or less and the tank
+        // is topped back up to 5%, so you can never end a flight stranded. Called from the
+        // crash path and from the grounded check in FixedUpdate (which covers landings that
+        // never register as a crash, e.g. simply walking back onto solid ground).
+        void ClampEnergyFloor()
+        {
+            if (energyFraction < minEnergyReserve) energyFraction = minEnergyReserve;
         }
 
         // "You gain energy depending on the speed you used to crash onto it, it should be more
@@ -3236,6 +3358,36 @@ namespace KineticEnergy.Player
         // the multiplier itself grows with speed.
         void GainEnergyFromCrash(float crashSpeed)
         {
+            // EnergyEconomy1 (direct request): the refund derives ONLY from the last launch's
+            // own spend, by its type - no speed term, no minimum floor:
+            //   ground launch          -> exactly what it cost (a wash);
+            //   midair launch          -> spend * (1.01 + 0.01 * X), X = full tank / spend, so
+            //                             smaller launches earn a bigger multiplier (X capped
+            //                             at 100 so a near-zero tap can't mint energy);
+            //   West air-down launch   -> flat 1.2x.
+            if (lastLaunchRefundEconomy)
+            {
+                float economyGain;
+                if (lastLaunchWasAirDown)
+                {
+                    economyGain = Mathf.Max(lastLaunchEnergySpent * groundPoundRefundMultiplier, groundPoundMinRefund);
+                }
+                else if (lastLaunchWasGrounded)
+                {
+                    economyGain = lastLaunchEnergySpent;
+                }
+                else
+                {
+                    // X = energy used / max energy (the tank is the 0-1 fraction itself, so X
+                    // IS the spend), refund = spend * (X * factor + 1) - see the field.
+                    float x = lastLaunchEnergySpent;
+                    economyGain = lastLaunchEnergySpent * (x * midairRefundSpendFactor + 1f);
+                }
+                energyFraction = Mathf.Clamp01(energyFraction + economyGain);
+                ClampEnergyFloor();
+                return;
+            }
+
             // FastPaced replaces the speed-based formula outright: refund exactly what the launch
             // spent, times fastPacedRefundMultiplier (direct request - see the field's own
             // comment). The minEnergyGainPerCrash floor (itself a direct request from earlier)
@@ -3246,6 +3398,7 @@ namespace KineticEnergy.Player
                 : crashSpeed * energyGainPerSpeed * (1f + crashSpeed * energyGainSpeedBonus);
             gained = Mathf.Max(gained, minEnergyGainPerCrash);
             energyFraction = Mathf.Clamp01(energyFraction + gained);
+            ClampEnergyFloor();
         }
 
         Vector3 AimDirection()
