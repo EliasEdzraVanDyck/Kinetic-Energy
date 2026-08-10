@@ -975,14 +975,10 @@ namespace KineticEnergy.Player
                 cameraOrbit.SetIgnoreSlowMo(westAirDownLaunch
                     && (stickAimChargeType == StickAimChargeType.Up || stickAimChargeType == StickAimChargeType.Down));
 
-                // Center the cursor at the end of the dotted line while aiming MIDAIR (direct
-                // request). Scoped to the FIRST-PERSON aim only - every charge type keeps its
-                // camera behaviour completely untouched, which is what the earlier
-                // third-person meddling got wrong. In first person the view normally points
-                // along the launch DIRECTION, but the shot arcs under gravity, so the landing
-                // cursor hangs well below screen centre; the camera now aims at the cursor
-                // itself instead (rotation only - the launch direction still comes from
-                // pitch/yaw, so aiming is unaffected and there's no feedback loop).
+                // First-person midair aim looks at the cursor at the end of the dotted line -
+                // instantly on aim start, eased as the landing point moves (direct request).
+                // Rotation only; the launch direction still comes from pitch/yaw, so there is
+                // no feedback loop between where the view points and where the shot lands.
                 bool framingAim = !isGrounded && hasValidPredictedLanding && (fastPacedAiming || fastPacedCharging);
                 cameraOrbit.SetTrajectoryFraming(framingAim, lastPredictedLanding);
             }
@@ -1417,12 +1413,14 @@ namespace KineticEnergy.Player
             // Defy Gravity charges frozen in place for their whole duration, not just their
             // opening frame - and, now, also what keeps a crashed/isStuck cube pinned exactly
             // where it crashed (direct request: "stop all movement and stick to that location").
-            if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || isStuck || fastPacedCharging || mixedAirAiming
-                // Automatic Energy: the WHOLE aim freezes (direct bug report - falling during
-                // the aim kept changing the solved requirement every frame, reading as energy
-                // building over time, and drifted the shot). Frozen, the required energy is a
-                // stable function of the aim point alone, and the launch matches the preview.
-                || (fastPacedAiming && energyControlMode == EnergyControlMode.Automatic))
+            // EVERY aim/charge state holds the cube still, the forward first-person aim
+            // included (direct request: aiming forward midair should be as slow as aiming
+            // downwards - the difference was never the timescale, both run at 0.75; the
+            // vertical charges froze velocity while this aim let you keep falling at full
+            // speed). Safe now that firing closes the aim and a held button can't reopen it -
+            // the old "don't freeze here" rule existed for when one hold spanned several shots.
+            if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None
+                || isStuck || fastPacedCharging || mixedAirAiming || fastPacedAiming)
             {
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;

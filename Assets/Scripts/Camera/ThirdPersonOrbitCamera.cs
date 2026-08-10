@@ -84,12 +84,33 @@ namespace KineticEnergy.Camera
         // (direct request: "the visual line should be in the middle of the screen") - the focus
         // point becomes the line's midpoint outright, so the line is genuinely centered and the
         // player simply falls out of frame on a long arc, which is the intent. Distance from
-        // the focus is unchanged. All transitions keep the ordinary SmoothDamp easing.
+        // First person sits at the centre of the player's FRONT FACE, pushed this far further
+        // along the view direction so the cube itself is never in shot (direct request,
+        // replacing the look-at-the-landing-point framing, which whipped around whenever the
+        // predicted landing jumped). The cube is 1 unit across, so 0.5 reaches its front face
+        // and the rest is clearance.
+        public float firstPersonForwardOffset = 0.75f;
+        // Position smoothing used for the frame(s) right after a first-person <-> third-person
+        // switch (direct request: the change should be near instant). Ordinary movement keeps
+        // positionSmoothTime; only the mode change uses this much snappier value.
+        public float modeSwitchSmoothTime = 0.02f;
+
+        bool modeSwitching;
+
+        // First-person aim looks AT the predicted landing point (the cursor at the end of the
+        // dotted line) rather than along the raw launch ray - the arc drops under gravity, so
+        // the two differ. Snapped into place the instant aiming starts, then eased whenever
+        // the landing point MOVES (new target, changed energy), which is what stops the
+        // violent whipping when a target jumps (direct request).
+        public float framingTurnSpeed = 300f;
+
         bool framingActive;
         Vector3 framingPoint;
+        bool framingJustStarted;
 
         public void SetTrajectoryFraming(bool active, Vector3 worldPoint)
         {
+            if (active && !framingActive) framingJustStarted = true;
             framingActive = active;
             framingPoint = worldPoint;
         }
@@ -152,6 +173,7 @@ namespace KineticEnergy.Camera
 
         public void SetFirstPersonMode(bool enabled)
         {
+            if (firstPerson != enabled) modeSwitching = true; // near-instant transition, see modeSwitchSmoothTime
             firstPerson = enabled;
             if (!enabled) SetAimZoom(0f);
         }
@@ -340,24 +362,40 @@ namespace KineticEnergy.Camera
             Quaternion rotation = tilt * Quaternion.Euler(pitch, yaw, 0f);
             Vector3 focusPoint = target.position + currentUp * height;
 
-            // Camera POSITION is never affected by framing - third person keeps its ordinary
-            // player-centred orbit, first person stays at the player. Framing only redirects
-            // where first person LOOKS (below).
-            Vector3 desiredPosition = firstPerson ? focusPoint : focusPoint - rotation * Vector3.forward * distance;
+            // First person: the player's own centre pushed forward past its front face - NOT
+            // the focus point, which carries the third-person `height` lift and was what put
+            // the first-person view up at a raised Y. Third person keeps its ordinary orbit.
+            Vector3 desiredPosition = firstPerson
+                ? target.position + rotation * Vector3.forward * firstPersonForwardOffset
+                : focusPoint - rotation * Vector3.forward * distance;
 
-            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, positionSmoothTime);
+            // A mode switch uses the much shorter smooth time until the camera has essentially
+            // arrived - so first <-> third person reads as a snap without the hard teleport
+            // (and without the leftover SmoothDamp velocity that a teleport would keep).
+            float smoothTime = modeSwitching ? modeSwitchSmoothTime : positionSmoothTime;
+            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, smoothTime);
+            if (modeSwitching && (transform.position - desiredPosition).sqrMagnitude < 0.0025f) modeSwitching = false;
 
             if (firstPerson)
             {
-                // Framing (see SetTrajectoryFraming): look AT the cursor at the end of the
-                // dotted line so it sits at screen centre, instead of along the raw launch
-                // direction - the arc drops under gravity, which is exactly why the cursor
-                // used to hang below centre. AimForward is built from pitch/yaw, NOT from
-                // this rotation, so the shot itself is unchanged.
                 Vector3 framingDir = framingPoint - transform.position;
-                transform.rotation = framingActive && framingDir.sqrMagnitude > 0.0001f
+                Quaternion targetRotation = framingActive && framingDir.sqrMagnitude > 0.0001f
                     ? Quaternion.LookRotation(framingDir, currentUp)
                     : rotation;
+
+                if (framingJustStarted)
+                {
+                    // Aiming just began - land on the cursor immediately.
+                    transform.rotation = targetRotation;
+                    framingJustStarted = false;
+                }
+                else
+                {
+                    // The landing point moved (retarget, energy change) - ease across at a
+                    // capped rate. Unscaled so it feels the same during the aim's bullet-time.
+                    transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation,
+                        framingTurnSpeed * Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
+                }
             }
             else
             {
