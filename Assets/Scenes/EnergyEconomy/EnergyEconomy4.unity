@@ -184,7 +184,7 @@ Transform:
   m_GameObject: {fileID: 13537149}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 19.9, z: 47.9}
+  m_LocalPosition: {x: 0, y: 16.1, z: 24.5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1992,7 +1992,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: groundPoundHopHeight
-      value: 0.1
+      value: 0.2
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: maxLaunchesPerFlight
@@ -2007,12 +2007,16 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
+      propertyPath: startingEnergyFraction
+      value: 0.3
+      objectReference: {fileID: 0}
+    - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: groundPoundBoostEconomy
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: groundPoundSlowDuration
-      value: 18.55
+      value: 0.5
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: lastLaunchRefundEconomy
@@ -2024,7 +2028,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: groundPoundBoostMultiplier
-      value: 10
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: groundPoundRefundMultiplier
@@ -3319,11 +3323,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6836527623815314695, guid: 4502cf5d42de4c545bc5bf8452570f94, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 26.5
+      value: 21.800001
       objectReference: {fileID: 0}
     - target: {fileID: 6836527623815314695, guid: 4502cf5d42de4c545bc5bf8452570f94, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 47.9
+      value: 24.5
       objectReference: {fileID: 0}
     - target: {fileID: 6836527623815314695, guid: 4502cf5d42de4c545bc5bf8452570f94, type: 3}
       propertyPath: m_LocalRotation.w

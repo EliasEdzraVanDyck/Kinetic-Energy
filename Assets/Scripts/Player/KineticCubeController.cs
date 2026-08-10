@@ -616,6 +616,10 @@ namespace KineticEnergy.Player
         // EnergyEconomy4's post-ground-pound window: slow-mo runs while this is >0, and a
         // midair aim started inside it starts fully charged.
         float groundPoundWindowTimer;
+        // True while an aim/charge that was OPENED inside the ground-pound window is still held -
+        // gravity stays off for its whole duration and comes back on release or launch
+        // (direct request, EnergyEconomy4 only).
+        bool groundPoundAimNoGravity;
 
         // Read by KineticCubeControllerFreeMove to know whether it should instantly face
         // movement direction while walking (StickAim only - see its FixedUpdate).
@@ -2192,6 +2196,12 @@ namespace KineticEnergy.Player
         // grounded-cancels-the-air-aim rule (see UpdateMixedScheme).
         void CancelFastPacedAim()
         {
+            if (groundPoundAimNoGravity)
+            {
+                groundPoundAimNoGravity = false;
+                groundPoundWindowTimer = 0f; // the window ends with the aim - no lingering freeze
+                rb.useGravity = true; // letting go of the aim ends the ground-pound gravity hold
+            }
             fastPacedAiming = false;
             fastPacedCharging = false;
             chargeTime = 0f;
@@ -2850,6 +2860,15 @@ namespace KineticEnergy.Player
             {
                 if (fastPacedAiming)
                 {
+                    // Same ground-pound release as CancelFastPacedAim - this direct exit path
+                    // must end the gravity hold and freeze window too, or the cube keeps
+                    // hovering after the aim is let go.
+                    if (groundPoundAimNoGravity)
+                    {
+                        groundPoundAimNoGravity = false;
+                        groundPoundWindowTimer = 0f;
+                        rb.useGravity = true;
+                    }
                     fastPacedAiming = false;
                     fastPacedCharging = false;
                     chargeTime = 0f;
@@ -2888,6 +2907,8 @@ namespace KineticEnergy.Player
                 if (groundPoundBoostEconomy && groundPoundWindowTimer > 0f)
                 {
                     chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
+                    groundPoundAimNoGravity = true;
+                    rb.useGravity = false;
                 }
             }
 
@@ -2914,9 +2935,16 @@ namespace KineticEnergy.Player
                 // Normally a fresh charge starts from zero - but inside EnergyEconomy4's
                 // post-ground-pound window it inherits the full tank instead (see above), so
                 // the instant charge isn't wiped the moment the launch button goes down.
-                chargeTime = groundPoundBoostEconomy && groundPoundWindowTimer > 0f
-                    ? Mathf.Min(maxChargeTime, EnergyChargeCeiling())
-                    : 0f;
+                if (groundPoundBoostEconomy && groundPoundWindowTimer > 0f)
+                {
+                    chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
+                    groundPoundAimNoGravity = true;
+                    rb.useGravity = false;
+                }
+                else
+                {
+                    chargeTime = 0f;
+                }
                 // Instant stop, same reasoning as every other scheme's charge-start - FixedUpdate
                 // keeps re-applying this for the whole charge (see fastPacedCharging's own use
                 // there), so the shot always fires from a dead stop with no drift to account for.
@@ -2972,6 +3000,12 @@ namespace KineticEnergy.Player
         // defyGravityDuration is >0 only for a Defy Gravity launch - see its own field comment.
         void QueueLaunch(Vector3 direction, float force, float damping, float defyGravityDuration = 0f)
         {
+            if (groundPoundAimNoGravity)
+            {
+                groundPoundAimNoGravity = false;
+                groundPoundWindowTimer = 0f; // the window ends with the launch too
+                rb.useGravity = true; // launching ends the ground-pound gravity hold
+            }
             queuedDirection = direction;
             queuedForce = force;
             queuedDamping = damping;
