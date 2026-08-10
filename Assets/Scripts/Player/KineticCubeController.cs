@@ -215,6 +215,24 @@ namespace KineticEnergy.Player
         // launch pays 1.3x at factor 3, a 50% launch 2.5x). Exposed so the slope is tunable
         // without touching code; the reserve floor and the 100% cap bound it either way.
         public float midairRefundSpendFactor = 3f;
+        // EnergyEconomy3 only (direct request): launches CHAIN within a flight - the speed you
+        // already carried is added on top of the new launch's impulse instead of being wiped
+        // by the aim freeze, and the refund is calculated from the TOTAL energy spent across
+        // every launch of that flight rather than just the last one. Both reset on landing.
+        public bool chainLaunchAccumulation = false;
+
+        [Header("Energy Economy 4")]
+        // EnergyEconomy4 only (direct request). Every launch refunds exactly what it cost (a
+        // wash) EXCEPT a dedicated-button ground pound, which pays back the flight's whole
+        // spend - the launch that got you airborne AND the pound itself - times
+        // groundPoundBoostMultiplier. The pound also bounces you free instead of sticking:
+        // a free hop of groundPoundHopHeight, then slow-mo at the midair-aim rate for
+        // groundPoundSlowDuration. Start a midair aim inside that window and its charge is set
+        // instantly to everything you currently have.
+        public bool groundPoundBoostEconomy = false;
+        public float groundPoundBoostMultiplier = 1.5f;
+        public float groundPoundHopHeight = 0.1f;
+        public float groundPoundSlowDuration = 0.3f;
 
         // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
         // punchier-feeling launch, but a faster exit speed alone would also fly further - linear
@@ -589,6 +607,15 @@ namespace KineticEnergy.Player
         // Where/how the last launch fired - drives lastLaunchRefundEconomy's per-launch rules.
         bool lastLaunchWasGrounded;
         bool lastLaunchWasAirDown;
+        // chainLaunchAccumulation state: the speed carried into the current aim (captured the
+        // instant the freeze engages, before it's zeroed) and the running total of energy
+        // spent since the last landing.
+        Vector3 carriedLaunchVelocity;
+        float flightEnergySpent;
+        bool wasFrozenLastTick;
+        // EnergyEconomy4's post-ground-pound window: slow-mo runs while this is >0, and a
+        // midair aim started inside it starts fully charged.
+        float groundPoundWindowTimer;
 
         // Read by KineticCubeControllerFreeMove to know whether it should instantly face
         // movement direction while walking (StickAim only - see its FixedUpdate).
@@ -875,6 +902,10 @@ namespace KineticEnergy.Player
             // aimButtonSpent's own comment.
             if (aimButtonSpent && !AimButtonHeld()) aimButtonSpent = false;
 
+            // EnergyEconomy4's post-ground-pound slow-mo window - real seconds, so the 0.3s
+            // isn't stretched by the slow-mo it is itself causing.
+            if (groundPoundWindowTimer > 0f) groundPoundWindowTimer -= Time.unscaledDeltaTime;
+
             if (transform.position.y < fallResetY)
             {
                 Time.timeScale = 1f;
@@ -1032,7 +1063,11 @@ namespace KineticEnergy.Player
             bool airborneAimSlow = !isGrounded && (isAiming || fastPacedAiming || mixedAirAiming || (AimButtonHeld() && !aimButtonSpent));
             bool charging = airborneAimSlow
                 || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None
-                || fastPacedCharging;
+                || fastPacedCharging
+                // EnergyEconomy4's post-ground-pound window holds the midair-aim slow-mo for
+                // its duration; starting an aim inside it just keeps the same rate going, and
+                // letting it lapse returns to normal speed.
+                || groundPoundWindowTimer > 0f;
             // Charging's bullet-time wins over the flight speed-up - starting a mid-air charge
             // freezes the cube anyway (the "flight" is suspended), so the slow-down is the state
             // that matches what's on screen. hasLaunched clears on crash (RegisterCrash), which
@@ -1419,12 +1454,21 @@ namespace KineticEnergy.Player
             // vertical charges froze velocity while this aim let you keep falling at full
             // speed). Safe now that firing closes the aim and a held button can't reopen it -
             // the old "don't freeze here" rule existed for when one hold spanned several shots.
-            if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None
-                || isStuck || fastPacedCharging || mixedAirAiming || fastPacedAiming)
+            bool frozenNow = isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None
+                || isStuck || fastPacedCharging || mixedAirAiming || fastPacedAiming
+                // EnergyEconomy4: the post-ground-pound slow-mo window also freezes the cube in
+                // place (direct request), so the free hop just hangs there until the window
+                // lapses or the player opens an aim.
+                || (groundPoundBoostEconomy && groundPoundWindowTimer > 0f);
+            if (frozenNow)
             {
+                // Capture the speed being frozen away on the FIRST frozen tick - that's what
+                // chainLaunchAccumulation adds back on top of the next launch (see the field).
+                if (!wasFrozenLastTick && !isStuck) carriedLaunchVelocity = rb.linearVelocity;
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
             }
+            wasFrozenLastTick = frozenNow;
 
             bool slamJustFired = false;
             float slamForce = 0f;
@@ -1436,6 +1480,10 @@ namespace KineticEnergy.Player
                 nonStickyReleaseTimer = 0f; // launching supersedes a pending timed release
                 rb.useGravity = true; // back on, undoing OnCollisionEnter's stick - direct request
                 rb.linearDamping = queuedDamping;
+                // Chained launches keep the speed they already had - the aim freeze zeroed it,
+                // so it's restored here and the new impulse adds on top (direct request,
+                // EnergyEconomy3). Every other scene fires from a dead stop as before.
+                if (chainLaunchAccumulation) rb.linearVelocity = carriedLaunchVelocity;
                 rb.AddForce(queuedDirection * queuedForce, ForceMode.Impulse);
                 launchGraceTimer = launchGraceDuration;
                 launchStartPosition = transform.position;
@@ -1499,6 +1547,8 @@ namespace KineticEnergy.Player
             {
                 launchesSinceGrounded = 0;
                 fastPacedFlightExact = false;
+                flightEnergySpent = 0f;               // chain reset on a plain landing too
+                carriedLaunchVelocity = Vector3.zero;
                 ClampEnergyFloor(); // landed with 5% or less -> topped back up to 5%
             }
 
@@ -1736,6 +1786,7 @@ namespace KineticEnergy.Player
             launchesSinceGrounded = 0;   // a crash is a landing - the per-flight launch budget resets
             mixedAirAiming = false;      // defensive - the freeze should prevent crashing mid-aim at all
             fastPacedFlightExact = false; // the exact-line flight ended in this crash
+            carriedLaunchVelocity = Vector3.zero; // the chain ends here - see chainLaunchAccumulation
 
             // "If you crash onto an object, aiming should be disabled until you pressed it
             // again" (direct request, all scenes/schemes): a crash closes any aim outright and
@@ -1785,6 +1836,33 @@ namespace KineticEnergy.Player
             if (surface == null || surface.GetComponentInParent<BreakableCrackWall>() == null)
             {
                 GainEnergyFromCrash(crashSpeed);
+            }
+
+            // Target spheres: the crash counts exactly like any other surface (energy included,
+            // handled above), then the sphere is destroyed. The cling timer is armed
+            // UNCONDITIONALLY here - whatever the contact normal or the scene's stick rules
+            // say, the surface is about to vanish, so hanging there permanently would be a
+            // soft-lock. Launch during the cling to carry on; otherwise you drop, same timing
+            // as any non-sticky wall.
+            // EnergyEconomy4's ground-pound bounce (direct request): instead of sticking, a
+            // free hop of groundPoundHopHeight (no energy cost), gravity back on, and a
+            // slow-mo window - during which starting a midair aim charges it to the hilt.
+            if (groundPoundBoostEconomy && lastLaunchWasAirDown)
+            {
+                transform.position += Vector3.up * groundPoundHopHeight;
+                isStuck = false;
+                nonStickyReleaseTimer = 0f;
+                rb.useGravity = true;
+                groundPoundWindowTimer = groundPoundSlowDuration;
+            }
+
+            flightEnergySpent = 0f; // the chained total is consumed by the refund above
+
+            LaunchTarget target = surface != null ? surface.GetComponentInParent<LaunchTarget>() : null;
+            if (target != null)
+            {
+                nonStickyReleaseTimer = nonStickyWallStickDuration;
+                target.Hit();
             }
         }
 
@@ -2805,6 +2883,12 @@ namespace KineticEnergy.Player
                     reverseChargingDown = false;
                     chargeDisplayInsufficient = false;
                 }
+                // EnergyEconomy4: an aim opened inside the post-ground-pound window starts
+                // fully charged - exactly the energy currently in the tank (direct request).
+                if (groundPoundBoostEconomy && groundPoundWindowTimer > 0f)
+                {
+                    chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
+                }
             }
 
             bool lmbPressed = fastPacedLaunchAction != null && fastPacedLaunchAction.action != null && fastPacedLaunchAction.action.WasPressedThisFrame();
@@ -2827,7 +2911,12 @@ namespace KineticEnergy.Player
                 if (!lmbPressed || energyFraction <= 0f || !CanStartNewLaunch()) return;
 
                 fastPacedCharging = true;
-                chargeTime = 0f;
+                // Normally a fresh charge starts from zero - but inside EnergyEconomy4's
+                // post-ground-pound window it inherits the full tank instead (see above), so
+                // the instant charge isn't wiped the moment the launch button goes down.
+                chargeTime = groundPoundBoostEconomy && groundPoundWindowTimer > 0f
+                    ? Mathf.Min(maxChargeTime, EnergyChargeCeiling())
+                    : 0f;
                 // Instant stop, same reasoning as every other scheme's charge-start - FixedUpdate
                 // keeps re-applying this for the whole charge (see fastPacedCharging's own use
                 // there), so the shot always fires from a dead stop with no drift to account for.
@@ -2905,6 +2994,7 @@ namespace KineticEnergy.Player
             // fastPacedRefundMultiplier's own comment.
             lastLaunchEnergySpent = Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge);
             energyFraction = Mathf.Clamp01(energyFraction - lastLaunchEnergySpent);
+            flightEnergySpent += lastLaunchEnergySpent; // running total for the chained refund
             // No failsafe at launch time, in either state (direct request: the 5% failsafe
             // applies only ONCE YOU LAND) - a launch may leave the tank as empty as the
             // player committed it to be.
@@ -3078,7 +3168,10 @@ namespace KineticEnergy.Player
                 foreach (PredictionGeometryProxy entry in geometryProxies)
                 {
                     if (entry.proxy == null || !entry.proxy.activeSelf) continue;
-                    Collider proxyCollider = entry.proxyBox != null ? (Collider)entry.proxyBox : entry.proxyMesh;
+                    Collider proxyCollider = entry.proxyBox != null ? (Collider)entry.proxyBox
+                        : entry.proxySphere != null ? entry.proxySphere
+                        : entry.proxyCapsule != null ? (Collider)entry.proxyCapsule
+                        : entry.proxyMesh;
                     if (proxyCollider == null) continue;
                     // Broad-phase: anything whose bounds sit clearly away from the spawn can't
                     // be overlapping it.
@@ -3250,6 +3343,18 @@ namespace KineticEnergy.Player
                     entry.proxyMesh = proxy.AddComponent<MeshCollider>();
                     entry.proxyMesh.convex = meshCol.convex;
                 }
+                else if (col is SphereCollider)
+                {
+                    // Spheres (the Target prefab) used to fall into the unhandled branch below,
+                    // so they never existed in the prediction scene at all and the dotted line
+                    // sailed straight through them (direct report).
+                    entry.proxySphere = proxy.AddComponent<SphereCollider>();
+                }
+                else if (col is CapsuleCollider sourceCapsuleCollider)
+                {
+                    entry.proxyCapsule = proxy.AddComponent<CapsuleCollider>();
+                    entry.proxyCapsule.direction = sourceCapsuleCollider.direction;
+                }
                 else
                 {
                     Debug.LogWarning($"KineticCubeController: unhandled collider type {col.GetType().Name} on {col.name} - not included in landing prediction geometry.");
@@ -3268,6 +3373,8 @@ namespace KineticEnergy.Player
             public GameObject proxy;
             public BoxCollider proxyBox;
             public MeshCollider proxyMesh;
+            public SphereCollider proxySphere;
+            public CapsuleCollider proxyCapsule;
         }
         readonly List<PredictionGeometryProxy> geometryProxies = new List<PredictionGeometryProxy>();
 
@@ -3303,6 +3410,18 @@ namespace KineticEnergy.Player
             else if (entry.proxyMesh != null && entry.source is MeshCollider sourceMesh)
             {
                 if (entry.proxyMesh.sharedMesh != sourceMesh.sharedMesh) entry.proxyMesh.sharedMesh = sourceMesh.sharedMesh;
+            }
+            else if (entry.proxySphere != null && entry.source is SphereCollider sourceSphere)
+            {
+                if (entry.proxySphere.center != sourceSphere.center) entry.proxySphere.center = sourceSphere.center;
+                if (entry.proxySphere.radius != sourceSphere.radius) entry.proxySphere.radius = sourceSphere.radius;
+            }
+            else if (entry.proxyCapsule != null && entry.source is CapsuleCollider sourceCapsule)
+            {
+                if (entry.proxyCapsule.center != sourceCapsule.center) entry.proxyCapsule.center = sourceCapsule.center;
+                if (entry.proxyCapsule.radius != sourceCapsule.radius) entry.proxyCapsule.radius = sourceCapsule.radius;
+                if (entry.proxyCapsule.height != sourceCapsule.height) entry.proxyCapsule.height = sourceCapsule.height;
+                if (entry.proxyCapsule.direction != sourceCapsule.direction) entry.proxyCapsule.direction = sourceCapsule.direction;
             }
 
             bool sourceSolid = entry.source.enabled && entry.source.gameObject.activeInHierarchy;
@@ -3363,23 +3482,37 @@ namespace KineticEnergy.Player
             //                             smaller launches earn a bigger multiplier (X capped
             //                             at 100 so a near-zero tap can't mint energy);
             //   West air-down launch   -> flat 1.2x.
+            // EnergyEconomy4: flat wash for everything, boosted for the ground pound - and the
+            // pound counts the WHOLE flight's spend (both launches), see the fields.
+            if (groundPoundBoostEconomy)
+            {
+                float flightSpend = flightEnergySpent > 0.0001f ? flightEnergySpent : lastLaunchEnergySpent;
+                energyFraction = Mathf.Clamp01(energyFraction
+                    + (lastLaunchWasAirDown ? flightSpend * groundPoundBoostMultiplier : flightSpend));
+                ClampEnergyFloor();
+                return;
+            }
+
             if (lastLaunchRefundEconomy)
             {
+                // chainLaunchAccumulation bases the refund on the TOTAL spent across the whole
+                // flight's chain of launches; otherwise it's the last launch alone.
+                float spend = chainLaunchAccumulation ? flightEnergySpent : lastLaunchEnergySpent;
                 float economyGain;
                 if (lastLaunchWasAirDown)
                 {
-                    economyGain = Mathf.Max(lastLaunchEnergySpent * groundPoundRefundMultiplier, groundPoundMinRefund);
+                    economyGain = Mathf.Max(spend * groundPoundRefundMultiplier, groundPoundMinRefund);
                 }
                 else if (lastLaunchWasGrounded)
                 {
-                    economyGain = lastLaunchEnergySpent;
+                    economyGain = spend;
                 }
                 else
                 {
                     // X = energy used / max energy (the tank is the 0-1 fraction itself, so X
                     // IS the spend), refund = spend * (X * factor + 1) - see the field.
-                    float x = lastLaunchEnergySpent;
-                    economyGain = lastLaunchEnergySpent * (x * midairRefundSpendFactor + 1f);
+                    float x = spend;
+                    economyGain = spend * (x * midairRefundSpendFactor + 1f);
                 }
                 energyFraction = Mathf.Clamp01(energyFraction + economyGain);
                 ClampEnergyFloor();

@@ -3683,6 +3683,87 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: EnergyEconomy1 setup complete OK");
         }
 
+        // Builds Assets/Prefabs/Target.prefab (direct request): a solid sphere that is
+        // destroyed when the player launches into it. The crash is an ordinary one - same
+        // energy rules as any platform - and you're left hanging where it was, free to launch
+        // again or drop after the usual wall-cling. Creates ONLY the prefab asset and its
+        // material; no scene is modified or saved.
+        [MenuItem("Tools/Kinetic Energy/Create Target Prefab")]
+        public static void CreateTargetPrefab()
+        {
+            Material targetMat = new Material(FindBestShader());
+            targetMat.color = new Color(0.95f, 0.35f, 0.15f);
+            targetMat = SaveMaterialAsset(targetMat, "TargetMaterial");
+
+            if (!AssetDatabase.IsValidFolder(PrefabFolder))
+            {
+                AssetDatabase.CreateFolder("Assets", "Prefabs");
+            }
+
+            GameObject root = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            try
+            {
+                root.name = "Target";
+                root.transform.localScale = Vector3.one * 2f;
+                root.GetComponent<Renderer>().sharedMaterial = targetMat;
+                // Solid, NOT a trigger - the player has to actually crash into it for the
+                // normal crash/energy handling to run.
+                root.GetComponent<SphereCollider>().isTrigger = false;
+                root.AddComponent<LaunchTarget>();
+                PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/Target.prefab");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+            }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: Target prefab created OK");
+        }
+
+        // EnergyEconomy3 (direct request): chained launches - the speed already carried is
+        // added to the next launch, and the crash refund is calculated from the TOTAL energy
+        // spent across the flight's launches. Wiring flag only; every tunable stays as set in
+        // the Inspector. No other scene is touched.
+        [MenuItem("Tools/Kinetic Energy/Setup EnergyEconomy3")]
+        public static void SetupEnergyEconomy3()
+        {
+            const string scenePath = "Assets/Scenes/EnergyEconomy/EnergyEconomy3.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+            {
+                throw new Exception($"KineticEnergySetup: scene missing - {scenePath}");
+            }
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            KineticCubeController controller = FindPlayerController(scenePath);
+            controller.chainLaunchAccumulation = true;
+            EditorUtility.SetDirty(controller);
+
+            SaveActiveScene();
+            Debug.Log("KineticEnergySetup: EnergyEconomy3 setup complete OK");
+        }
+
+        // EnergyEconomy4 (direct request): flat wash refunds, a boosted ground pound that pays
+        // back the whole flight's spend, and the pound's free hop + slow-mo window with its
+        // instant full charge. Wiring flag only - every tunable stays as set in the Inspector.
+        [MenuItem("Tools/Kinetic Energy/Setup EnergyEconomy4")]
+        public static void SetupEnergyEconomy4()
+        {
+            const string scenePath = "Assets/Scenes/EnergyEconomy/EnergyEconomy4.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+            {
+                throw new Exception($"KineticEnergySetup: scene missing - {scenePath}");
+            }
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            KineticCubeController controller = FindPlayerController(scenePath);
+            controller.groundPoundBoostEconomy = true;
+            EditorUtility.SetDirty(controller);
+
+            SaveActiveScene();
+            Debug.Log("KineticEnergySetup: EnergyEconomy4 setup complete OK");
+        }
+
         static void ConfigurePauseMenuForBuild(string scenePath, (string label, string sceneName)[] buildScenes, string finishNextScene)
         {
             Font font = FindBestFont();
