@@ -3644,9 +3644,17 @@ namespace KineticEnergy.EditorSetup
             // silent no-op). Both now return to the menu, which is in every build.
             ReplaceWinWithNextScene("MainMenu");
 
-            // The meter's 10 divider cells: 9 white lines, 3px wide like the border, laid over
-            // the fill area (inset 3px on every side, so inner width = 320 - 6 = 314). Added
-            // as the container's LAST child so they render on top of both fill bars.
+            AddMeterDividers(scenePath);
+
+            SaveActiveScene();
+            Debug.Log("KineticEnergySetup: EnergyEconomy1 setup complete OK");
+        }
+
+        // The meter's 10 divider cells: 9 white lines, 3px wide like the border, laid over
+        // the fill area (inset 3px on every side, so inner width = 320 - 6 = 314). Added
+        // as the container's LAST child so they render on top of both fill bars.
+        static void AddMeterDividers(string scenePath)
+        {
             GameObject pauseSystem = FindByNameIncludingInactive("PauseSystem");
             Transform meter = pauseSystem != null ? pauseSystem.transform.Find("PauseCanvas/EnergyMeter") : null;
             if (meter == null)
@@ -3678,9 +3686,92 @@ namespace KineticEnergy.EditorSetup
                 lineRt.anchoredPosition = new Vector2(inset + innerWidth * i / 10f, 0f);
                 line.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.9f); // the Outline's own color
             }
+        }
 
+        // TestLevel4 EnergyEconomy build (direct request): EnergyEconomy1's finish chains into
+        // TestLevel4, TestLevel4's finish returns to MainMenu 2, and TestLevel4's Player and
+        // camera get EnergyEconomy1's EXACT serialized tuning - every flag and value the user
+        // set in the Inspector, nothing re-assigned by hand here - via a JSON copy that keeps
+        // TestLevel4's own scene-object wiring intact. The 10-cell meter dividers come along
+        // too, so the scene plays exactly like EnergyEconomy1.
+        [MenuItem("Tools/Kinetic Energy/Setup TestLevel4 EnergyEconomy Build")]
+        public static void SetupTestLevel4EnergyEconomyBuild()
+        {
+            const string menuScenePath = "Assets/Scenes/MainMenu 2.unity";
+            const string economyScenePath = "Assets/Scenes/EnergyEconomy/EnergyEconomy1.unity";
+            const string testScenePath = "Assets/Scenes/EnergyEconomy/TestLevel4.unity";
+            foreach (string path in new[] { menuScenePath, economyScenePath, testScenePath })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(path) == null)
+                {
+                    throw new Exception($"KineticEnergySetup: scene missing - {path}");
+                }
+            }
+
+            // EnergyEconomy1: capture the tuned Player/camera state, chain its finish onward.
+            EditorSceneManager.OpenScene(economyScenePath, OpenSceneMode.Single);
+            KineticCubeController sourceController = FindPlayerController(economyScenePath);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindFirstObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceCamera == null)
+            {
+                throw new Exception($"KineticEnergySetup: no ThirdPersonOrbitCamera in {economyScenePath}.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+            ReplaceWinWithNextScene("TestLevel4");
             SaveActiveScene();
-            Debug.Log("KineticEnergySetup: EnergyEconomy1 setup complete OK");
+
+            // TestLevel4: same values, its own wiring, same meter cells, finish back to menu.
+            EditorSceneManager.OpenScene(testScenePath, OpenSceneMode.Single);
+            KineticCubeController targetController = FindPlayerController(testScenePath);
+            ThirdPersonOrbitCamera targetCamera = UnityEngine.Object.FindFirstObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (targetCamera == null)
+            {
+                throw new Exception($"KineticEnergySetup: no ThirdPersonOrbitCamera in {testScenePath}.");
+            }
+            OverwriteSerializedValuesKeepObjectRefs(targetController, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(targetCamera, cameraJson);
+            AddMeterDividers(testScenePath);
+            ReplaceWinWithNextScene("MainMenu 2");
+            SaveActiveScene();
+
+            EditorBuildSettings.scenes = new[]
+            {
+                new EditorBuildSettingsScene(menuScenePath, true),
+                new EditorBuildSettingsScene(economyScenePath, true),
+                new EditorBuildSettingsScene(testScenePath, true),
+            };
+            Debug.Log("KineticEnergySetup: TestLevel4 EnergyEconomy build setup complete OK");
+        }
+
+        // Stamps another component's serialized state (as EditorJsonUtility JSON) onto target,
+        // then restores every UnityEngine.Object reference target had before - the JSON's own
+        // refs are instance IDs from a scene that is no longer loaded, and the references
+        // (meter, camera rig, input actions...) are per-scene wiring that must stay the
+        // target scene's own.
+        static void OverwriteSerializedValuesKeepObjectRefs(Component target, string sourceJson)
+        {
+            var savedRefs = new List<(string path, UnityEngine.Object value)>();
+            var so = new SerializedObject(target);
+            SerializedProperty prop = so.GetIterator();
+            while (prop.Next(true))
+            {
+                if (prop.propertyType == SerializedPropertyType.ObjectReference && prop.propertyPath != "m_Script")
+                {
+                    savedRefs.Add((prop.propertyPath, prop.objectReferenceValue));
+                }
+            }
+
+            EditorJsonUtility.FromJsonOverwrite(sourceJson, target);
+
+            so = new SerializedObject(target);
+            foreach ((string path, UnityEngine.Object value) in savedRefs)
+            {
+                SerializedProperty restored = so.FindProperty(path);
+                if (restored != null) restored.objectReferenceValue = value;
+            }
+            so.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(target);
         }
 
         static void ConfigurePauseMenuForBuild(string scenePath, (string label, string sceneName)[] buildScenes, string finishNextScene)
