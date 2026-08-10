@@ -233,6 +233,12 @@ namespace KineticEnergy.Player
         public float groundPoundBoostMultiplier = 1.5f;
         public float groundPoundHopHeight = 0.1f;
         public float groundPoundSlowDuration = 0.3f;
+        // EnergyEconomy4 charge ramp (direct request): the straight-up and ground-pound charge
+        // speed starts at the base multiplier and grows linearly the longer the button is held -
+        // rate = base + growth * secondsHeld (real seconds, matching the unscaled charge).
+        // In this scene these replace upDownChargeSpeedMultiplier for both directions.
+        public float groundPoundChargeBaseSpeed = 1.5f;
+        public float groundPoundChargeSpeedGrowth = 1f;
 
         // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
         // punchier-feeling launch, but a faster exit speed alone would also fly further - linear
@@ -627,6 +633,8 @@ namespace KineticEnergy.Player
         // The boost HALF of a refund paid at aim-open - provisional until the shot actually
         // fires; backed out again if the aim closes without launching (direct request).
         float groundPoundBoostExtra;
+        // Real seconds the current pound charge has been held - drives the charge-speed ramp.
+        float groundPoundChargeHoldTime;
 
         // Read by KineticCubeControllerFreeMove to know whether it should instantly face
         // movement direction while walking (StickAim only - see its FixedUpdate).
@@ -2621,8 +2629,17 @@ namespace KineticEnergy.Player
                 // charge keeps breathing with the bullet-time as before.
                 if (westAirDownLaunch && (stickAimChargeType == StickAimChargeType.Up || stickAimChargeType == StickAimChargeType.Down))
                 {
+                    float chargeSpeed = upDownChargeSpeedMultiplier;
+                    // EnergyEconomy4: the up/down charge speed ramps up the longer it's held -
+                    // base + growth * secondsHeld (direct request; this scene only). Both
+                    // directions share the same base/growth pair.
+                    if (groundPoundBoostEconomy)
+                    {
+                        chargeSpeed = groundPoundChargeBaseSpeed + groundPoundChargeSpeedGrowth * groundPoundChargeHoldTime;
+                        groundPoundChargeHoldTime += Time.unscaledDeltaTime;
+                    }
                     chargeTime = Mathf.Min(
-                        chargeTime + Time.unscaledDeltaTime * chargeAccumulationRate * upDownChargeSpeedMultiplier,
+                        chargeTime + Time.unscaledDeltaTime * chargeAccumulationRate * chargeSpeed,
                         maxChargeTime, EnergyChargeCeiling());
                 }
                 else
@@ -2730,6 +2747,7 @@ namespace KineticEnergy.Player
             stickAimChargeType = type;
             chargeTime = 0f;
             stickAimHasAimed = false;
+            groundPoundChargeHoldTime = 0f; // each pound charge's speed ramp starts fresh
             // Instant stop, same reasoning as the charge-based schemes' aim-start - FixedUpdate
             // keeps re-applying this for the whole charge, not just this one frame, so an
             // airborne charge doesn't slowly start falling again from gravity.
@@ -3573,9 +3591,10 @@ namespace KineticEnergy.Player
                 float flightSpend = flightEnergySpent > 0.0001f ? flightEnergySpent : lastLaunchEnergySpent;
                 // The plain wash refund is ALWAYS paid right here, pound or not. Only the
                 // pound's boost EXTRA is deferred: paid when a midair aim opens inside the
-                // window, forfeited if that never happens (direct request).
+                // window, forfeited if that never happens. The extra keys off the POUND launch
+                // alone (the second launch), not the whole flight (direct request).
                 energyFraction = Mathf.Clamp01(energyFraction + flightSpend);
-                if (lastLaunchWasAirDown) groundPoundPendingRefund = flightSpend;
+                if (lastLaunchWasAirDown) groundPoundPendingRefund = lastLaunchEnergySpent;
                 ClampEnergyFloor();
                 return;
             }
