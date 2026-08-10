@@ -620,6 +620,13 @@ namespace KineticEnergy.Player
         // gravity stays off for its whole duration and comes back on release or launch
         // (direct request, EnergyEconomy4 only).
         bool groundPoundAimNoGravity;
+        // The pound's refund, held back until it's clear whether it earns the boost: paid
+        // boosted the moment a midair aim opens inside the window, or paid plain on the next
+        // landing if no aim ever opened (direct request).
+        float groundPoundPendingRefund;
+        // The boost HALF of a refund paid at aim-open - provisional until the shot actually
+        // fires; backed out again if the aim closes without launching (direct request).
+        float groundPoundBoostExtra;
 
         // Read by KineticCubeControllerFreeMove to know whether it should instantly face
         // movement direction while walking (StickAim only - see its FixedUpdate).
@@ -908,7 +915,13 @@ namespace KineticEnergy.Player
 
             // EnergyEconomy4's post-ground-pound slow-mo window - real seconds, so the 0.3s
             // isn't stretched by the slow-mo it is itself causing.
-            if (groundPoundWindowTimer > 0f) groundPoundWindowTimer -= Time.unscaledDeltaTime;
+            if (groundPoundWindowTimer > 0f)
+            {
+                groundPoundWindowTimer -= Time.unscaledDeltaTime;
+                // Window lapsed with no aim opened: the boost extra is forfeited for good -
+                // the plain refund was already paid at the crash (direct request).
+                if (groundPoundWindowTimer <= 0f) groundPoundPendingRefund = 0f;
+            }
 
             if (transform.position.y < fallResetY)
             {
@@ -1030,6 +1043,12 @@ namespace KineticEnergy.Player
                     || (fastPacedAiming && energyControlMode != EnergyControlMode.Standard);
                 energyMeter.SetCharge(ChargeFraction(), charging);
                 energyMeter.SetChargeWarning(chargeDisplayInsufficient);
+                // EnergyEconomy4: while the pound's boost extra is still on offer (window open,
+                // no aim yet - pending is consumed the moment an aim opens), preview it in
+                // orange past the end of the yellow fill.
+                energyMeter.SetBonus(
+                    energyFraction + groundPoundPendingRefund * (groundPoundBoostMultiplier - 1f),
+                    groundPoundBoostEconomy && groundPoundPendingRefund > 0f && groundPoundWindowTimer > 0f);
             }
 
             switch (controlScheme)
@@ -1858,6 +1877,10 @@ namespace KineticEnergy.Player
                 nonStickyReleaseTimer = 0f;
                 rb.useGravity = true;
                 groundPoundWindowTimer = groundPoundSlowDuration;
+                // Consumed: the free hop's own landing is NOT a pound - without this it would
+                // re-enter the deferred-refund branch and double-count the pound's spend.
+                lastLaunchWasAirDown = false;
+                lastLaunchEnergySpent = 0f;
             }
 
             flightEnergySpent = 0f; // the chained total is consumed by the refund above
@@ -2194,6 +2217,28 @@ namespace KineticEnergy.Player
         // Cleanly winds down the FastPaced-style aim state: camera back to third person, zoom
         // reset, any charge discarded without firing. Shared by scheme switches and Tutorial2's
         // grounded-cancels-the-air-aim rule (see UpdateMixedScheme).
+        // EnergyEconomy4: the pound's boost EXTRA (the plain refund was already paid at the
+        // crash) lands the moment a midair aim opens inside the window, so the instant full
+        // charge right after includes it. Remembered as provisional - measured against what was
+        // actually banked, so a tank clamped at full can't be over-debited by the revert.
+        void PayGroundPoundBoostedRefund()
+        {
+            if (groundPoundPendingRefund <= 0f) return;
+            float before = energyFraction;
+            energyFraction = Mathf.Clamp01(energyFraction + groundPoundPendingRefund * (groundPoundBoostMultiplier - 1f));
+            groundPoundBoostExtra = Mathf.Max(0f, energyFraction - before);
+            groundPoundPendingRefund = 0f;
+        }
+
+        // EnergyEconomy4: an aim that closes WITHOUT firing forfeits the boost - only the extra
+        // part is taken back, the plain refund underneath stays (direct request).
+        void RevertGroundPoundBoost()
+        {
+            if (groundPoundBoostExtra <= 0f) return;
+            energyFraction = Mathf.Clamp01(energyFraction - groundPoundBoostExtra);
+            groundPoundBoostExtra = 0f;
+        }
+
         void CancelFastPacedAim()
         {
             if (groundPoundAimNoGravity)
@@ -2201,6 +2246,7 @@ namespace KineticEnergy.Player
                 groundPoundAimNoGravity = false;
                 groundPoundWindowTimer = 0f; // the window ends with the aim - no lingering freeze
                 rb.useGravity = true; // letting go of the aim ends the ground-pound gravity hold
+                RevertGroundPoundBoost(); // aimed but didn't shoot - back to the plain refund
             }
             fastPacedAiming = false;
             fastPacedCharging = false;
@@ -2868,6 +2914,7 @@ namespace KineticEnergy.Player
                         groundPoundAimNoGravity = false;
                         groundPoundWindowTimer = 0f;
                         rb.useGravity = true;
+                        RevertGroundPoundBoost(); // aimed but didn't shoot - back to the plain refund
                     }
                     fastPacedAiming = false;
                     fastPacedCharging = false;
@@ -2906,6 +2953,7 @@ namespace KineticEnergy.Player
                 // fully charged - exactly the energy currently in the tank (direct request).
                 if (groundPoundBoostEconomy && groundPoundWindowTimer > 0f)
                 {
+                    PayGroundPoundBoostedRefund();
                     chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
                     groundPoundAimNoGravity = true;
                     rb.useGravity = false;
@@ -2937,6 +2985,7 @@ namespace KineticEnergy.Player
                 // the instant charge isn't wiped the moment the launch button goes down.
                 if (groundPoundBoostEconomy && groundPoundWindowTimer > 0f)
                 {
+                    PayGroundPoundBoostedRefund();
                     chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
                     groundPoundAimNoGravity = true;
                     rb.useGravity = false;
@@ -3005,6 +3054,7 @@ namespace KineticEnergy.Player
                 groundPoundAimNoGravity = false;
                 groundPoundWindowTimer = 0f; // the window ends with the launch too
                 rb.useGravity = true; // launching ends the ground-pound gravity hold
+                groundPoundBoostExtra = 0f; // the shot fired - the boost is earned and kept
             }
             queuedDirection = direction;
             queuedForce = force;
@@ -3521,8 +3571,11 @@ namespace KineticEnergy.Player
             if (groundPoundBoostEconomy)
             {
                 float flightSpend = flightEnergySpent > 0.0001f ? flightEnergySpent : lastLaunchEnergySpent;
-                energyFraction = Mathf.Clamp01(energyFraction
-                    + (lastLaunchWasAirDown ? flightSpend * groundPoundBoostMultiplier : flightSpend));
+                // The plain wash refund is ALWAYS paid right here, pound or not. Only the
+                // pound's boost EXTRA is deferred: paid when a midair aim opens inside the
+                // window, forfeited if that never happens (direct request).
+                energyFraction = Mathf.Clamp01(energyFraction + flightSpend);
+                if (lastLaunchWasAirDown) groundPoundPendingRefund = flightSpend;
                 ClampEnergyFloor();
                 return;
             }

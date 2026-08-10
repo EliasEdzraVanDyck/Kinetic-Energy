@@ -3760,6 +3760,29 @@ namespace KineticEnergy.EditorSetup
             controller.groundPoundBoostEconomy = true;
             EditorUtility.SetDirty(controller);
 
+            // Orange boost-preview bar (direct request: "display the extra energy you could get
+            // from the ground pound before you aim in orange"): same filled-bar construction as
+            // the yellow/blue fills, inserted at the yellow fill's sibling index so it renders
+            // BEHIND it - only the extra portion past current energy shows as orange.
+            EnergyMeterController meter = controller.energyMeter;
+            if (meter == null || meter.energyFillImage == null)
+            {
+                throw new Exception("KineticEnergySetup: EnergyEconomy4 has no wired energy meter to add the bonus bar to");
+            }
+            if (meter.bonusFillImage == null)
+            {
+                Transform container = meter.energyFillImage.transform.parent;
+                Transform existing = container.Find("BonusFill");
+                Image bonus = existing != null
+                    ? existing.GetComponent<Image>()
+                    : CreateFillBar("BonusFill", container, new Color(1f, 0.55f, 0.1f), 3f);
+                bonus.transform.SetSiblingIndex(meter.energyFillImage.transform.GetSiblingIndex());
+                bonus.fillAmount = 0f;
+                bonus.gameObject.SetActive(false);
+                meter.bonusFillImage = bonus;
+                EditorUtility.SetDirty(meter);
+            }
+
             SaveActiveScene();
             Debug.Log("KineticEnergySetup: EnergyEconomy4 setup complete OK");
         }

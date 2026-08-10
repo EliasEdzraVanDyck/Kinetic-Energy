@@ -14,6 +14,10 @@ namespace KineticEnergy.Player
     {
         public Image energyFillImage;
         public Image chargeFillImage;
+        // EnergyEconomy4 only: orange preview bar sitting BEHIND the yellow fill, showing
+        // current energy PLUS the ground pound's still-unclaimed boost extra - so only the
+        // extra portion pokes out past the yellow, in orange, until it's claimed or forfeited.
+        public Image bonusFillImage;
 
         // Automatic Energy mode: the charge bar shows the REQUIRED energy for the aimed shot,
         // which can exceed what's stored - the bar turns this warning color then (direct
@@ -24,6 +28,15 @@ namespace KineticEnergy.Player
         public void SetChargeWarning(bool insufficient)
         {
             if (chargeFillImage != null) chargeFillImage.color = insufficient ? insufficientChargeColor : chargeColor;
+        }
+
+        // totalFraction = energy + pending boost extra; drawn behind the yellow fill (see the
+        // field), so the visible orange sliver is exactly the extra on offer.
+        public void SetBonus(float totalFraction, bool visible)
+        {
+            if (bonusFillImage == null) return;
+            bonusFillImage.gameObject.SetActive(visible);
+            bonusFillImage.fillAmount = visible ? Mathf.Clamp01(totalFraction) : 0f;
         }
 
         public void SetEnergy(float fraction)
