@@ -228,6 +228,29 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: SetupAll complete OK");
         }
 
+        // Quarry-only playtest build: the one scene, nothing else - no Gauntlet, no menu;
+        // the game boots straight into the arena. The scene list is passed explicitly, so
+        // EditorBuildSettings and the scenes themselves stay completely untouched. NOTE: the
+        // orange menu pad and the pause menu's Main Menu / level buttons have no destination
+        // in this build - pressing them logs a harmless error and nothing happens.
+        [MenuItem("Tools/Kinetic Energy/Build Quarry Only")]
+        public static void BuildQuarryOnly()
+        {
+            var options = new BuildPlayerOptions
+            {
+                scenes = new[] { QuarryScenePath },
+                locationPathName = "Builds/QuarryOnly/KineticEnergy.exe",
+                target = BuildTarget.StandaloneWindows64,
+                options = BuildOptions.None,
+            };
+            var report = BuildPipeline.BuildPlayer(options);
+            if (report.summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
+            {
+                throw new Exception($"KineticEnergySetup: Quarry-only build FAILED - {report.summary.result}, {report.summary.totalErrors} errors.");
+            }
+            Debug.Log($"KineticEnergySetup: Quarry-only build complete OK -> {options.locationPathName} ({report.summary.totalSize / (1024 * 1024)} MB)");
+        }
+
         static void UpdateBuildSettings()
         {
             EditorBuildSettings.scenes = new[]
@@ -442,9 +465,9 @@ namespace KineticEnergy.EditorSetup
                 throw new Exception("KineticEnergySetup: PauseSystem prefab is missing expected children.");
             }
 
-            Text controlsHint = rig.pauseCanvas.Find("ControlsHintLabel")?.GetComponent<Text>();
+            // The top-left ControlsHintLabel is hand-authored in the editor, not wired to
+            // the controller - only the pause menu's Controls panel body is script-filled.
             Text controlsBody = rig.pauseCanvas.Find("ControlsPanel/ControlsBody")?.GetComponent<Text>();
-            rig.controller.controlsHintLabel = controlsHint;
             rig.controller.controlsPanelBody = controlsBody;
 
             Transform meterControllerChild = pauseSystem.transform.Find("EnergyMeter");

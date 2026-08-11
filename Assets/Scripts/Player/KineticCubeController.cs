@@ -251,9 +251,9 @@ namespace KineticEnergy.Player
         public InputActionReference airLaunchAction;
 
         [Header("Controls Text")]
-        // Written at runtime (Start) so the on-screen text can never silently go stale
-        // relative to the controls the code actually implements.
-        public Text controlsHintLabel;
+        // The top-left corner hint is NOT script-written (direct request) - author its text
+        // directly on the ControlsHintLabel object in the scene. Only the pause menu's
+        // detailed Controls panel body is still filled in at runtime.
         public Text controlsPanelBody;
 
         // ---------- Runtime state ----------
@@ -1810,21 +1810,6 @@ namespace KineticEnergy.Player
             const string crashLine =
                 "Crashing refunds energy - green STICKY surfaces hold you until you launch,\n" +
                 "anything else drops you after a moment (flat ground you can walk off freely)\n";
-
-            if (controlsHintLabel != null)
-            {
-                controlsHintLabel.text =
-                    "Move (on the ground): Left Stick / WASD\n" +
-                    "Grounded: Left Trigger / Right Mouse to aim+charge - steer the aim with\n" +
-                    "  the Mouse (Left Stick on controller), Right Trigger / Left Mouse to\n" +
-                    "  launch - or hold South / Space to charge an Up launch\n" +
-                    "Airborne: hold Right Mouse / Left Trigger to aim (first person), dial the\n" +
-                    "  energy with the Mouse Wheel / Right Stick, Left Mouse / Right Trigger\n" +
-                    "  fires. West / E charges the GROUND POUND (release to slam down)\n" +
-                    crashLine +
-                    "Camera: Mouse / Right Stick   Trail on/off: Right Bumper\n" +
-                    "Pause: Start / Options / Esc";
-            }
 
             if (controlsPanelBody != null)
             {

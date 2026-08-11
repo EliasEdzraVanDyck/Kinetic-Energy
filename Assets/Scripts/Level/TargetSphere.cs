@@ -28,14 +28,33 @@ namespace KineticEnergy.Level
         [Tooltip("A respawn point must have at least this much empty space around it, so a sphere can't reappear inside geometry.")]
         public float respawnClearRadius = 2.5f;
 
+        // Targets never sit below this height, wherever they spawn or respawn.
+        const float MinHeightY = 7f;
+
         Renderer[] sphereRenderers;
         Collider[] sphereColliders;
         float respawnRemaining;
+
+        // Visible and collectable right now (not waiting out a respawn).
+        public bool IsActive => respawnRemaining <= 0f;
 
         void Awake()
         {
             sphereRenderers = GetComponentsInChildren<Renderer>(true);
             sphereColliders = GetComponentsInChildren<Collider>(true);
+
+            // Enforced in code so hand-tuned scene values stay untouched.
+            if (transform.position.y < MinHeightY)
+            {
+                Vector3 lifted = transform.position;
+                lifted.y = MinHeightY;
+                transform.position = lifted;
+            }
+        }
+
+        void Start()
+        {
+            counter?.Register(this);
         }
 
         void Update()
@@ -66,9 +85,21 @@ namespace KineticEnergy.Level
         public void OnHitByCrash()
         {
             if (respawnRemaining > 0f) return;
-            counter?.ReportCollected();
             respawnRemaining = respawnSeconds;
             SetCollected(true);
+            // Reported AFTER hiding, so the counter's minimum-active check sees the true
+            // count and can respawn a hidden sphere immediately if needed.
+            counter?.ReportCollected();
+        }
+
+        // The counter's minimum-targets rule: bring this hidden sphere back right now, at a
+        // random point.
+        public void ForceRespawnNow()
+        {
+            if (respawnRemaining <= 0f) return;
+            respawnRemaining = 0f;
+            MoveToRandomRespawnPoint();
+            SetCollected(false);
         }
 
         // Picks a random point inside the respawn box with enough clearance to not overlap
@@ -82,7 +113,7 @@ namespace KineticEnergy.Level
             {
                 Vector3 candidate = new Vector3(
                     Random.Range(respawnAreaMin.x, respawnAreaMax.x),
-                    Random.Range(respawnAreaMin.y, respawnAreaMax.y),
+                    Mathf.Max(Random.Range(respawnAreaMin.y, respawnAreaMax.y), MinHeightY),
                     Random.Range(respawnAreaMin.z, respawnAreaMax.z));
                 if (!Physics.CheckSphere(candidate, respawnClearRadius))
                 {
