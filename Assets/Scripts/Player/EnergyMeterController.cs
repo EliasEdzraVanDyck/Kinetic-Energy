@@ -19,6 +19,17 @@ namespace KineticEnergy.Player
         // past the yellow, in orange, until it's claimed or forfeited.
         public Image bonusFillImage;
 
+        // Shows/hides the whole meter (the UI container the fill bars live in) - used to
+        // disable a meter whose corresponding mode is off (e.g. energy meter under infinite
+        // energy, slowdown bar outside AimBudget mode).
+        public void SetVisible(bool visible)
+        {
+            GameObject container = energyFillImage != null && energyFillImage.transform.parent != null
+                ? energyFillImage.transform.parent.gameObject
+                : gameObject;
+            if (container.activeSelf != visible) container.SetActive(visible);
+        }
+
         // totalFraction = energy + pending boost extra; drawn behind the yellow fill (see
         // the field), so the visible orange sliver is exactly the extra on offer.
         public void SetBonus(float totalFraction, bool visible)

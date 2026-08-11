@@ -36,6 +36,7 @@ namespace KineticEnergy.EditorSetup
     public static class KineticEnergySetup
     {
         const string QuarryScenePath = "Assets/Scenes/Quarry.unity";
+        const string Level1ScenePath = "Assets/Scenes/Level1.unity";
         const string GauntletScenePath = "Assets/Scenes/Gauntlet.unity";
         const string MainMenuScenePath = "Assets/Scenes/MainMenu.unity";
         const string ActionsPath = "Assets/InputSystem_Actions.inputactions";
@@ -569,9 +570,14 @@ namespace KineticEnergy.EditorSetup
         // (Variant A). The controller hides it in every other slowdown mode.
         static void AddSlowdownMeter(CoreRig rig)
         {
-            DestroyDirectChildIfExists(rig.pauseCanvas, "SlowdownMeter");
+            AddSlowdownMeterUi(rig.pauseCanvas, rig.controller);
+        }
+
+        static void AddSlowdownMeterUi(Transform pauseCanvas, KineticCubeController controller)
+        {
+            DestroyDirectChildIfExists(pauseCanvas, "SlowdownMeter");
             GameObject container = new GameObject("SlowdownMeter", typeof(RectTransform));
-            container.transform.SetParent(rig.pauseCanvas, false);
+            container.transform.SetParent(pauseCanvas, false);
             RectTransform rt = container.GetComponent<RectTransform>();
             rt.anchorMin = new Vector2(1f, 1f);
             rt.anchorMax = new Vector2(1f, 1f);
@@ -586,8 +592,27 @@ namespace KineticEnergy.EditorSetup
 
             EnergyMeterController meter = container.AddComponent<EnergyMeterController>();
             meter.energyFillImage = fill;
-            rig.controller.slowdownMeter = meter;
-            EditorUtility.SetDirty(rig.controller);
+            controller.slowdownMeter = meter;
+            EditorUtility.SetDirty(controller);
+        }
+
+        // Adds the slowdown (aim budget) meter UI to Level 1 and wires it to the Player -
+        // scene ADDITIONS only, nothing existing is moved or re-valued. The controller
+        // keeps it disabled while the scene's slowdown mode isn't AimBudget.
+        [MenuItem("Tools/Kinetic Energy/Add Slowdown Meter To Level 1")]
+        public static void AddSlowdownMeterToLevel1()
+        {
+            EditorSceneManager.OpenScene(Level1ScenePath, OpenSceneMode.Single);
+            KineticCubeController controller = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            GameObject pauseSystem = GameObject.Find("PauseSystem");
+            Transform pauseCanvas = pauseSystem != null ? pauseSystem.transform.Find("PauseCanvas") : null;
+            if (controller == null || pauseCanvas == null)
+            {
+                throw new Exception("KineticEnergySetup: Level1.unity is missing its Player or PauseSystem/PauseCanvas.");
+            }
+            AddSlowdownMeterUi(pauseCanvas, controller);
+            SaveOpenScene(Level1ScenePath);
+            Debug.Log("KineticEnergySetup: slowdown meter added to Level 1 OK");
         }
 
         // A small always-on HUD label on its own canvas (below the pause canvas's order).
@@ -953,6 +978,442 @@ namespace KineticEnergy.EditorSetup
 
             SaveOpenScene(GauntletScenePath);
             Debug.Log($"KineticEnergySetup: Gauntlet setup complete OK (L={L:F1}m, H={H:F1}m, budget={AimBudgetSeconds}s, drain={TankDrainPerSecond}/s)");
+        }
+
+        // ==================== Level 1 - platform run into wall hops ====================
+        // A series of platforms whose gaps grow, demanding increasingly more launch energy,
+        // then a few sticky floating walls to hop between, over a red DamageWalls floor that
+        // instantly respawns the player at the start. The Player/camera tuning is COPIED
+        // from the Quarry scene's current instances (the values the user hand-tuned), so
+        // this level plays identically - nothing existing is rebuilt or re-valued.
+        [MenuItem("Tools/Kinetic Energy/Setup Level 1")]
+        public static void SetupLevel1()
+        {
+            // Capture the hand-tuned Player/camera state from the Quarry first.
+            EditorSceneManager.OpenScene(QuarryScenePath, OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find the Quarry's Player/camera to copy tuning from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            MeasureLaunchDistances(out float L, out float H);
+            NewEmptyScene(Level1ScenePath);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("Level1Course");
+            Transform tf = course.transform;
+
+            // The platform run: gaps grow with every jump, so each one needs more energy.
+            Vector3 platformSize = new Vector3(10f, 2f, 10f);
+            float[] gapFractions = { 0.15f, 0.25f, 0.35f, 0.5f, 0.65f, 0.8f };
+            float x = 0f;
+            CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
+            Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
+            for (int i = 0; i < gapFractions.Length; i++)
+            {
+                x += platformSize.x + gapFractions[i] * L;
+                CreateBlock(tf, "Platform" + (i + 1), new Vector3(x, -1f, 0f), platformSize, platformMat);
+            }
+
+            // The wall hops: a few sticky floating walls to jump between, then the end pad.
+            float wallSpacing = 0.3f * L;
+            float wallStartX = x + platformSize.x * 0.5f + 0.25f * L;
+            for (int i = 0; i < 3; i++)
+            {
+                float wallX = wallStartX + i * wallSpacing;
+                MakeSticky(CreateBlock(tf, "FloatingWall" + (i + 1),
+                    new Vector3(wallX, 7f, 0f), new Vector3(2f, 14f, 10f), platformMat));
+            }
+            float endX = wallStartX + 3f * wallSpacing + 0.2f * L;
+            CreateBlock(tf, "EndPlatform", new Vector3(endX, -1f, 0f), platformSize, platformMat);
+
+            // The hazard: a red DamageWalls floor under the whole course - touch it and you
+            // respawn instantly at the start.
+            GameObject respawnPoint = new GameObject("RespawnPoint");
+            respawnPoint.transform.position = playerSpawn;
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(endX * 0.5f, -12f, 0f), new Vector3(endX + 60f, 2f, 80f), damageMat);
+            DamageWalls damage = damageFloor.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(damage);
+
+            // Finish on the end pad returns to the menu.
+            GameObject finish = new GameObject("FinishTrigger");
+            finish.transform.position = new Vector3(endX, 2f, 0f);
+            BoxCollider finishBox = finish.AddComponent<BoxCollider>();
+            finishBox.isTrigger = true;
+            finishBox.size = new Vector3(4f, 4f, 8f);
+            finish.AddComponent<FinishLineNextScene>().nextSceneName = "MainMenu";
+
+            CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
+            PointCameraAt(rig, new Vector3(platformSize.x + gapFractions[0] * L, 0f, 0f));
+
+            // Stamp the Quarry's hand-tuned values over the fresh instances, keeping this
+            // scene's own object wiring (meter, camera, input references) intact.
+            OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
+
+            SaveOpenScene(Level1ScenePath);
+            Debug.Log($"KineticEnergySetup: Level 1 setup complete OK (L={L:F1}m; gaps "
+                + string.Join(", ", Array.ConvertAll(gapFractions, g => (g * L).ToString("F0"))) + "m)");
+        }
+
+        // Level 1's gradual-drain test: sets ONLY the gradualLaunchDrain wiring flag on the
+        // scene's Player instance - no other value is read or written (the user tunes
+        // everything else in the Inspector).
+        [MenuItem("Tools/Kinetic Energy/Enable Gradual Drain In Level 1")]
+        public static void EnableGradualDrainInLevel1()
+        {
+            EditorSceneManager.OpenScene(Level1ScenePath, OpenSceneMode.Single);
+            KineticCubeController controller = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            if (controller == null) throw new Exception("KineticEnergySetup: no Player in Level1.unity.");
+            controller.gradualLaunchDrain = true;
+            EditorUtility.SetDirty(controller);
+            SaveOpenScene(Level1ScenePath);
+            Debug.Log("KineticEnergySetup: gradual launch drain enabled in Level 1 OK");
+        }
+
+        // Level 1's wall-crash launch limit: sets ONLY the wallCrashLaunchAllowance wiring
+        // value (1 launch per non-grounding crash) on the scene's Player instance - no
+        // positions and no other values are touched.
+        [MenuItem("Tools/Kinetic Energy/Enable Wall-Crash Launch Limit In Level 1")]
+        public static void EnableWallCrashLimitInLevel1()
+        {
+            EditorSceneManager.OpenScene(Level1ScenePath, OpenSceneMode.Single);
+            KineticCubeController controller = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            if (controller == null) throw new Exception("KineticEnergySetup: no Player in Level1.unity.");
+            controller.wallCrashLaunchAllowance = 1;
+            EditorUtility.SetDirty(controller);
+            SaveOpenScene(Level1ScenePath);
+            Debug.Log("KineticEnergySetup: wall-crash launch limit enabled in Level 1 OK");
+        }
+
+        // Turns the reusable pieces into prefab ASSETS (direct request):
+        //  - FinishTrigger, PlayerShadow and SlowdownMeter are converted from Level 1's
+        //    existing instances (SaveAsPrefabAssetAndConnect keeps their positions and
+        //    values; PlayerShadow's cross-hierarchy player reference is re-wired on the
+        //    scene instance afterwards, since a prefab asset cannot hold it).
+        //  - EnergyMeter is built fresh as a standalone prefab (the live meters sit inside
+        //    the PauseSystem prefab and stay untouched) - drop it on any canvas and wire
+        //    the Player's energyMeter field to it.
+        [MenuItem("Tools/Kinetic Energy/Make HUD Prefabs From Level 1")]
+        public static void MakeHudPrefabsFromLevel1()
+        {
+            EditorSceneManager.OpenScene(Level1ScenePath, OpenSceneMode.Single);
+
+            GameObject finishTrigger = GameObject.Find("FinishTrigger");
+            if (finishTrigger != null)
+            {
+                PrefabUtility.SaveAsPrefabAssetAndConnect(finishTrigger, PrefabFolder + "/FinishTrigger.prefab", InteractionMode.AutomatedAction);
+            }
+
+            GameObject shadowGo = GameObject.Find("PlayerShadow");
+            if (shadowGo != null)
+            {
+                PlayerShadow shadow = shadowGo.GetComponent<PlayerShadow>();
+                Transform playerRef = shadow != null ? shadow.player : null;
+                PrefabUtility.SaveAsPrefabAssetAndConnect(shadowGo, PrefabFolder + "/PlayerShadow.prefab", InteractionMode.AutomatedAction);
+                // Cross-hierarchy wiring must be restored on the instance after the save.
+                if (shadow != null)
+                {
+                    shadow.player = playerRef;
+                    EditorUtility.SetDirty(shadow);
+                }
+            }
+
+            GameObject pauseSystem = GameObject.Find("PauseSystem");
+            Transform slowdownMeter = pauseSystem != null ? pauseSystem.transform.Find("PauseCanvas/SlowdownMeter") : null;
+            if (slowdownMeter != null)
+            {
+                PrefabUtility.SaveAsPrefabAssetAndConnect(slowdownMeter.gameObject, PrefabFolder + "/SlowdownMeter.prefab", InteractionMode.AutomatedAction);
+            }
+
+            SaveOpenScene(Level1ScenePath);
+            CreateEnergyMeterPrefab();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: HUD prefabs created OK (FinishTrigger, PlayerShadow, SlowdownMeter, EnergyMeter)");
+        }
+
+        // A standalone, self-contained energy meter prefab: the full bar stack (outline,
+        // backdrop, orange bonus, yellow energy, blue charge, 10-cell dividers) with the
+        // EnergyMeterController ON the container. Anchored top-right like the live meters.
+        static void CreateEnergyMeterPrefab()
+        {
+            GameObject container = new GameObject("EnergyMeter", typeof(RectTransform));
+            try
+            {
+                RectTransform rt = container.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(1f, 1f);
+                rt.anchorMax = new Vector2(1f, 1f);
+                rt.pivot = new Vector2(1f, 1f);
+                rt.anchoredPosition = new Vector2(-24f, -24f);
+                rt.sizeDelta = new Vector2(320f, 36f);
+
+                const float outline = 3f;
+                CreatePanel("Outline", container.transform, new Color(1f, 1f, 1f, 0.9f));
+                InsetRect(CreatePanel("Backdrop", container.transform, new Color(0f, 0f, 0f, 0.5f)), outline);
+                Image bonusFill = CreateFillBar("BonusFill", container.transform, new Color(1f, 0.55f, 0.1f, 0.95f), outline);
+                bonusFill.gameObject.SetActive(false);
+                Image energyFill = CreateFillBar("EnergyFill", container.transform, new Color(0.95f, 0.82f, 0.15f), outline);
+                Image chargeFill = CreateFillBar("ChargeFill", container.transform, new Color(0.3f, 0.65f, 1f), outline);
+                chargeFill.gameObject.SetActive(false);
+
+                // The 10-cell dividers, matching the live meters.
+                GameObject dividers = new GameObject("MeterDividers", typeof(RectTransform));
+                dividers.transform.SetParent(container.transform, false);
+                RectTransform dividersRt = dividers.GetComponent<RectTransform>();
+                dividersRt.anchorMin = Vector2.zero;
+                dividersRt.anchorMax = Vector2.one;
+                dividersRt.offsetMin = Vector2.zero;
+                dividersRt.offsetMax = Vector2.zero;
+                float innerWidth = 320f - outline * 2f;
+                for (int i = 1; i <= 9; i++)
+                {
+                    GameObject line = new GameObject("Divider" + i, typeof(RectTransform));
+                    line.transform.SetParent(dividers.transform, false);
+                    RectTransform lineRt = line.GetComponent<RectTransform>();
+                    lineRt.anchorMin = new Vector2(0f, 0f);
+                    lineRt.anchorMax = new Vector2(0f, 1f);
+                    lineRt.pivot = new Vector2(0.5f, 0.5f);
+                    lineRt.sizeDelta = new Vector2(outline, -outline * 2f);
+                    lineRt.anchoredPosition = new Vector2(outline + innerWidth * i / 10f, 0f);
+                    line.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.9f);
+                }
+
+                EnergyMeterController meter = container.AddComponent<EnergyMeterController>();
+                meter.energyFillImage = energyFill;
+                meter.chargeFillImage = chargeFill;
+                meter.bonusFillImage = bonusFill;
+
+                PrefabUtility.SaveAsPrefabAsset(container, PrefabFolder + "/EnergyMeter.prefab");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(container);
+            }
+        }
+
+        // Swaps every plain (non-prefab) instance of the HUD pieces for an instance of the
+        // corresponding prefab, carrying position/values over as instance overrides and
+        // re-wiring the Player's references. Objects already connected to the prefabs
+        // (Level 1's) are left alone; the PauseSystem's built-in meter UI is deactivated
+        // per instance and replaced by the standalone EnergyMeter prefab.
+        [MenuItem("Tools/Kinetic Energy/Replace HUD Instances With Prefabs")]
+        public static void ReplaceHudInstancesWithPrefabs()
+        {
+            string[] scenePaths = { Level1ScenePath, QuarryScenePath, GauntletScenePath };
+            foreach (string scenePath in scenePaths)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                KineticCubeController controller = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+                if (controller == null) continue;
+
+                // --- PlayerShadow ---
+                GameObject oldShadow = GameObject.Find("PlayerShadow");
+                if (oldShadow != null && !PrefabUtility.IsPartOfPrefabInstance(oldShadow))
+                {
+                    PlayerShadow oldComp = oldShadow.GetComponent<PlayerShadow>();
+                    GameObject newShadow = InstantiatePrefab("PlayerShadow");
+                    newShadow.transform.position = oldShadow.transform.position;
+                    PlayerShadow newComp = newShadow.GetComponent<PlayerShadow>();
+                    if (newComp != null && oldComp != null)
+                    {
+                        newComp.player = oldComp.player;
+                        newComp.maxDistance = oldComp.maxDistance;
+                        newComp.surfaceOffset = oldComp.surfaceOffset;
+                        EditorUtility.SetDirty(newComp);
+                    }
+                    UnityEngine.Object.DestroyImmediate(oldShadow);
+                }
+
+                // --- Energy meter: deactivate the PauseSystem's built-in UI, drop in the
+                // standalone prefab at the same canvas slot, re-wire the Player. ---
+                GameObject pauseSystemGo = GameObject.Find("PauseSystem");
+                Transform pauseCanvas = pauseSystemGo != null ? pauseSystemGo.transform.Find("PauseCanvas") : null;
+                if (pauseCanvas != null)
+                {
+                    Transform oldMeterUi = pauseCanvas.Find("EnergyMeter");
+                    bool oldMeterIsPrefabPart = oldMeterUi != null && PrefabUtility.IsPartOfPrefabInstance(oldMeterUi.gameObject)
+                        && !PrefabUtility.IsAnyPrefabInstanceRoot(oldMeterUi.gameObject);
+                    if (oldMeterUi != null && oldMeterIsPrefabPart)
+                    {
+                        int slot = oldMeterUi.GetSiblingIndex();
+                        oldMeterUi.gameObject.SetActive(false);
+                        Transform oldMeterController = pauseSystemGo.transform.Find("EnergyMeter");
+                        if (oldMeterController != null) oldMeterController.gameObject.SetActive(false);
+
+                        GameObject newMeter = InstantiatePrefab("EnergyMeter");
+                        newMeter.transform.SetParent(pauseCanvas, false);
+                        newMeter.transform.SetSiblingIndex(slot);
+                        controller.energyMeter = newMeter.GetComponent<EnergyMeterController>();
+                        EditorUtility.SetDirty(controller);
+                    }
+
+                    // --- Slowdown meter ---
+                    Transform oldSlowdown = pauseCanvas.Find("SlowdownMeter");
+                    if (oldSlowdown != null && !PrefabUtility.IsPartOfPrefabInstance(oldSlowdown.gameObject))
+                    {
+                        int slot = oldSlowdown.GetSiblingIndex();
+                        UnityEngine.Object.DestroyImmediate(oldSlowdown.gameObject);
+                        GameObject newSlowdown = InstantiatePrefab("SlowdownMeter");
+                        newSlowdown.transform.SetParent(pauseCanvas, false);
+                        newSlowdown.transform.SetSiblingIndex(slot);
+                        controller.slowdownMeter = newSlowdown.GetComponent<EnergyMeterController>();
+                        EditorUtility.SetDirty(controller);
+                    }
+                }
+
+                // --- Finish triggers of the FinishLineNextScene kind (Level 1's finish, the
+                // Quarry's menu pad) - the Gauntlet's own GauntletFinishLine stays as it is. ---
+                foreach (FinishLineNextScene oldFinish in UnityEngine.Object.FindObjectsByType<FinishLineNextScene>(FindObjectsInactive.Include))
+                {
+                    if (PrefabUtility.IsPartOfPrefabInstance(oldFinish.gameObject)) continue;
+                    GameObject oldGo = oldFinish.gameObject;
+                    BoxCollider oldBox = oldGo.GetComponent<BoxCollider>();
+                    Vector3 position = oldGo.transform.position;
+                    string nextScene = oldFinish.nextSceneName;
+
+                    GameObject newFinish = InstantiatePrefab("FinishTrigger");
+                    newFinish.name = oldGo.name;
+                    newFinish.transform.position = position;
+                    FinishLineNextScene newComp = newFinish.GetComponent<FinishLineNextScene>();
+                    if (newComp != null) newComp.nextSceneName = nextScene;
+                    BoxCollider newBox = newFinish.GetComponent<BoxCollider>();
+                    if (newBox != null && oldBox != null)
+                    {
+                        newBox.size = oldBox.size;
+                        newBox.center = oldBox.center;
+                    }
+                    EditorUtility.SetDirty(newFinish);
+                    UnityEngine.Object.DestroyImmediate(oldGo);
+                }
+
+                SaveOpenScene(scenePath);
+            }
+            Debug.Log("KineticEnergySetup: HUD prefab instance replacement complete OK");
+        }
+
+        // Unity never propagates a prefab ROOT's transform to its instances (each placement
+        // owns its root position/size by design), and the meters' whole layout sat on the
+        // root RectTransform - which is why asset edits didn't show up in scenes. This
+        // moves each meter's layout onto an inner "Body" child (prefab-driven, so edits DO
+        // propagate) and zeroes the existing instances' roots once so nothing shifts.
+        [MenuItem("Tools/Kinetic Energy/Fix HUD Prefab Layout Propagation")]
+        public static void FixHudPrefabLayoutPropagation()
+        {
+            RestructureMeterPrefab(PrefabFolder + "/EnergyMeter.prefab");
+            RestructureMeterPrefab(PrefabFolder + "/SlowdownMeter.prefab");
+
+            string[] scenePaths = { Level1ScenePath, QuarryScenePath, GauntletScenePath };
+            foreach (string scenePath in scenePaths)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                GameObject pauseSystemGo = GameObject.Find("PauseSystem");
+                Transform pauseCanvas = pauseSystemGo != null ? pauseSystemGo.transform.Find("PauseCanvas") : null;
+                if (pauseCanvas == null) continue;
+
+                bool changed = false;
+                foreach (string meterName in new[] { "EnergyMeter", "SlowdownMeter" })
+                {
+                    foreach (Transform child in pauseCanvas)
+                    {
+                        if (child.name != meterName || !PrefabUtility.IsAnyPrefabInstanceRoot(child.gameObject)) continue;
+                        RectTransform rt = child as RectTransform;
+                        if (rt == null) continue;
+                        rt.anchoredPosition = Vector2.zero;
+                        rt.sizeDelta = Vector2.zero;
+                        EditorUtility.SetDirty(rt);
+                        changed = true;
+                    }
+                }
+                if (changed) SaveOpenScene(scenePath);
+            }
+            Debug.Log("KineticEnergySetup: HUD prefab layout propagation fixed OK (edit the prefabs' Body child from now on)");
+        }
+
+        static void RestructureMeterPrefab(string prefabPath)
+        {
+            GameObject root = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                if (root.transform.Find("Body") != null) return; // already restructured
+
+                RectTransform rootRt = root.GetComponent<RectTransform>();
+                GameObject body = new GameObject("Body", typeof(RectTransform));
+                RectTransform bodyRt = body.GetComponent<RectTransform>();
+                body.transform.SetParent(root.transform, false);
+
+                // The Body inherits the whole layout the root used to carry...
+                bodyRt.anchorMin = rootRt.anchorMin;
+                bodyRt.anchorMax = rootRt.anchorMax;
+                bodyRt.pivot = rootRt.pivot;
+                bodyRt.anchoredPosition = rootRt.anchoredPosition;
+                bodyRt.sizeDelta = rootRt.sizeDelta;
+
+                // ...and every visual moves under it (Body itself stays the last-created
+                // child until the loop empties the root, so ordering is preserved).
+                var toMove = new List<Transform>();
+                foreach (Transform child in root.transform)
+                {
+                    if (child != body.transform) toMove.Add(child);
+                }
+                foreach (Transform child in toMove)
+                {
+                    child.SetParent(body.transform, false);
+                }
+
+                // The root becomes a pure zero-size anchor point.
+                rootRt.anchoredPosition = Vector2.zero;
+                rootRt.sizeDelta = Vector2.zero;
+
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+        }
+
+        // Stamps another component's serialized state (as EditorJsonUtility JSON) onto
+        // target, then restores every UnityEngine.Object reference target had before - the
+        // JSON's refs are instance IDs from a scene no longer loaded, while the target's own
+        // wiring must stay this scene's.
+        static void OverwriteSerializedValuesKeepObjectRefs(Component target, string sourceJson)
+        {
+            var savedRefs = new List<(string path, UnityEngine.Object value)>();
+            var serialized = new SerializedObject(target);
+            SerializedProperty property = serialized.GetIterator();
+            while (property.Next(true))
+            {
+                if (property.propertyType == SerializedPropertyType.ObjectReference && property.propertyPath != "m_Script")
+                {
+                    savedRefs.Add((property.propertyPath, property.objectReferenceValue));
+                }
+            }
+
+            EditorJsonUtility.FromJsonOverwrite(sourceJson, target);
+
+            serialized = new SerializedObject(target);
+            foreach ((string path, UnityEngine.Object value) in savedRefs)
+            {
+                SerializedProperty restored = serialized.FindProperty(path);
+                if (restored != null) restored.objectReferenceValue = value;
+            }
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(target);
         }
 
         static (string label, string sceneName, int variant)[] LevelPauseButtons()

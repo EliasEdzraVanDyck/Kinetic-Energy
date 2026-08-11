@@ -94,6 +94,13 @@ namespace KineticEnergy.Player
         public float chargeAcceleration = 1f;
         [Tooltip("Test-level switch: the tank is pinned at 100% and refunds/costs are ignored.")]
         public bool infiniteEnergy = false;
+        // Test-level switch (Level 1): a launch's cost drains from the meter OVER the
+        // flight instead of instantly - 0% drained at fire, 100% by landing, paced by the
+        // flight time the aim predicted. Firing a new launch midair stops the old drain, so
+        // the not-yet-spent remainder stays in the meter and funds the next launch (halfway
+        // through the path = half the energy still available).
+        [Tooltip("Drain a launch's cost over the flight instead of instantly (see comment). Off = classic instant deduction.")]
+        public bool gradualLaunchDrain = false;
         [Tooltip("Yellow energy / blue charge meter, top right - wired per scene by the setup script.")]
         public EnergyMeterController energyMeter;
 
@@ -203,6 +210,13 @@ namespace KineticEnergy.Player
         [Header("Launch Limit")]
         [Tooltip("Launches allowed since last standing/crashing (a crash resets the budget). 0 = unlimited.")]
         public int maxLaunchesPerFlight = 2;
+        // Level-1 test rule: a crash on a surface that does NOT ground you (a wall, a
+        // platform's side, a floating object, a target - anything whose face is too steep
+        // to stand on) grants only this many launches until you're genuinely grounded
+        // again. Between two floating walls that means exactly one midair launch per hop.
+        // 0 = off: every crash restores the full launch budget, as always.
+        [Tooltip("Launches granted by a NON-grounding crash (walls/sides/floating objects) until truly grounded again. 0 = off.")]
+        public int wallCrashLaunchAllowance = 0;
 
         [Header("Crash Guards")]
         // A large impulse can make PhysX re-report the launch platform's own continuous
@@ -292,6 +306,10 @@ namespace KineticEnergy.Player
         // released once - prevents a held trigger from instantly reopening the aim.
         bool aimButtonSpent;
 
+        // Wall-crash launch limit state: -1 = inactive (the normal maxLaunchesPerFlight
+        // budget applies); otherwise the exact launches left until genuinely grounded.
+        int launchesRemainingOverride = -1;
+
         // Flight state.
         bool hasLaunched;
         bool currentFlightIsDownward; // slams are EXPECTED to instantly re-strike their own surface - bypasses the crash guards
@@ -337,6 +355,14 @@ namespace KineticEnergy.Player
         // landing height the aim predicted when it fired.
         float flightApexY;
         float flightPredictedLandingY;
+
+        // Gradual-drain state: how much of the current launch's cost is still undrained,
+        // and how fast it drains (cost / predicted flight seconds). A new launch overwrites
+        // both - the old remainder is simply never taken.
+        float gradualDrainRemaining;
+        float gradualDrainPerSecond;
+        // Predicted flight duration of the last previewed shot, captured for the drain pace.
+        float lastPredictedFlightSeconds;
 
         // Slowdown resource.
         float aimBudgetRemaining;
@@ -604,7 +630,9 @@ namespace KineticEnergy.Player
             // The midair first-person aim slows time only while the slowdown resource can
             // pay for it (the raw aim-button hold is included so there's no gap between the
             // press and the state change). Grounded aiming runs at full speed on purpose.
-            bool rawAimHeld = AimButtonHeld() && !aimButtonSpent;
+            // The raw aim-button hold only bridges press-to-open - with no launch available
+            // the aim can't open, so the hold must not slow time either.
+            bool rawAimHeld = AimButtonHeld() && !aimButtonSpent && CanStartNewLaunch();
             bool airAimSlow = !isGrounded && (airAiming || rawAimHeld) && SlowdownAvailable();
             // The post-ground-pound window holds the slow-mo for its duration - part of the
             // pound itself, so never metered by the slowdown resource.
@@ -679,8 +707,11 @@ namespace KineticEnergy.Player
 
         void UpdateEnergyMeters()
         {
+            // Each meter disables itself while its corresponding mode is off: the energy
+            // meter under infinite energy, the slowdown bar outside AimBudget mode.
             if (energyMeter != null)
             {
+                energyMeter.SetVisible(!infiniteEnergy);
                 energyMeter.SetEnergy(energyFraction);
                 bool charging = isAiming || holdChargeDirection != HoldChargeDirection.None || airAiming;
                 energyMeter.SetCharge(ChargeFraction(), charging);
@@ -694,7 +725,7 @@ namespace KineticEnergy.Player
             if (slowdownMeter != null)
             {
                 bool showBudget = slowdownMode == SlowdownMode.AimBudget;
-                if (slowdownMeter.gameObject.activeSelf != showBudget) slowdownMeter.gameObject.SetActive(showBudget);
+                slowdownMeter.SetVisible(showBudget);
                 if (showBudget)
                 {
                     slowdownMeter.SetEnergy(aimBudgetSeconds > 0f ? aimBudgetRemaining / aimBudgetSeconds : 0f);
@@ -957,7 +988,9 @@ namespace KineticEnergy.Player
 
             if (!airAiming)
             {
-                if (energyFraction <= 0f) return;
+                // No energy, or no launch available (the wall-crash limit / launch budget
+                // spent) - then there is nothing to aim WITH, so aim mode must not open.
+                if (energyFraction <= 0f || !CanStartNewLaunch()) return;
                 // Opening the aim always needs a FRESH press - a button still held from
                 // before a launch/crash does nothing until released and re-pressed.
                 if (!(airAimAction != null && airAimAction.action != null && airAimAction.action.WasPressedThisFrame())) return;
@@ -1132,8 +1165,45 @@ namespace KineticEnergy.Player
             energyFraction = Mathf.Min(energyFraction, Mathf.Clamp01(fraction));
         }
 
+        // Hazard hook (DamageWalls): a full instant respawn - every aim, charge, flight and
+        // stick state is wound down, the tank returns to its starting level, and the player
+        // reappears at the given point standing still under normal gravity.
+        public void RespawnAtPoint(Vector3 position)
+        {
+            if (airAiming) CancelAirAim();
+            CancelHoldCharge();
+            CloseGroundedAim();
+            waitingForAimRelease = true; // held buttons must be re-pressed after a respawn
+            aimButtonSpent = true;
+
+            hasLaunched = false;
+            launchQueued = false;
+            isStuck = false;
+            nonStickyReleaseTimer = 0f;
+            launchesSinceGrounded = 0;
+            launchesRemainingOverride = -1;
+            flightEnergySpent = 0f;
+            gradualDrainRemaining = 0f;
+            poundWindowTimer = 0f;
+            poundPendingRefund = 0f;
+            poundBoostExtra = 0f;
+            poundAimHoldingGravityOff = false;
+
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.useGravity = true;
+            rb.linearDamping = plainFallDamping;
+            transform.position = position;
+
+            energyFraction = infiniteEnergy ? 1f : startingEnergyFraction;
+            Time.timeScale = 1f;
+        }
+
         bool CanStartNewLaunch()
         {
+            // The wall-crash limit, when armed, replaces the normal budget outright.
+            if (launchesRemainingOverride == 0) return false;
+            if (launchesRemainingOverride > 0) return true;
             return maxLaunchesPerFlight <= 0 || launchesSinceGrounded < maxLaunchesPerFlight;
         }
 
@@ -1156,6 +1226,7 @@ namespace KineticEnergy.Player
             launchQueued = true;
             hasLaunched = true;
             launchesSinceGrounded++;
+            if (launchesRemainingOverride > 0) launchesRemainingOverride--;
             exactFlightNoNudge = false;   // re-armed by the midair fire path right after this call
             aimButtonSpent = true;        // a held aim button does nothing further until released
             lastLaunchWasGrounded = isGrounded;
@@ -1165,7 +1236,21 @@ namespace KineticEnergy.Player
             // Deduct what was ACTUALLY spendable, not the theoretical charge cost - the
             // refund can then never fabricate energy a nearly-empty tank didn't really spend.
             lastLaunchEnergySpent = Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge);
-            if (!infiniteEnergy) energyFraction = Mathf.Clamp01(energyFraction - lastLaunchEnergySpent);
+            if (!infiniteEnergy)
+            {
+                if (gradualLaunchDrain)
+                {
+                    // The cost leaves the meter over the flight instead of now. Starting a
+                    // new launch overwrites any old drain - the undrained remainder of the
+                    // previous launch is still in the meter, funding this one.
+                    gradualDrainRemaining = lastLaunchEnergySpent;
+                    gradualDrainPerSecond = lastLaunchEnergySpent / lastPredictedFlightSeconds;
+                }
+                else
+                {
+                    energyFraction = Mathf.Clamp01(energyFraction - lastLaunchEnergySpent);
+                }
+            }
             flightEnergySpent += lastLaunchEnergySpent; // running total for the pound's whole-flight wash
 
             // The flight speed-up grows with commitment: +1% game speed per 1% of the tank
@@ -1206,11 +1291,21 @@ namespace KineticEnergy.Player
             bool airAimFrozen = airAiming && (isGrounded || SlowdownAvailable());
             // The post-ground-pound window also freezes the cube in place - the free hop
             // just hangs there until the window lapses or an aim opens.
-            if (isAiming || holdChargeDirection != HoldChargeDirection.None || airAimFrozen || isStuck
-                || poundWindowTimer > 0f)
+            bool frozenThisTick = isAiming || holdChargeDirection != HoldChargeDirection.None || airAimFrozen || isStuck
+                || poundWindowTimer > 0f;
+            if (frozenThisTick)
             {
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
+            }
+
+            // Gradual drain: the launch's cost trickles out of the meter as the flight
+            // progresses (paused while frozen mid-aim - the flight isn't progressing then).
+            if (gradualLaunchDrain && !infiniteEnergy && hasLaunched && !frozenThisTick && gradualDrainRemaining > 0f)
+            {
+                float drainStep = Mathf.Min(gradualDrainPerSecond * Time.fixedDeltaTime, gradualDrainRemaining);
+                gradualDrainRemaining -= drainStep;
+                energyFraction = Mathf.Max(energyFraction - drainStep, 0f);
             }
 
             bool slamJustFired = false;
@@ -1247,6 +1342,7 @@ namespace KineticEnergy.Player
             if (isGrounded && !hasLaunched)
             {
                 launchesSinceGrounded = 0;
+                launchesRemainingOverride = -1; // genuinely grounded - the wall-crash limit lifts
                 exactFlightNoNudge = false;
                 flightEnergySpent = 0f; // the flight (and its refund basis) ends on the ground
                 if (!infiniteEnergy) ClampEnergyFloor();
@@ -1402,6 +1498,12 @@ namespace KineticEnergy.Player
             isStuck = true;
             hasLaunched = false;
             launchesSinceGrounded = 0; // a crash is a landing - the launch budget resets
+            // ...EXCEPT under the wall-crash rule: a surface too steep to stand on grants
+            // only the small allowance until the player is genuinely grounded again.
+            bool groundingCrash = Vector3.Dot(contactNormal, Vector3.up) >= flatGroundStickThreshold;
+            launchesRemainingOverride = wallCrashLaunchAllowance > 0 && !groundingCrash
+                ? wallCrashLaunchAllowance
+                : -1;
             exactFlightNoNudge = false;
 
             // A crash closes any aim outright and demands a genuine release-and-repress.
@@ -1431,6 +1533,14 @@ namespace KineticEnergy.Player
                 {
                     nonStickyReleaseTimer = nonStickyWallStickDuration;
                 }
+            }
+
+            // Gradual drain: landing means the launch is 100% spent - whatever hadn't
+            // trickled out yet is taken now, BEFORE the refund is paid.
+            if (gradualLaunchDrain && !infiniteEnergy && gradualDrainRemaining > 0f)
+            {
+                energyFraction = Mathf.Max(energyFraction - gradualDrainRemaining, 0f);
+                gradualDrainRemaining = 0f;
             }
 
             // Breakable crack panes never refund energy - they exist to be smashed through,
@@ -1564,6 +1674,7 @@ namespace KineticEnergy.Player
             Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, damping, out int stepCount, out bool didLand);
             lastPredictedLanding = landingPoint;
             hasValidPredictedLanding = didLand;
+            lastPredictedFlightSeconds = Mathf.Max(stepCount * Time.fixedDeltaTime, 0.1f);
 
             if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
             {
