@@ -29,11 +29,9 @@ namespace KineticEnergy.UI
         public Text controlsBodyText;
 
         [Header("Win")]
-        // Hidden by default, inside PausePanel - FastPacedLevel's finish line (FinishLineWin)
-        // shows it via ShowWin() instead of reloading the scene the way the other levels'
-        // FinishLine does. Lives here rather than on its own component since the win screen IS
-        // the pause screen, just with this one extra label - direct request: "once you reach the
-        // finish line you should open the pause screen and display a text saying You Win!".
+        // Hidden by default, inside PausePanel - The Gauntlet's finish line
+        // (GauntletFinishLine) shows it via ShowWin(). Lives here rather than on its own
+        // component since the win screen IS the pause screen, just with this one extra label.
         public Text winLabel;
 
         bool isPaused;
@@ -56,8 +54,8 @@ namespace KineticEnergy.UI
             winLabel?.gameObject.SetActive(false);
         }
 
-        // FastPacedLevel's finish - the ordinary pause screen with the win label showing. Not
-        // one-shot-guarded here; FinishLineWin only ever calls it once.
+        // The finish line's win state - the ordinary pause screen with the win label showing.
+        // Not one-shot-guarded here; GauntletFinishLine only ever calls it once.
         public void ShowWin()
         {
             winLabel?.gameObject.SetActive(true);
@@ -149,6 +147,20 @@ namespace KineticEnergy.UI
         {
             Time.timeScale = 1f;
             SceneManager.LoadScene(sceneName);
+        }
+
+        // The Gauntlet's two variants are the same scene under one flag - these bake the
+        // tester's choice into the static selection the scene's run logger consumes on load.
+        public void LoadSceneVariantA(string sceneName)
+        {
+            KineticEnergy.Level.SlowdownVariantSelection.PendingVariantB = false;
+            LoadSceneByName(sceneName);
+        }
+
+        public void LoadSceneVariantB(string sceneName)
+        {
+            KineticEnergy.Level.SlowdownVariantSelection.PendingVariantB = true;
+            LoadSceneByName(sceneName);
         }
 
         public void OnQuitClicked()

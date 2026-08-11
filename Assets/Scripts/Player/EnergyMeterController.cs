@@ -15,17 +15,6 @@ namespace KineticEnergy.Player
         public Image energyFillImage;
         public Image chargeFillImage;
 
-        // Automatic Energy mode: the charge bar shows the REQUIRED energy for the aimed shot,
-        // which can exceed what's stored - the bar turns this warning color then (direct
-        // request: "if you don't have enough energy that bar should look red").
-        public Color chargeColor = new Color(0.3f, 0.65f, 1f);
-        public Color insufficientChargeColor = new Color(0.9f, 0.2f, 0.2f);
-
-        public void SetChargeWarning(bool insufficient)
-        {
-            if (chargeFillImage != null) chargeFillImage.color = insufficient ? insufficientChargeColor : chargeColor;
-        }
-
         public void SetEnergy(float fraction)
         {
             if (energyFillImage != null) energyFillImage.fillAmount = Mathf.Clamp01(fraction);

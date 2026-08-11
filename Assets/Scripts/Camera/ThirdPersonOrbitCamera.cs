@@ -37,21 +37,18 @@ namespace KineticEnergy.Camera
         public float maxDeltaTime = 0.05f;
 
         [Header("Auto Recenter")]
-        // Used by StickAim launches (see KineticCubeController.QueueStickAimLaunch) to swing the
-        // camera back behind the player after firing - NOT used by the charge-based schemes,
-        // which need the camera to stay exactly where the player left it so the landing-preview
-        // trail stays fully visible and un-yanked-at (see LandingPreviewController's own accuracy
-        // requirements). Cancels itself the instant the player provides any manual look input, so
-        // it never fights the player's own camera control.
+        // Used by forward hold-charge launches to swing the camera back behind the player
+        // after firing. Cancels itself the instant the player provides any manual look input,
+        // so it never fights the player's own camera control.
         public float recenterSpeed = 240f;
 
         [Header("Input")]
         public InputActionReference lookAction;
 
-        // Tutorial2's midair aim (KineticCubeController.mixedFastPacedAir) - while active, the
-        // LEFT stick aims instead of the right stick (direct request): any non-mouse look input
-        // is substituted by the stick value fed in here each frame. Mouse aiming is deliberately
-        // unaffected - the substitution only applies when the look action isn't mouse-driven.
+        // While the midair aim is open the LEFT stick steers the camera (the right stick is
+        // the energy dial there): any non-mouse look input is substituted by the stick value
+        // fed in here each frame. Mouse aiming is deliberately unaffected - the substitution
+        // only applies when the look action isn't mouse-driven.
         bool aimStickOverrideActive;
         Vector2 aimStickOverrideValue;
         // While the grounded aim's "Aim: Mouse" option is steering the launch direction with
@@ -145,36 +142,17 @@ namespace KineticEnergy.Camera
         public float maxZoomFov = 20f;
         // Pitch limits while first person is active - near-vertical is SAFE there (first person
         // applies the raw rotation directly, none of the LookRotation-at-target degeneracy the
-        // +/-75 orbit limits guard against). Tutorial2's camera instance sets these to +/-89
-        // (direct request); the defaults keep every other scene exactly as before.
-        public float firstPersonMinPitch = -75f;
-        public float firstPersonMaxPitch = 75f;
+        // +/-75 orbit limits guard against), and the midair aim needs to look almost straight
+        // down to line up pounds.
+        public float firstPersonMinPitch = -89f;
+        public float firstPersonMaxPitch = 89f;
 
         UnityEngine.Camera cam;
         bool firstPerson;
 
-        // The up direction the whole orbit is built around - world up everywhere except after a
-        // FastPaced crash onto a tilted platform, where SetUpVector re-bases it to that
-        // platform's surface normal (direct request: "the camera's up should be the platform's up
-        // that the player crashed onto"). currentUp glides toward targetUp in LateUpdate rather
-        // than snapping, so the horizon rolls smoothly over ~a second instead of jump-cutting.
-        // All the orbit math below composes tiltRotation (world-up -> currentUp) with the
-        // ordinary world-up yaw/pitch rotation, so yaw/pitch keep meaning "turn/look within the
-        // current frame of reference" no matter which way that frame is tilted.
-        Vector3 targetUp = Vector3.up;
-        Vector3 currentUp = Vector3.up;
-        public float upAlignSpeed = 3f;
-
-        Quaternion TiltRotation => Quaternion.FromToRotation(Vector3.up, currentUp);
-
-        // World-space direction this camera is currently looking - the FastPaced scheme fires
+        // World-space direction this camera is currently looking - the midair aim fires
         // exactly along this, so the shot always goes exactly where the first-person view points.
-        public Vector3 AimForward => TiltRotation * Quaternion.Euler(pitch, yaw, 0f) * Vector3.forward;
-
-        public void SetUpVector(Vector3 up)
-        {
-            targetUp = up.sqrMagnitude > 0.0001f ? up.normalized : Vector3.up;
-        }
+        public Vector3 AimForward => Quaternion.Euler(pitch, yaw, 0f) * Vector3.forward;
 
         public void SetFirstPersonMode(bool enabled)
         {
@@ -220,7 +198,7 @@ namespace KineticEnergy.Camera
         void Start()
         {
             if (target == null) return;
-            if (yawInitialized) return; // already set externally (e.g. LevelGenerator facing the finish) before this ran
+            if (yawInitialized) return; // already set externally (CameraStartFacing) before this ran
 
             Vector3 offset = transform.position - (target.position + Vector3.up * height);
             if (offset.sqrMagnitude > 0.0001f)
@@ -229,7 +207,7 @@ namespace KineticEnergy.Camera
             }
         }
 
-        // Called from LevelGenerator.Awake() - guaranteed to run before this component's own
+        // Called from CameraStartFacing.Awake() - guaranteed to run before this component's own
         // Start() (Unity runs every Awake() in the scene before any Start()), so it always wins
         // over the offset-based auto-calculation above. Also snaps position immediately rather
         // than letting LateUpdate's SmoothDamp ease into the new orbit spot over a few frames,
@@ -295,14 +273,10 @@ namespace KineticEnergy.Camera
 
             // Unscaled, not Time.deltaTime - Time.deltaTime already shrinks 1:1 with
             // Time.timeScale, which would otherwise make the camera merely ride along with
-            // whatever fraction chargeTimeScale happens to be. Direct request is a flat half
-            // speed specifically whenever the game is running SLOW, not a proportional slowdown
-            // that tracks the exact charge-time-scale value. Strictly < 1, not != 1 - the
-            // FastPaced scheme now SPEEDS the game up to 150% during a flight (see
-            // KineticCubeController.fastPacedFlightTimeScale), and the direct request there is
-            // that camera/aiming be UNAFFECTED by the speed-up, which unscaled time already
-            // gives for free; the != 1 form would have wrongly halved camera speed for the whole
-            // flight.
+            // whatever fraction chargeTimeScale happens to be. Instead the camera runs at a
+            // flat HALF speed whenever the game is running slow. Strictly < 1, not != 1 - a
+            // launch in flight speeds the game UP (KineticCubeController.launchFlightTimeScale)
+            // and camera/aiming must be unaffected by that, which unscaled time gives for free.
             //
             // The frame right after a scene reload (Restart, or the new fall-reset) can have an
             // abnormally large deltaTime - loading everything (Player/Camera/PauseSystem, plus
@@ -348,24 +322,16 @@ namespace KineticEnergy.Camera
                 firstPerson ? firstPersonMinPitch : minPitch,
                 firstPerson ? firstPersonMaxPitch : maxPitch);
 
-            // Glide the reference-frame up toward wherever the last crash re-based it (see
-            // SetUpVector) - Slerp by a rate*dt fraction gives a fast start that eases out, which
-            // reads as the horizon "settling" onto the new platform rather than snapping.
-            currentUp = Vector3.Slerp(currentUp, targetUp, Mathf.Clamp01(upAlignSpeed * dt)).normalized;
-            Quaternion tilt = TiltRotation;
-
             // Traditional 3rd-person platformer orbit: position swings around the target on
             // both yaw and pitch, always framing it, rather than tilting/panning in place.
-            // firstPerson (FastPaced scheme's RMB-aim only - see SetFirstPersonMode) collapses
-            // this to sit exactly at the focus point instead of orbiting at `distance`, using the
-            // raw look rotation directly rather than LookRotation-at-target (which degenerates at
+            // firstPerson (the midair aim's mode - see SetFirstPersonMode) collapses this to
+            // sit exactly at the focus point instead of orbiting at `distance`, using the raw
+            // look rotation directly rather than LookRotation-at-target (which degenerates at
             // zero distance, where focusPoint - transform.position is ~zero and has no reliable
             // direction). Reuses the same SmoothDamp position glide either way, so switching in
-            // or out of first person eases smoothly rather than snapping. Everything is composed
-            // on top of `tilt` so the whole orbit - height offset included - is expressed in the
-            // crashed platform's frame of reference, not the world's (see currentUp above).
-            Quaternion rotation = tilt * Quaternion.Euler(pitch, yaw, 0f);
-            Vector3 focusPoint = target.position + currentUp * height;
+            // or out of first person eases smoothly rather than snapping.
+            Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
+            Vector3 focusPoint = target.position + Vector3.up * height;
 
             // First person: the player's own centre pushed forward past its front face - NOT
             // the focus point, which carries the third-person `height` lift and was what put
@@ -391,7 +357,7 @@ namespace KineticEnergy.Camera
                     // aim - so an up-aimed shot that lands behind/below you can't spin the
                     // view downward.
                     targetRotation = Quaternion.RotateTowards(rotation,
-                        Quaternion.LookRotation(framingDir, currentUp), framingMaxDeviation);
+                        Quaternion.LookRotation(framingDir, Vector3.up), framingMaxDeviation);
                 }
 
                 if (framingJustStarted)
@@ -417,7 +383,7 @@ namespace KineticEnergy.Camera
                 Vector3 lookDir = focusPoint - transform.position;
                 if (lookDir.sqrMagnitude > 0.0001f)
                 {
-                    transform.rotation = Quaternion.LookRotation(lookDir, currentUp);
+                    transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
                 }
             }
 

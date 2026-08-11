@@ -13,8 +13,8 @@ namespace KineticEnergy.Player
     /// up/down extends/shortens how far it travels (pushes more or less force along the camera's
     /// forward direction), stick left/right drifts the landing spot sideways (force along the
     /// camera's right direction). "Subtle" is load-bearing here - airControlAcceleration
-    /// defaults well below gravity (9.81 m/s^2) so this can only ever nudge an already-falling
-    /// arc, never replace it with full player-directed flight.
+    /// stays below gravity so this can only ever nudge an already-falling arc, never replace
+    /// it with full player-directed flight.
     ///
     /// The cube visually leans into whichever way the stick is pushed while airborne (a
     /// snowboard/surfboard-style bank), which is why the mesh lives on a separate `visual` child
@@ -30,9 +30,7 @@ namespace KineticEnergy.Player
     /// grounded movement directly SETS velocity, which must stay blocked for a launch's entire
     /// flight (not just a brief post-launch window) or it can silently overwrite the launch
     /// itself; airborne nudging only ADDS a small force, which can't meaningfully stomp anything,
-    /// so it only needs to wait out that brief window. KineticCubeController's Hold-Release and
-    /// Analog schemes are kept in the project but not currently selectable (see its
-    /// alternateSchemesEnabled) - only Launch Instantly is reachable for now.
+    /// so it only needs to wait out that brief window.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     public class KineticCubeControllerFreeMove : MonoBehaviour
@@ -77,9 +75,8 @@ namespace KineticEnergy.Player
         Quaternion visualTargetRotation = Quaternion.identity;
         float launchFacingYaw;
 
-        // Read by KineticCubeController's StickAim scheme (RT's neutral-stick fallback direction)
-        // and FacingArrowIndicator (the always-on red arrow) - both need "which way is the cube
-        // currently facing", which is exactly what this field already tracks for the lean visual.
+        // Read by KineticCubeController - the forward hold-charge's neutral direction is
+        // "which way is the cube currently facing", which this already tracks for the visual.
         public float FacingYaw => launchFacingYaw;
 
         void Awake()
@@ -147,16 +144,10 @@ namespace KineticEnergy.Player
                 Vector3 horizontalVelocity = moveDirection * moveSpeed;
                 rb.linearVelocity = new Vector3(horizontalVelocity.x, rb.linearVelocity.y, horizontalVelocity.z);
 
-                // StickAim/LaunchInstantly/Mixed: face movement direction instantly while
-                // walking (direct request extended this from StickAim-only to the old scheme and
-                // Mixed's grounded phase too). Only HoldRelease/AnalogPressure - kept in the
-                // project but currently unreachable - still leave facing alone while grounded.
-                bool instantGroundFacing = launchController != null && (
-                    launchController.CurrentScheme == ControlScheme.StickAim ||
-                    launchController.CurrentScheme == ControlScheme.LaunchInstantly ||
-                    launchController.CurrentScheme == ControlScheme.Mixed);
-
-                if (moveDirection.sqrMagnitude > 0.0001f && instantGroundFacing)
+                // Face the movement direction instantly while walking - "launch forward"
+                // means the way the cube is visibly pointing, so walking must keep facing
+                // honest at all times.
+                if (moveDirection.sqrMagnitude > 0.0001f)
                 {
                     launchFacingYaw = Mathf.Atan2(moveDirection.x, moveDirection.z) * Mathf.Rad2Deg;
                     if (visual != null) visual.localRotation = Quaternion.Euler(0f, launchFacingYaw, 0f);
@@ -191,12 +182,12 @@ namespace KineticEnergy.Player
                     // already is (from gravity, and from however the cube left the ground) rather
                     // than overriding it, so it always reads as "steering an existing fall".
                     //
-                    // Divided back out by timeScale when the game is running FAST (FastPaced's
-                    // 150% in-flight speed-up - see KineticCubeController.fastPacedFlightTimeScale):
-                    // at timeScale 1.5 the physics steps 1.5x as much game-time per real second,
-                    // so an unadjusted acceleration would integrate into 1.5x the nudge per real
-                    // second of stick-holding - direct request is that nudging NOT be affected by
-                    // the speed-up. Slow-motion (charging) is deliberately left uncompensated:
+                    // Divided back out by timeScale when the game is running FAST (the in-flight
+                    // speed-up, KineticCubeController.launchFlightTimeScale): at timeScale 2 the
+                    // physics steps twice as much game-time per real second, so an unadjusted
+                    // acceleration would integrate into twice the nudge per real second of
+                    // stick-holding. Nudge strength per real second must not depend on the
+                    // speed-up. Slow-motion (charging) is deliberately left uncompensated:
                     // nothing is in flight to nudge during a charge anyway.
                     float speedUpCompensation = Time.timeScale > 1f ? 1f / Time.timeScale : 1f;
                     Vector3 correction = (forward * stick.y + right * stick.x) * (airControlAcceleration * speedUpCompensation);
