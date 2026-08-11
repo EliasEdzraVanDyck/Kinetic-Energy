@@ -22,17 +22,11 @@ namespace KineticEnergy.Player
         public GameObject crosshairGroup;
         [Tooltip("Offset along the landing face's normal - negative moves the marker from the resting center onto the surface.")]
         public float markerGroundOffset = -0.5f;
+        [Tooltip("Small extra lift off the landing face so the marker never clips into it.")]
+        public float markerSurfaceLift = 0.06f;
         public Transform[] trailDots;
         [Tooltip("Maximum gap between adjacent trail dots, in meters of real arc length.")]
         public float maxDotSpacing = 1f;
-
-        [Header("Marker Smoothing")]
-        // The prediction recomputes every frame, so the landing point can legitimately jump
-        // between platforms as charge changes - smoothing glides between successive targets
-        // instead of popping. snapDistance still teleports across a genuinely large jump
-        // (aim swung to a different part of the level) rather than flying the marker there.
-        public float positionSmoothTime = 0.05f;
-        public float snapDistance = 25f;
 
         [Tooltip("What the preview shows before any runtime SetMode call.")]
         public PredictionMode initialMode = PredictionMode.Trail;
@@ -40,7 +34,6 @@ namespace KineticEnergy.Player
         PredictionMode currentMode = PredictionMode.Trail;
         bool isVisible;
         bool hasLanding = true;
-        Vector3 crosshairSmoothVelocity;
 
         public PredictionMode CurrentMode => currentMode;
 
@@ -71,10 +64,12 @@ namespace KineticEnergy.Player
             hasLanding = didLand;
             ApplyModeVisibility();
 
+            // The cursor tracks the prediction INSTANTLY - no smoothing glide. The aim's
+            // feedback loop lives on this marker, so any lag reads as input latency.
             if (hasLanding && crosshairGroup != null)
             {
                 Vector3 normal = landingNormal.sqrMagnitude > 0.0001f ? landingNormal.normalized : Vector3.up;
-                MoveSmoothly(crosshairGroup.transform, landingPoint + normal * markerGroundOffset, ref crosshairSmoothVelocity);
+                crosshairGroup.transform.position = landingPoint + normal * (markerGroundOffset + markerSurfaceLift);
                 crosshairGroup.transform.rotation = Quaternion.FromToRotation(Vector3.up, normal);
             }
 
@@ -161,19 +156,6 @@ namespace KineticEnergy.Player
 
                 trailDots[d].position = Vector3.Lerp(trajectory[segmentEnd - 1], trajectory[segmentEnd], segmentT);
             }
-        }
-
-        void MoveSmoothly(Transform t, Vector3 target, ref Vector3 velocity)
-        {
-            float jump = Vector3.Distance(t.position, target);
-
-            if (jump > snapDistance)
-            {
-                t.position = target;
-                velocity = Vector3.zero;
-                return;
-            }
-            t.position = Vector3.SmoothDamp(t.position, target, ref velocity, positionSmoothTime);
         }
 
         void ApplyModeVisibility()

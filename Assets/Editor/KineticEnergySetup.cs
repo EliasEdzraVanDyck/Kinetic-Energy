@@ -56,14 +56,28 @@ namespace KineticEnergy.EditorSetup
         const float DownLaunchDamping = 0.2f;
         const float Gravity = -30f;
         const float ChargeAccumulationRate = 0.3f;
-        const float UpDownChargeSpeedMultiplier = 1.5f;
+        // The grounded aim, forward hold-charge and midair dial accelerate: the rate grows
+        // the longer the input sustains in one direction. (Up/down charges use the pound's
+        // own base+growth ramp above.)
+        const float ChargeAcceleration = 1f;
+        // Doubled from the original 7 (direct request: "increase air control significantly")
+        // - still below gravity (30), so the nudge steers a fall rather than replacing it.
+        const float AirControlAcceleration = 14f;
         const float EnergyCostPerFullCharge = 1f;
         const float MinEnergyReserve = 0.05f;
         const float MidairRefundSpendFactor = 0.3f;
-        const float GroundPoundRefundMultiplier = 1.7f;
-        const float GroundPoundMinRefund = 0.1f;
+        // The EnergyEconomy4 ground pound (Final-Project branch): bounce hop, slow-mo
+        // window, boosted whole-flight refund claimed by aiming inside the window, and the
+        // base+growth charge ramp. Values are EnergyEconomy4's scene overrides.
+        const float GroundPoundBoostMultiplier = 1.5f;
+        const float GroundPoundHopHeight = 0.2f;
+        const float GroundPoundSlowDuration = 0.5f;
+        const float GroundPoundChargeBaseSpeed = 1.5f;
+        const float GroundPoundChargeSpeedGrowth = 5f;
         const float ChargeTimeScale = 0.2f;
+        // Flight game speed: 200% base, +1% per 1% of the tank spent on the launch.
         const float LaunchFlightTimeScale = 2f;
+        const float FlightTimeScaleEnergyBonus = 1f;
         const float AimBudgetSeconds = 2f;
         // Parity rule: a full tank must buy about the same slow-time as the aim budget, or
         // the A/B test measures generosity instead of architecture. 1 tank / 2s = 0.5/s.
@@ -83,14 +97,18 @@ namespace KineticEnergy.EditorSetup
             controller.downLaunchDamping = DownLaunchDamping;
             controller.gravity = Gravity;
             controller.chargeAccumulationRate = ChargeAccumulationRate;
-            controller.upDownChargeSpeedMultiplier = UpDownChargeSpeedMultiplier;
+            controller.chargeAcceleration = ChargeAcceleration;
+            controller.groundPoundBoostMultiplier = GroundPoundBoostMultiplier;
+            controller.groundPoundHopHeight = GroundPoundHopHeight;
+            controller.groundPoundSlowDuration = GroundPoundSlowDuration;
+            controller.groundPoundChargeBaseSpeed = GroundPoundChargeBaseSpeed;
+            controller.groundPoundChargeSpeedGrowth = GroundPoundChargeSpeedGrowth;
             controller.energyCostPerFullCharge = EnergyCostPerFullCharge;
             controller.minEnergyReserve = MinEnergyReserve;
             controller.midairRefundSpendFactor = MidairRefundSpendFactor;
-            controller.groundPoundRefundMultiplier = GroundPoundRefundMultiplier;
-            controller.groundPoundMinRefund = GroundPoundMinRefund;
             controller.chargeTimeScale = ChargeTimeScale;
             controller.launchFlightTimeScale = LaunchFlightTimeScale;
+            controller.flightTimeScaleEnergyBonus = FlightTimeScaleEnergyBonus;
             controller.aimBudgetSeconds = AimBudgetSeconds;
             controller.tankDrainPerSecond = TankDrainPerSecond;
             controller.dialStickRate = DialStickRate;
@@ -117,7 +135,9 @@ namespace KineticEnergy.EditorSetup
             controller.infiniteEnergy = false;
             controller.slowdownMode = SlowdownMode.Unlimited;
             controller.fallResetY = -30f;
-            controller.groundedAimWithMouse = false;
+            // Mouse aiming is the grounded default; gamepad sticks keep their normal roles
+            // regardless (device checked per frame, no binding masks involved).
+            controller.groundedAimWithMouse = true;
             controller.groundedMouseAimSensitivity = 0.15f;
             controller.wasdCameraTurnMultiplier = 1.5f;
 
@@ -227,10 +247,39 @@ namespace KineticEnergy.EditorSetup
                 LandingPreviewController preview = root.GetComponentInChildren<LandingPreviewController>(true);
                 if (preview != null)
                 {
-                    preview.initialMode = PredictionMode.Trail;
+                    preview.initialMode = PredictionMode.TrailAndCrosshair;
                     controller.landingPreview = preview;
+
+                    // The dotted line is composed of SPHERES (direct request).
+                    Mesh sphereMesh = Resources.GetBuiltinResource<Mesh>("New-Sphere.fbx");
+                    if (preview.trailDots != null)
+                    {
+                        foreach (Transform dot in preview.trailDots)
+                        {
+                            MeshFilter dotMesh = dot != null ? dot.GetComponent<MeshFilter>() : null;
+                            if (dotMesh != null) dotMesh.sharedMesh = sphereMesh;
+                        }
+                    }
                 }
                 controller.aimArrow = root.GetComponentInChildren<AimArrowIndicator>(true);
+
+                // The player MODEL is a sphere (direct request) - visual only. Physics keeps
+                // the BoxCollider: the footprint BoxCasts, the crash-stick alignment, and the
+                // prediction clone are all built around it, and the sphere mesh's 1m diameter
+                // sits fully inside the same 1m box.
+                KineticCubeControllerFreeMove freeMove = root.GetComponent<KineticCubeControllerFreeMove>();
+                if (freeMove != null)
+                {
+                    freeMove.airControlAcceleration = AirControlAcceleration;
+                    if (freeMove.visual != null)
+                    {
+                        MeshFilter visualMesh = freeMove.visual.GetComponentInChildren<MeshFilter>(true);
+                        if (visualMesh != null)
+                        {
+                            visualMesh.sharedMesh = Resources.GetBuiltinResource<Mesh>("New-Sphere.fbx");
+                        }
+                    }
+                }
 
                 PrefabUtility.SaveAsPrefabAsset(root, path);
             }
@@ -254,6 +303,23 @@ namespace KineticEnergy.EditorSetup
                 RemoveMissingScripts(root);
                 DestroyChildrenMatching(root.transform, "RadialMenu");
                 DestroyChildrenMatching(root.transform, "PreviewModeLabel");
+
+                // The energy meter's orange BONUS bar (the ground pound's still-unclaimed
+                // boost extra), drawn behind the yellow fill so only the extra pokes out.
+                Transform meterUi = root.transform.Find("PauseCanvas/EnergyMeter");
+                Transform meterControllerChild = root.transform.Find("EnergyMeter");
+                EnergyMeterController meterController = meterControllerChild != null ? meterControllerChild.GetComponent<EnergyMeterController>() : null;
+                if (meterUi != null && meterController != null)
+                {
+                    Transform staleBonus = meterUi.Find("BonusFill");
+                    if (staleBonus != null) UnityEngine.Object.DestroyImmediate(staleBonus.gameObject);
+
+                    Image bonusFill = CreateFillBar("BonusFill", meterUi, new Color(1f, 0.55f, 0.1f, 0.95f), 3f);
+                    Transform energyFill = meterUi.Find("EnergyFill");
+                    if (energyFill != null) bonusFill.transform.SetSiblingIndex(energyFill.GetSiblingIndex());
+                    bonusFill.gameObject.SetActive(false);
+                    meterController.bonusFillImage = bonusFill;
+                }
 
                 Transform scenesPanel = root.transform.Find("PauseCanvas/ScenesPanel");
                 if (scenesPanel != null)
@@ -338,6 +404,7 @@ namespace KineticEnergy.EditorSetup
             }
 
             ApplyPlayerTuning(rig.controller);
+            rig.freeMove.airControlAcceleration = AirControlAcceleration;
             rig.controller.cameraTransform = cameraRig.transform;
             rig.controller.cameraOrbit = rig.orbitCamera;
             rig.freeMove.cameraTransform = cameraRig.transform;
@@ -349,6 +416,7 @@ namespace KineticEnergy.EditorSetup
             // First person may look near-vertical - the midair aim lines up pounds this way.
             rig.orbitCamera.firstPersonMinPitch = -89f;
             rig.orbitCamera.firstPersonMaxPitch = 89f;
+            rig.orbitCamera.framingMaxDeviation = 45f;
 
             // Pause system wiring.
             rig.pauseCanvas = pauseSystem.transform.Find("PauseCanvas");
@@ -396,6 +464,7 @@ namespace KineticEnergy.EditorSetup
             BuildPlayerShadow(player.transform);
             BuildDirectionalLight();
             BuildGlobalVolume();
+            ConfigureShadowDistance(300f);
 
             EditorUtility.SetDirty(rig.controller);
             EditorUtility.SetDirty(rig.freeMove);
@@ -523,10 +592,22 @@ namespace KineticEnergy.EditorSetup
         // exercising one property of the launch, inside a sticky boundary cage so
         // overshooting parks you on the world's ceiling instead of killing you.
 
+        // The level document sizes the quarry in multiples of a MAX-charge launch (L), which
+        // at the current tuning is ~107m - far too sparse in practice. This densifies the
+        // whole quarry uniformly (0.35 = roughly a third of the distances everywhere). The
+        // Gauntlet deliberately has no such knob, since its beat difficulty depends on gaps
+        // being honest fractions of a real max launch.
+        const float QuarryScale = 0.35f;
+
         [MenuItem("Tools/Kinetic Energy/Setup Quarry")]
         public static void SetupQuarry()
         {
             MeasureLaunchDistances(out float L, out float H);
+            // The boundary must be sized against the REAL max launch, not the scaled level
+            // units - a scaled-down cage would be jumpable.
+            float realMaxLaunchHeight = H;
+            L *= QuarryScale;
+            H *= QuarryScale;
             Debug.Log($"KineticEnergySetup: measured launch units L={L:F1}m (max-charge grounded launch at {ReferenceAimPitchDegrees} degrees), H={H:F1}m (max-charge straight-up apex).");
 
             NewEmptyScene(QuarryScenePath);
@@ -534,7 +615,6 @@ namespace KineticEnergy.EditorSetup
             float width = 3f * L;       // x
             float depth = 3f * L;       // z
             float rimHeight = 2.5f * H; // y of the quarry rim
-            float cageTop = 3f * H;     // sticky world ceiling
 
             Material rockFloor = MakeMaterial("QuarryFloorMaterial", new Color(0.42f, 0.52f, 0.42f));
             Material rockWall = MakeMaterial("QuarryWallMaterial", new Color(0.32f, 0.45f, 0.36f));
@@ -542,28 +622,31 @@ namespace KineticEnergy.EditorSetup
             Material perchMat = MakeMaterial("QuarryPerchMaterial", new Color(0.45f, 0.55f, 0.72f));
             Material markerMat = MakeMaterial("QuarryMarkerMaterial", new Color(0.95f, 0.85f, 0.25f));
 
-            // --- Terrain container: everything under it is sticky (GetComponentInParent). ---
+            // --- Terrain container. NOTHING here is sticky by default: stickiness is
+            // strictly opt-in via a StickySurface component on the individual object (see
+            // MakeSticky calls below - only the chimney interior and the cathedral's
+            // hang-spots get one). Add or remove StickySurface on any object to change it. ---
             GameObject terrain = new GameObject("QuarryTerrain");
-            terrain.AddComponent<StickySurface>().sticky = true;
             Transform tf = terrain.transform;
 
             // Zone A - the bowl floor: deliberately empty, nothing on it but scale.
             CreateBlock(tf, "QuarryFloor", new Vector3(0f, -1f, 0f), new Vector3(width, 2f, depth), rockFloor);
 
-            // Four rim walls, sloping slightly inward (~8 degrees) so no face is a pure
-            // vertical box. Oversized and sunk below the floor so the tilt leaves no seams.
-            const float wallTilt = 8f;
+            // Four vertical rim walls, sunk below the floor so there are no seams.
+            // Non-sticky: their own container, no StickySurface.
+            GameObject rimWalls = new GameObject("QuarryRimWalls");
+            Transform wallsTf = rimWalls.transform;
             const float wallThickness = 8f;
             float wallHeight = rimHeight + 20f;
-            float lean = Mathf.Sin(wallTilt * Mathf.Deg2Rad) * wallHeight * 0.5f;
-            CreateRotatedBlock(tf, "WallSouth", new Vector3(0f, rimHeight * 0.5f, -depth * 0.5f - wallThickness * 0.5f + lean),
-                new Vector3(width + wallThickness * 2f, wallHeight, wallThickness), Quaternion.Euler(-wallTilt, 0f, 0f), rockWall);
-            CreateRotatedBlock(tf, "WallNorth", new Vector3(0f, rimHeight * 0.5f, depth * 0.5f + wallThickness * 0.5f - lean),
-                new Vector3(width + wallThickness * 2f, wallHeight, wallThickness), Quaternion.Euler(wallTilt, 0f, 0f), rockWall);
-            CreateRotatedBlock(tf, "WallWest", new Vector3(-width * 0.5f - wallThickness * 0.5f + lean, rimHeight * 0.5f, 0f),
-                new Vector3(wallThickness, wallHeight, depth + wallThickness * 2f), Quaternion.Euler(0f, 0f, -wallTilt), rockWall);
-            CreateRotatedBlock(tf, "WallEast", new Vector3(width * 0.5f + wallThickness * 0.5f - lean, rimHeight * 0.5f, 0f),
-                new Vector3(wallThickness, wallHeight, depth + wallThickness * 2f), Quaternion.Euler(0f, 0f, wallTilt), rockWall);
+            float wallCenterY = rimHeight - wallHeight * 0.5f; // top flush with the rim, base sunk 20m under the floor
+            CreateBlock(wallsTf, "WallSouth", new Vector3(0f, wallCenterY, -depth * 0.5f - wallThickness * 0.5f),
+                new Vector3(width + wallThickness * 2f, wallHeight, wallThickness), rockWall);
+            CreateBlock(wallsTf, "WallNorth", new Vector3(0f, wallCenterY, depth * 0.5f + wallThickness * 0.5f),
+                new Vector3(width + wallThickness * 2f, wallHeight, wallThickness), rockWall);
+            CreateBlock(wallsTf, "WallWest", new Vector3(-width * 0.5f - wallThickness * 0.5f, wallCenterY, 0f),
+                new Vector3(wallThickness, wallHeight, depth + wallThickness * 2f), rockWall);
+            CreateBlock(wallsTf, "WallEast", new Vector3(width * 0.5f + wallThickness * 0.5f, wallCenterY, 0f),
+                new Vector3(wallThickness, wallHeight, depth + wallThickness * 2f), rockWall);
 
             // Spawn ledge, mid-height on the south wall, looking in.
             float ledgeY = rimHeight * 0.5f;
@@ -579,50 +662,42 @@ namespace KineticEnergy.EditorSetup
                 float y = 0.4f * H * (i + 1);
                 float z = -0.9f * L + 0.6f * L * i;
                 float terraceDepth = terraceDepths[i];
-                float inset = Mathf.Sin(wallTilt * Mathf.Deg2Rad) * y; // follow the wall's lean
                 CreateBlock(tf, "Terrace" + (i + 1),
-                    new Vector3(-width * 0.5f + inset + terraceDepth * 0.5f, y - 0.5f, z),
+                    new Vector3(-width * 0.5f + terraceDepth * 0.5f, y - 0.5f, z),
                     new Vector3(terraceDepth, 1f, 8f), ledgeMat);
             }
 
             // Zone C - the cathedral (east wall): two overhangs and a sticky ceiling patch
             // whose underside is reachable only by a straight-up launch from the floor.
-            float eastInnerX(float atHeight) => width * 0.5f - Mathf.Sin(wallTilt * Mathf.Deg2Rad) * atHeight;
+            // NOTE: nothing in this scene carries StickySurface - assign it by hand in the
+            // editor wherever you decide a surface should hold.
+            float eastInnerX = width * 0.5f;
             CreateBlock(tf, "CathedralOverhangLow",
-                new Vector3(eastInnerX(0.8f * H) - 0.075f * L, 0.8f * H, 0.3f * L),
+                new Vector3(eastInnerX - 0.075f * L, 0.8f * H, 0.3f * L),
                 new Vector3(0.15f * L, 2f, 0.2f * L), rockWall);
             CreateBlock(tf, "CathedralOverhangHigh",
-                new Vector3(eastInnerX(1.5f * H) - 0.06f * L, 1.5f * H, -0.2f * L),
+                new Vector3(eastInnerX - 0.06f * L, 1.5f * H, -0.2f * L),
                 new Vector3(0.12f * L, 2f, 0.16f * L), rockWall);
             // Ceiling patch: sits just under one max-charge straight-up launch from the floor.
-            Vector3 ceilingPatchCenter = new Vector3(eastInnerX(0.92f * H) - 0.2f * L, 0.92f * H, 0.05f * L);
+            Vector3 ceilingPatchCenter = new Vector3(eastInnerX - 0.2f * L, 0.92f * H, 0.05f * L);
             CreateBlock(tf, "CathedralCeilingPatch", ceilingPatchCenter, new Vector3(0.3f * L, 2f, 0.3f * L), rockWall);
             // The launch spot on the floor directly beneath it, marked.
             CreateBlock(tf, "CeilingLaunchMarker", new Vector3(ceilingPatchCenter.x, 0.05f, ceilingPatchCenter.z), new Vector3(4f, 0.1f, 4f), markerMat);
 
-            // Zone D - the chimney (north-west corner): a sticky shaft 0.8L square rising to
-            // 1.6H, with a breakable crack floor halfway up. Intended discovery: launch up
-            // the shaft (chaining off its sticky walls), exit the top, pound back down
-            // THROUGH the crack floor into the pit below it.
-            float shaft = 0.8f * L;
-            float shaftTop = 1.6f * H;
-            Vector3 shaftCenter = new Vector3(-width * 0.5f + shaft * 0.5f + 0.15f * L, 0f, depth * 0.5f - shaft * 0.5f - 0.15f * L);
-            const float shaftWallThickness = 4f;
-            CreateBlock(tf, "ChimneyWallWest", shaftCenter + new Vector3(-shaft * 0.5f - shaftWallThickness * 0.5f, shaftTop * 0.5f, 0f),
-                new Vector3(shaftWallThickness, shaftTop, shaft + shaftWallThickness * 2f), rockWall);
-            CreateBlock(tf, "ChimneyWallEast", shaftCenter + new Vector3(shaft * 0.5f + shaftWallThickness * 0.5f, shaftTop * 0.5f, 0f),
-                new Vector3(shaftWallThickness, shaftTop, shaft + shaftWallThickness * 2f), rockWall);
-            CreateBlock(tf, "ChimneyWallNorth", shaftCenter + new Vector3(0f, shaftTop * 0.5f, shaft * 0.5f + shaftWallThickness * 0.5f),
-                new Vector3(shaft, shaftTop, shaftWallThickness), rockWall);
-            CreateBlock(tf, "ChimneyWallSouth", shaftCenter + new Vector3(0f, shaftTop * 0.5f, -shaft * 0.5f - shaftWallThickness * 0.5f),
-                new Vector3(shaft, shaftTop, shaftWallThickness), rockWall);
-            // The crack floor: the breakable pane prefab scaled to span the shaft, smashable
-            // only by a downward pound from above.
-            GameObject crackFloor = InstantiatePrefab("BreakableCrackWall");
-            crackFloor.name = "ChimneyCrackFloor";
-            crackFloor.transform.position = shaftCenter + new Vector3(0f, shaftTop * 0.5f, 0f);
-            crackFloor.transform.localScale = new Vector3(shaft / 4f, 1f, shaft / 4f); // the pane asset is 4x4
-            // The pit below it: floor is the quarry floor, already sticky.
+            // Zone D - the north-west corner: a climbing cluster of platforms stepping up
+            // and into the corner at varied heights, with a target above the top one.
+            Vector3 cornerBase = new Vector3(-width * 0.5f + 0.35f * L, 0f, depth * 0.5f - 0.35f * L);
+            Vector3[] cornerPlatforms =
+            {
+                cornerBase + new Vector3(0.15f * L, 0.3f * H - 0.5f, -0.15f * L),
+                cornerBase + new Vector3(-0.05f * L, 0.65f * H - 0.5f, 0.05f * L),
+                cornerBase + new Vector3(0.1f * L, 1.0f * H - 0.5f, 0.12f * L),
+                cornerBase + new Vector3(-0.12f * L, 1.35f * H - 0.5f, -0.08f * L),
+            };
+            for (int i = 0; i < cornerPlatforms.Length; i++)
+            {
+                CreateBlock(tf, "CornerPlatform" + (i + 1), cornerPlatforms[i], new Vector3(8f, 1f, 8f), ledgeMat);
+            }
 
             // Zone E - the perches: the only NON-sticky surfaces in the level (0.3s cling).
             // A separate container without StickySurface, visually distinct.
@@ -639,21 +714,25 @@ namespace KineticEnergy.EditorSetup
                 CreateBlock(perches.transform, "Perch" + (i + 1), perchPositions[i], new Vector3(7f, 1f, 7f), perchMat);
             }
 
-            // Boundary cage: the rim continues upward as INVISIBLE sticky borders to a
-            // ceiling at 3H. Overshooting parks you on the world's ceiling - failure becomes
-            // a vantage point to pound back in from.
+            // Boundary cage: the rim continues upward as INVISIBLE wall borders, tall enough
+            // that even a max-charge launch from the rim can't clear them. No ceiling -
+            // gravity is the ceiling. Non-sticky (a boundary is a catch-net, not a perch)
+            // and ignored by the aim preview, so the trail never lands on empty sky.
             GameObject cage = new GameObject("BoundaryCage");
-            cage.AddComponent<StickySurface>().sticky = true;
-            CreateInvisibleBox(cage.transform, "CageCeiling", new Vector3(0f, cageTop + 2f, 0f), new Vector3(width + 40f, 4f, depth + 40f));
-            CreateInvisibleBox(cage.transform, "CageSouth", new Vector3(0f, (rimHeight + cageTop) * 0.5f, -depth * 0.5f - 6f), new Vector3(width + 40f, cageTop - rimHeight + 8f, 4f));
-            CreateInvisibleBox(cage.transform, "CageNorth", new Vector3(0f, (rimHeight + cageTop) * 0.5f, depth * 0.5f + 6f), new Vector3(width + 40f, cageTop - rimHeight + 8f, 4f));
-            CreateInvisibleBox(cage.transform, "CageWest", new Vector3(-width * 0.5f - 6f, (rimHeight + cageTop) * 0.5f, 0f), new Vector3(4f, cageTop - rimHeight + 8f, depth + 40f));
-            CreateInvisibleBox(cage.transform, "CageEast", new Vector3(width * 0.5f + 6f, (rimHeight + cageTop) * 0.5f, 0f), new Vector3(4f, cageTop - rimHeight + 8f, depth + 40f));
+            cage.AddComponent<AimPreviewIgnored>();
+            float cageTop = rimHeight + realMaxLaunchHeight + 15f;
+            float cageWallHeight = cageTop - rimHeight + 8f;
+            float cageCenterY = (rimHeight + cageTop) * 0.5f;
+            CreateInvisibleBox(cage.transform, "CageSouth", new Vector3(0f, cageCenterY, -depth * 0.5f - 6f), new Vector3(width + 40f, cageWallHeight, 4f));
+            CreateInvisibleBox(cage.transform, "CageNorth", new Vector3(0f, cageCenterY, depth * 0.5f + 6f), new Vector3(width + 40f, cageWallHeight, 4f));
+            CreateInvisibleBox(cage.transform, "CageWest", new Vector3(-width * 0.5f - 6f, cageCenterY, 0f), new Vector3(4f, cageWallHeight, depth + 40f));
+            CreateInvisibleBox(cage.transform, "CageEast", new Vector3(width * 0.5f + 6f, cageCenterY, 0f), new Vector3(4f, cageWallHeight, depth + 40f));
 
-            // The rig, configured as a toy: infinite energy, free unlimited slow-down, no
-            // fail state. The only exits are the pause menu and the menu pad below.
+            // The rig, with EnergyEconomy1's exact energy balancing (20% start, last-launch
+            // refunds) plus the EnergyEconomy4 ground pound - both are the tuning defaults
+            // ApplyPlayerTuning already stamps. Slow-down is unmetered here; no fail state.
+            // The only exits are the pause menu and the menu pad below.
             CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
-            rig.controller.infiniteEnergy = true;
             rig.controller.slowdownMode = SlowdownMode.Unlimited;
             // The cage means nothing can fall out of the world - park the reset far below
             // the floor so it can never fire.
@@ -686,7 +765,7 @@ namespace KineticEnergy.EditorSetup
                 new Vector3(0f, 0.3f * H, 0.2f * L),                                        // Zone A - over the open bowl
                 new Vector3(-width * 0.5f + 12f, 0.4f * H * 4f + 3f, -0.9f * L + 1.8f * L), // Zone B - above the top terrace
                 ceilingPatchCenter + new Vector3(0f, -4f, 0f),                              // Zone C - hanging under the ceiling patch
-                shaftCenter + new Vector3(0f, 6f, 0f),                                      // Zone D - in the chimney's pit
+                cornerPlatforms[3] + new Vector3(0f, 5f, 0f),                               // Zone D - above the corner cluster's top platform
                 perchPositions[2] + new Vector3(0f, 4f, 0f),                                // Zone E - over a perch
                 new Vector3(0.9f * L, 1.9f * H, 0.9f * L),                                  // awkward mid-air
                 new Vector3(-1.1f * L, 1.1f * H, -0.9f * L),
@@ -733,10 +812,11 @@ namespace KineticEnergy.EditorSetup
             float recoveryY = -0.35f * H;
             float fallReset = -0.6f * H;
 
-            // Everything sticky lives under this container; recovery ledges are sticky too
-            // (they are safety, not a hazard).
+            // NOTHING here is sticky by default - stickiness is strictly opt-in via a
+            // StickySurface component on the individual object. In this level only beat 3's
+            // strip carries one (plus the beat-5 panel's own TimedStickyPanel); every
+            // platform top is flat and walkable, so nothing else needs to hold.
             GameObject terrain = new GameObject("GauntletPlatforms");
-            terrain.AddComponent<StickySurface>().sticky = true;
             Transform tf = terrain.transform;
 
             var beatRegions = new List<(int beat, Vector3 center, Vector3 size)>();
@@ -960,6 +1040,14 @@ namespace KineticEnergy.EditorSetup
             return go;
         }
 
+        // Stickiness is strictly opt-in, per object - a surface only holds a crash if it
+        // itself carries a StickySurface component, visible in the Inspector.
+        static GameObject MakeSticky(GameObject go)
+        {
+            go.AddComponent<StickySurface>().sticky = true;
+            return go;
+        }
+
         // Solid and sticky-taggable but never rendered - the boundary cage. A plain
         // GameObject with only a BoxCollider: the landing prediction picks it up like any
         // other static collider, so the trail honestly shows a landing on the world's edge.
@@ -981,11 +1069,28 @@ namespace KineticEnergy.EditorSetup
             go.transform.position = position;
             go.transform.localScale = Vector3.one * 3f;
             go.GetComponent<Renderer>().sharedMaterial = material;
-            SphereCollider collider = go.GetComponent<SphereCollider>();
-            collider.isTrigger = true;
+            // SOLID on purpose: the player crash-lands on the sphere (normal refund), it
+            // vanishes, and the aim preview treats it as a genuine landing target.
             TargetSphere sphere = go.AddComponent<TargetSphere>();
             sphere.counter = counter;
             EditorUtility.SetDirty(sphere);
+        }
+
+        // URP ships with a ~50m max shadow distance - at this project's arena sizes that
+        // leaves most of the level shadowless while nearby blocks are shadowed, which reads
+        // as broken. Raised on every URP quality asset in Assets/Settings.
+        static void ConfigureShadowDistance(float distance)
+        {
+            foreach (string guid in AssetDatabase.FindAssets("t:UniversalRenderPipelineAsset", new[] { "Assets/Settings" }))
+            {
+                var pipelineAsset = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset>(AssetDatabase.GUIDToAssetPath(guid));
+                if (pipelineAsset != null && !Mathf.Approximately(pipelineAsset.shadowDistance, distance))
+                {
+                    pipelineAsset.shadowDistance = distance;
+                    EditorUtility.SetDirty(pipelineAsset);
+                }
+            }
+            AssetDatabase.SaveAssets();
         }
 
         static void BuildDirectionalLight()
@@ -1035,8 +1140,10 @@ namespace KineticEnergy.EditorSetup
             UnityEngine.Object.DestroyImmediate(visualGo.GetComponent<Collider>());
             visualGo.transform.localScale = new Vector3(1.6f, 0.02f, 1.6f);
 
+            // UNLIT on purpose - a lit black disc picks up lighting/shadowing and stops
+            // reading as a shadow at all.
             Color shadowColor = new Color(0f, 0f, 0f, 0.5f);
-            Material shadowMat = new Material(FindBestShader());
+            Material shadowMat = new Material(FindUnlitShader());
             shadowMat.color = shadowColor;
             MakeTransparent(shadowMat, shadowColor.a);
             shadowMat = SaveMaterialAsset(shadowMat, "PlayerShadowMaterial");
@@ -1101,6 +1208,14 @@ namespace KineticEnergy.EditorSetup
             mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
             mat.DisableKeyword("_ALPHAMODULATE_ON");
             mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        }
+
+        static Shader FindUnlitShader()
+        {
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null) shader = Shader.Find("Unlit/Color");
+            if (shader == null) shader = FindBestShader();
+            return shader;
         }
 
         static Shader FindBestShader()

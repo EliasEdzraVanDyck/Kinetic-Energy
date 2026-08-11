@@ -1,12 +1,15 @@
 using UnityEngine;
-using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // An optional self-directed goal (The Quarry): a floating sphere the player collects by
-    // touching it. It disappears, bumps the session counter, and respawns in place after
-    // respawnSeconds. No timer, no score screen, no failure - just a spine for free play.
-    // Trigger collider only, so it never alters a flight that passes through it.
+    // A SOLID target sphere: the player crashes into it like any surface (full energy
+    // refund by the scene's rules), then the sphere vanishes, leaving them hanging where it
+    // was - launch again to carry on, or ride out the brief cling and drop (the controller
+    // arms that release unconditionally for targets, since there is no surface left to rest
+    // on - see KineticCubeController.RegisterCrash). Being solid also makes it a genuine aim
+    // target: the dotted trail terminates on it and the reticle focuses it.
+    // Unlike the original one-shot version, it respawns in place after respawnSeconds and
+    // reports to the session counter.
     public class TargetSphere : MonoBehaviour
     {
         [Tooltip("Seconds after collection before this sphere reappears.")]
@@ -37,11 +40,10 @@ namespace KineticEnergy.Level
             }
         }
 
-        void OnTriggerEnter(Collider other)
+        // Called by KineticCubeController the moment the player crash-lands on this sphere.
+        public void OnHitByCrash()
         {
             if (respawnRemaining > 0f) return;
-            if (other.GetComponent<KineticCubeController>() == null) return;
-
             counter?.ReportCollected();
             respawnRemaining = respawnSeconds;
             SetCollected(true);

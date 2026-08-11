@@ -100,15 +100,24 @@ namespace KineticEnergy.Camera
         // the landing point MOVES (new target, changed energy), which is what stops the
         // violent whipping when a target jumps (direct request).
         public float framingTurnSpeed = 300f;
-        // How far the framed view may ever deviate from the actual AIM direction. Without this
-        // a steeply-up shot - which arcs over and lands BELOW you - swung the camera round to
-        // look down while you were aiming up (direct report). Inside the cap the cursor still
-        // centres normally; past it the view stays with the aim.
+        // How close (degrees, per axis) the cursor must be to the AIM for the view to centre
+        // on it. Past this the view stays glued to the aim - never pulled partway - so a
+        // steeply-up shot, which arcs over and lands far BELOW you, can't drag the view down
+        // and read as an upward pitch cap (direct report, twice).
         public float framingMaxDeviation = 45f;
 
         bool framingActive;
         Vector3 framingPoint;
         bool framingJustStarted;
+
+        // The first-person VIEW's own yaw/pitch, eased toward the framing target. Kept as
+        // separate angles (not a quaternion slerp) on purpose: interpolating between two
+        // level rotations along the shortest quaternion arc rolls the horizon mid-way, which
+        // read as the camera's Z rotation changing while moving between two targets. Building
+        // the rotation from yaw/pitch alone keeps roll at exactly zero on every frame.
+        float viewYaw;
+        float viewPitch;
+        bool viewAnglesSeeded;
 
         public void SetTrajectoryFraming(bool active, Vector3 worldPoint)
         {
@@ -158,7 +167,11 @@ namespace KineticEnergy.Camera
         {
             if (firstPerson != enabled) modeSwitching = true; // near-instant transition, see modeSwitchSmoothTime
             firstPerson = enabled;
-            if (!enabled) SetAimZoom(0f);
+            if (!enabled)
+            {
+                SetAimZoom(0f);
+                viewAnglesSeeded = false;
+            }
         }
 
         public void SetAimZoom(float chargeFraction01)
@@ -349,30 +362,48 @@ namespace KineticEnergy.Camera
 
             if (firstPerson)
             {
+                // The view target in yaw/pitch: the aim itself, or the cursor when it's
+                // CLOSE to the aim. Centering only engages while the cursor sits within
+                // framingMaxDeviation of the aim on both axes - a cursor further off (an
+                // up-aimed shot always lands far BELOW the aim) no longer drags the view at
+                // all, so a steep upward aim shows exactly where you're aiming instead of
+                // reading as a pitch cap. Never pulled partway: it's the cursor or the aim.
+                float targetYaw = yaw;
+                float targetPitch = pitch;
                 Vector3 framingDir = framingPoint - transform.position;
-                Quaternion targetRotation = rotation;
                 if (framingActive && framingDir.sqrMagnitude > 0.0001f)
                 {
-                    // Toward the cursor, but never further than framingMaxDeviation off the
-                    // aim - so an up-aimed shot that lands behind/below you can't spin the
-                    // view downward.
-                    targetRotation = Quaternion.RotateTowards(rotation,
-                        Quaternion.LookRotation(framingDir, Vector3.up), framingMaxDeviation);
+                    float framingYaw = Mathf.Atan2(framingDir.x, framingDir.z) * Mathf.Rad2Deg;
+                    float framingPitch = -Mathf.Asin(Mathf.Clamp(framingDir.normalized.y, -1f, 1f)) * Mathf.Rad2Deg;
+                    float framingYawDelta = Mathf.DeltaAngle(yaw, framingYaw);
+                    float framingPitchDelta = framingPitch - pitch;
+                    if (Mathf.Abs(framingYawDelta) <= framingMaxDeviation && Mathf.Abs(framingPitchDelta) <= framingMaxDeviation)
+                    {
+                        targetYaw = yaw + framingYawDelta;
+                        targetPitch = pitch + framingPitchDelta;
+                    }
                 }
 
-                if (framingJustStarted)
+                if (framingJustStarted || !viewAnglesSeeded)
                 {
                     // Aiming just began - land on the cursor immediately.
-                    transform.rotation = targetRotation;
+                    viewYaw = targetYaw;
+                    viewPitch = targetPitch;
+                    viewAnglesSeeded = true;
                     framingJustStarted = false;
                 }
                 else
                 {
                     // The landing point moved (retarget, energy change) - ease across at a
-                    // capped rate. Unscaled so it feels the same during the aim's bullet-time.
-                    transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation,
-                        framingTurnSpeed * Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
+                    // capped rate, per axis. Unscaled so it feels the same during the aim's
+                    // bullet-time.
+                    float turnStep = framingTurnSpeed * Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime);
+                    viewYaw = Mathf.MoveTowardsAngle(viewYaw, targetYaw, turnStep);
+                    viewPitch = Mathf.MoveTowards(viewPitch, targetPitch, turnStep);
                 }
+
+                // Built from yaw/pitch alone - the roll (Z) component is always exactly zero.
+                transform.rotation = Quaternion.Euler(viewPitch, viewYaw, 0f);
             }
             else
             {

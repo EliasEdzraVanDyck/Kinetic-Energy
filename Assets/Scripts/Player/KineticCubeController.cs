@@ -80,8 +80,13 @@ namespace KineticEnergy.Player
         [Range(0f, 1f)] public float minEnergyReserve = 0.05f;
         [Tooltip("Multiplies real seconds of holding into charge-seconds - the main knob for how fast charging feels.")]
         public float chargeAccumulationRate = 0.3f;
-        [Tooltip("Straight-up and ground-pound charges fill this much faster than a grounded aim charge.")]
-        public float upDownChargeSpeedMultiplier = 1.5f;
+        // The grounded aim charge, the forward hold-charge, and the midair energy dial all
+        // ACCELERATE: rate multiplier = 1 + sustainedSeconds * this. On the dial, flipping
+        // between adding and removing resets the ramp, so lowering energy also speeds up the
+        // longer you keep lowering. (Up/down charges use their own base+growth ramp - see
+        // groundPoundChargeBaseSpeed/groundPoundChargeSpeedGrowth.)
+        [Tooltip("How quickly a charge input's rate ramps up while sustained (1 = rate doubles after one second). Ramp resets when the dial flips direction.")]
+        public float chargeAcceleration = 1f;
         [Tooltip("Test-level switch: the tank is pinned at 100% and refunds/costs are ignored.")]
         public bool infiniteEnergy = false;
         [Tooltip("Yellow energy / blue charge meter, top right - wired per scene by the setup script.")]
@@ -90,10 +95,22 @@ namespace KineticEnergy.Player
         [Header("Crash Refunds")]
         [Tooltip("Midair-launch refund: spend * (1 + this * spend). The multiplier RISES with how much was committed.")]
         public float midairRefundSpendFactor = 0.3f;
-        [Tooltip("Ground-pound refund: spend * this.")]
-        public float groundPoundRefundMultiplier = 1.7f;
-        [Tooltip("...but a pound always refunds at least this fraction of the full tank.")]
-        public float groundPoundMinRefund = 0.1f;
+
+        [Header("Ground Pound (the EnergyEconomy4 mechanic)")]
+        // The pound doesn't stick - it BOUNCES: a free hop of groundPoundHopHeight, then a
+        // slow-mo window of groundPoundSlowDuration real seconds during which the cube hangs
+        // frozen. The crash refunds the flight's WHOLE spend as a wash immediately; the
+        // pound's boost EXTRA (poundSpend * (boostMultiplier - 1)) stays on offer - claimed
+        // by opening a midair aim inside the window (which also starts that aim FULLY
+        // charged and holds gravity off for its duration), forfeited if the window lapses.
+        // An aim that closes without firing gives the extra back.
+        public float groundPoundBoostMultiplier = 1.5f;
+        public float groundPoundHopHeight = 0.2f;
+        public float groundPoundSlowDuration = 0.5f;
+        // The pound/up charge speed ramp: rate multiplier = base + growth * secondsHeld
+        // (real seconds, matching the unscaled charge).
+        public float groundPoundChargeBaseSpeed = 1.5f;
+        public float groundPoundChargeSpeedGrowth = 5f;
 
         [Header("Aim Slowdown Resource")]
         [Tooltip("How the midair-aim slow-down is paid for - see the SlowdownMode enum.")]
@@ -145,10 +162,11 @@ namespace KineticEnergy.Player
         public LandingPreviewController landingPreview;
 
         [Header("Mouse Aim Option")]
-        // The pause menu's "Aim: Always Mouse" toggle (GroundedAimToggle): the grounded aim
-        // follows raw mouse delta instead of the stick/WASD, WASD drives the camera instead,
-        // and every gamepad gameplay binding is masked off (see ApplyGamepadBlock).
-        public bool groundedAimWithMouse = false;
+        // DEFAULT ON: the grounded aim follows raw mouse delta, and WASD drives the camera
+        // while aiming. Gamepad input is untouched either way - a stick that is actively
+        // aiming keeps its normal role (checked per frame via the move action's active
+        // device), so controller players get the exact same controls as always.
+        public bool groundedAimWithMouse = true;
         public float groundedMouseAimSensitivity = 0.15f;
         [Tooltip("WASD-as-camera turns this much faster while Always Mouse is on - keys are all-or-nothing, unlike a stick.")]
         public float wasdCameraTurnMultiplier = 1.5f;
@@ -156,8 +174,12 @@ namespace KineticEnergy.Player
         [Header("Time Scales")]
         [Tooltip("Global time scale while a launch is being aimed/charged midair (bullet time).")]
         public float chargeTimeScale = 0.2f;
-        [Tooltip("Global time scale while a launch is in flight and nothing is charging.")]
+        [Tooltip("Base global time scale while a launch is in flight and nothing is charging.")]
         public float launchFlightTimeScale = 2f;
+        // The flight speed-up scales with commitment: base 200%, plus 1% of game speed for
+        // every 1% of the tank the launch spent (a full-tank launch flies at 300%).
+        [Tooltip("Added to the flight time scale per full tank of energy spent on the launch (1 = +1% speed per 1% energy).")]
+        public float flightTimeScaleEnergyBonus = 1f;
 
         [Header("Launch Limit")]
         [Tooltip("Launches allowed since last standing/crashing (a crash resets the budget). 0 = unlimited.")]
@@ -232,6 +254,13 @@ namespace KineticEnergy.Player
         HoldChargeDirection holdChargeDirection = HoldChargeDirection.None;
         Vector3 holdChargeLastStickDirection;
         bool holdChargeStickWasHeld;
+        float holdChargeHeldSeconds; // real seconds this charge has been held - drives the rate ramp
+        float aimChargeHeldSeconds;  // ditto for the grounded aim's charge
+
+        // Midair dial ramp state: how long the dial has been moving in one direction, and
+        // which direction that is (+1 adding, -1 removing, 0 idle). A flip resets the ramp.
+        float dialRampSeconds;
+        int dialRampDirection;
 
         // Midair first-person aim state. Aiming (the camera/reticle) and charging are separate
         // on purpose: the aim can stay open across the energy dial's whole adjustment.
@@ -271,6 +300,20 @@ namespace KineticEnergy.Player
         float lastLaunchEnergySpent;
         bool lastLaunchWasGrounded;
         bool lastLaunchWasPound;
+        // Running total spent across every launch since the last landing - the pound's wash
+        // refund pays back the WHOLE flight, not just the pound itself.
+        float flightEnergySpent;
+
+        // Ground-pound bounce state: the post-pound slow-mo window, the boost extra still on
+        // offer, the provisional extra paid at aim-open (backed out if the aim closes without
+        // firing), and whether an aim opened inside the window is holding gravity off.
+        float poundWindowTimer;
+        float poundPendingRefund;
+        float poundBoostExtra;
+        bool poundAimHoldingGravityOff;
+
+        // This flight's time scale - base plus the energy-spend bonus, fixed at fire time.
+        float activeFlightTimeScale = 1f;
 
         // Slowdown resource.
         float aimBudgetRemaining;
@@ -351,31 +394,6 @@ namespace KineticEnergy.Player
         void Start()
         {
             WriteControlsText();
-            ApplyGamepadBlock();
-        }
-
-        // "Always Mouse" masks every gamepad gameplay binding on the shared action asset so
-        // the same physical motion can't aim and steer the camera at once. Menus stay
-        // controller-usable: the UI input module runs on its own asset, and PauseController
-        // reads the Start button directly.
-        public void ApplyGamepadBlock()
-        {
-            InputActionAsset actionAsset = moveAction != null && moveAction.action != null && moveAction.action.actionMap != null
-                ? moveAction.action.actionMap.asset
-                : null;
-            if (actionAsset == null) return;
-
-            if (groundedAimWithMouse)
-            {
-                InputControlScheme? keyboardScheme = actionAsset.FindControlScheme("Keyboard&Mouse");
-                actionAsset.bindingMask = keyboardScheme.HasValue
-                    ? InputBinding.MaskByGroup(keyboardScheme.Value.bindingGroup)
-                    : (InputBinding?)null;
-            }
-            else
-            {
-                actionAsset.bindingMask = null;
-            }
         }
 
         void OnEnable()
@@ -431,6 +449,15 @@ namespace KineticEnergy.Player
 
             // Re-arm the spent-aim-button latch only once both aim buttons are genuinely up.
             if (aimButtonSpent && !AimButtonHeld()) aimButtonSpent = false;
+
+            // The post-ground-pound slow-mo window - real seconds, so it isn't stretched by
+            // the slow-mo it is itself causing. Lapsing with no aim opened forfeits the
+            // boost extra for good (the plain wash refund was already paid at the crash).
+            if (poundWindowTimer > 0f)
+            {
+                poundWindowTimer -= Time.unscaledDeltaTime;
+                if (poundWindowTimer <= 0f) poundPendingRefund = 0f;
+            }
 
             if (transform.position.y < fallResetY)
             {
@@ -513,11 +540,12 @@ namespace KineticEnergy.Player
             }
         }
 
-        // Any midair aim/charge state that would freeze the cube counts as "deliberating".
+        // Only the midair first-person AIM counts as metered deliberation. The ground pound
+        // and the up-charge are committed actions, not thinking - they always freeze and
+        // charge exactly as they always have, in every slowdown mode.
         bool MidairDeliberationActive()
         {
-            if (isGrounded) return false;
-            return airAiming || isAiming || holdChargeDirection != HoldChargeDirection.None;
+            return !isGrounded && airAiming;
         }
 
         void UpdateSlowdownResource()
@@ -550,20 +578,21 @@ namespace KineticEnergy.Player
 
         void ApplyChargeTimeScale()
         {
-            // Slow-mo applies while deliberating MIDAIR (aiming or holding any charge, plus
-            // the raw aim-button hold so there's no gap between press and state change) - and
-            // only while the slowdown resource can pay for it. Grounded aiming runs at full
-            // speed on purpose.
+            // The midair first-person aim slows time only while the slowdown resource can
+            // pay for it (the raw aim-button hold is included so there's no gap between the
+            // press and the state change). Grounded aiming runs at full speed on purpose.
             bool rawAimHeld = AimButtonHeld() && !aimButtonSpent;
-            bool midairSlow = !isGrounded
-                && (isAiming || airAiming || holdChargeDirection != HoldChargeDirection.None || rawAimHeld)
-                && SlowdownAvailable();
-            // Grounded hold-charges (the Space up-launch) still slow time - the cube is
-            // standing still anyway and the slow-down is what matches what's on screen.
-            bool groundedChargeSlow = isGrounded && holdChargeDirection != HoldChargeDirection.None;
+            bool airAimSlow = !isGrounded && (airAiming || rawAimHeld) && SlowdownAvailable();
+            // The post-ground-pound window holds the slow-mo for its duration - part of the
+            // pound itself, so never metered by the slowdown resource.
+            bool poundWindowSlow = poundWindowTimer > 0f;
+            // Hold-charges (up-launch, ground pound, forward) ALWAYS slow time, grounded or
+            // midair, in every slowdown mode - their meters run on unscaled time, so the
+            // bullet-time is what makes them read as fast.
+            bool holdChargeSlow = holdChargeDirection != HoldChargeDirection.None;
 
-            float flightScale = hasLaunched ? launchFlightTimeScale : 1f;
-            Time.timeScale = midairSlow || groundedChargeSlow ? chargeTimeScale : flightScale;
+            float flightScale = hasLaunched ? activeFlightTimeScale : 1f;
+            Time.timeScale = airAimSlow || holdChargeSlow || poundWindowSlow ? chargeTimeScale : flightScale;
         }
 
         bool AimButtonHeld()
@@ -580,19 +609,22 @@ namespace KineticEnergy.Player
             if (cameraOrbit == null) return;
 
             // While the midair aim is open the LEFT stick steers the camera (the right stick
-            // is the energy dial there); while Always Mouse has the mouse steering the
-            // grounded aim, WASD drives the camera instead - unless a gamepad stick is doing
-            // the aiming, which keeps its normal role.
-            bool moveIsGamepadDriven = moveAction != null && moveAction.action != null
-                && moveAction.action.activeControl != null && moveAction.action.activeControl.device is Gamepad;
+            // is the energy dial there); while the mouse steers the grounded aim, WASD
+            // drives the camera instead. The WASD capture engages ONLY when the keyboard is
+            // genuinely the device driving movement - checking "not gamepad-driven" was
+            // wrong, because a CENTERED left stick actuates nothing (activeControl is null),
+            // which silently swallowed the right stick's camera look on controllers until
+            // the left stick moved.
+            bool moveIsKeyboardDriven = moveAction != null && moveAction.action != null
+                && moveAction.action.activeControl != null && moveAction.action.activeControl.device is Keyboard;
             bool aimWithMoveStick = airAiming
-                || (groundedAimWithMouse && isAiming && !moveIsGamepadDriven);
+                || (groundedAimWithMouse && isAiming && moveIsKeyboardDriven);
 
             Vector2 aimStick = aimWithMoveStick && moveAction != null && moveAction.action != null
                 ? moveAction.action.ReadValue<Vector2>()
                 : Vector2.zero;
             if (aimStick.sqrMagnitude < aimDeadzone * aimDeadzone) aimStick = Vector2.zero;
-            if (groundedAimWithMouse && isAiming && !moveIsGamepadDriven) aimStick *= wasdCameraTurnMultiplier;
+            if (groundedAimWithMouse && isAiming && moveIsKeyboardDriven) aimStick *= wasdCameraTurnMultiplier;
             cameraOrbit.SetAimStickOverride(aimWithMoveStick, aimStick);
 
             // While the mouse steers the grounded aim it must not also orbit the camera.
@@ -614,6 +646,11 @@ namespace KineticEnergy.Player
                 energyMeter.SetEnergy(energyFraction);
                 bool charging = isAiming || holdChargeDirection != HoldChargeDirection.None || airAiming;
                 energyMeter.SetCharge(ChargeFraction(), charging);
+                // While the pound's boost extra is still on offer, preview it in orange
+                // poking out past the end of the yellow fill.
+                energyMeter.SetBonus(
+                    energyFraction + poundPendingRefund * (groundPoundBoostMultiplier - 1f),
+                    poundPendingRefund > 0f && poundWindowTimer > 0f);
             }
 
             if (slowdownMeter != null)
@@ -661,6 +698,7 @@ namespace KineticEnergy.Player
                 {
                     isAiming = true;
                     chargeTime = 0f;
+                    aimChargeHeldSeconds = 0f;
                     // Stop dead instantly - FixedUpdate keeps re-applying this for the whole
                     // aim, so an airborne aim session doesn't sag under gravity.
                     rb.linearVelocity = Vector3.zero;
@@ -668,10 +706,15 @@ namespace KineticEnergy.Player
                     SeedAimFromCamera();
                     aimArrow?.SetVisible(true);
                     landingPreview?.SetVisible(true);
+                    // The cursor at the end of the line shows for grounded aims too.
+                    landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
                     if (!isGrounded) MidairAimOpened?.Invoke();
                 }
 
-                AccumulateCharge(Time.deltaTime * chargeAccumulationRate);
+                // The charge rate ramps up the longer the aim is held - same acceleration
+                // principle as the up/down hold-charges.
+                aimChargeHeldSeconds += Time.unscaledDeltaTime;
+                AccumulateCharge(Time.deltaTime * chargeAccumulationRate * ChargeRateRamp(aimChargeHeldSeconds));
 
                 // Aim adjustment runs on unscaled time - responsiveness must not slow down
                 // with the bullet-time.
@@ -757,6 +800,7 @@ namespace KineticEnergy.Player
         {
             holdChargeDirection = direction;
             chargeTime = 0f;
+            holdChargeHeldSeconds = 0f;
             holdChargeStickWasHeld = false;
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
@@ -784,15 +828,14 @@ namespace KineticEnergy.Player
 
             // Pressing a DIFFERENT direction button mid-charge switches the charge to that
             // direction - the accumulated charge carries over, and firing then happens on the
-            // new button's release.
+            // new button's release. Deliberately NO switch INTO the ground pound: a pound
+            // must be committed to from the start (a fresh midair West/E press), never
+            // smuggled in through a cheaper up/forward charge.
             bool upSwitch = (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
                 || (keyboardAvailable && Keyboard.current.spaceKey.wasPressedThisFrame);
-            bool downSwitch = (groundPoundAction != null && groundPoundAction.action != null && groundPoundAction.action.WasPressedThisFrame())
-                || (keyboardAvailable && Keyboard.current.eKey.wasPressedThisFrame);
             bool forwardSwitch = groundedLaunchAction != null && groundedLaunchAction.action != null && groundedLaunchAction.action.WasPressedThisFrame();
-            if (upSwitch && holdChargeDirection != HoldChargeDirection.Up) holdChargeDirection = HoldChargeDirection.Up;
-            else if (downSwitch && holdChargeDirection != HoldChargeDirection.Down) holdChargeDirection = HoldChargeDirection.Down;
-            else if (forwardSwitch && holdChargeDirection != HoldChargeDirection.Forward) holdChargeDirection = HoldChargeDirection.Forward;
+            if (upSwitch && holdChargeDirection != HoldChargeDirection.Up && holdChargeDirection != HoldChargeDirection.Down) holdChargeDirection = HoldChargeDirection.Up;
+            else if (forwardSwitch && holdChargeDirection == HoldChargeDirection.Up) holdChargeDirection = HoldChargeDirection.Forward;
 
             bool releasedNow = holdChargeDirection switch
             {
@@ -803,15 +846,18 @@ namespace KineticEnergy.Player
                 _ => groundedLaunchAction != null && groundedLaunchAction.action != null && groundedLaunchAction.action.WasReleasedThisFrame(),
             };
 
-            // Straight-up and pound charges fill in REAL time (the bullet-time must not slow
-            // the meter) and faster than a grounded aim charge.
+            // Every hold-charge ACCELERATES - the rate grows the longer the button is held.
+            // Up/down fill in REAL time (the bullet-time must not slow their meter) with the
+            // pound's own base+growth ramp; forward uses the shared acceleration curve.
+            holdChargeHeldSeconds += Time.unscaledDeltaTime;
             if (holdChargeDirection == HoldChargeDirection.Up || holdChargeDirection == HoldChargeDirection.Down)
             {
-                AccumulateCharge(Time.unscaledDeltaTime * chargeAccumulationRate * upDownChargeSpeedMultiplier);
+                float chargeSpeed = groundPoundChargeBaseSpeed + groundPoundChargeSpeedGrowth * holdChargeHeldSeconds;
+                AccumulateCharge(Time.unscaledDeltaTime * chargeAccumulationRate * chargeSpeed);
             }
             else
             {
-                AccumulateCharge(Time.deltaTime * chargeAccumulationRate);
+                AccumulateCharge(Time.deltaTime * chargeAccumulationRate * ChargeRateRamp(holdChargeHeldSeconds));
             }
 
             // Direction: up and down always fire dead vertical. Forward fires toward the
@@ -880,15 +926,30 @@ namespace KineticEnergy.Player
 
                 airAiming = true;
                 chargeTime = 0f; // each fresh aim starts from a clean dial
+                dialRampSeconds = 0f;
+                dialRampDirection = 0;
                 cameraOrbit?.SetFirstPersonMode(true);
                 landingPreview?.SetVisible(true);
                 landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
                 MidairAimOpened?.Invoke();
+
+                // An aim opened inside the post-ground-pound window claims the boost extra
+                // and starts FULLY charged - everything the tank can pay, instantly - with
+                // gravity held off for the whole aim.
+                if (poundWindowTimer > 0f)
+                {
+                    PayPoundBoostedRefund();
+                    chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
+                    poundAimHoldingGravityOff = true;
+                    rb.useGravity = false;
+                }
             }
 
             // The energy dial: right stick up/down adds/removes charge continuously, mouse
             // wheel steps it per notch. Live for the whole aim - the launch button is purely
-            // a confirm.
+            // a confirm. The dial ACCELERATES like every other charge input: the rate grows
+            // the longer it keeps moving in one direction, and FLIPPING between adding and
+            // removing resets the ramp - so lowering energy also lowers faster over time.
             float dialDelta = 0f;
             float stickY = GamepadLookValue().y;
             if (Mathf.Abs(stickY) > 0.5f)
@@ -902,7 +963,15 @@ namespace KineticEnergy.Player
             }
             if (dialDelta != 0f)
             {
-                chargeTime = Mathf.Clamp(chargeTime + dialDelta, 0f, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
+                int dialDirection = dialDelta > 0f ? 1 : -1;
+                if (dialDirection != dialRampDirection)
+                {
+                    dialRampSeconds = 0f;
+                    dialRampDirection = dialDirection;
+                }
+                dialRampSeconds += Time.unscaledDeltaTime;
+                chargeTime = Mathf.Clamp(chargeTime + dialDelta * ChargeRateRamp(dialRampSeconds),
+                    0f, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
             }
 
             // What would actually fire: the dialed charge, capped by what the tank can pay.
@@ -910,6 +979,10 @@ namespace KineticEnergy.Player
             float fireFraction = Mathf.Min(ChargeFraction(), energyCostPerFullCharge > 0f ? SpendableEnergy() / energyCostPerFullCharge : 1f);
             float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, fireFraction);
             float damping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, fireFraction);
+
+            // The camera zooms in with the dialed charge, so a long shot's distant landing
+            // spot stays legible.
+            cameraOrbit?.SetAimZoom(fireFraction);
 
             // The launch impulse ADDS to the current motion. While the slowdown resource
             // holds, the cube is frozen (velocity zero) - once it runs dry the cube keeps
@@ -928,12 +1001,41 @@ namespace KineticEnergy.Player
 
         void CancelAirAim()
         {
+            // A post-pound aim that closes WITHOUT firing gives the boost extra back (the
+            // plain wash refund underneath stays), releases the gravity hold, and ends the
+            // window - no lingering freeze.
+            if (poundAimHoldingGravityOff)
+            {
+                poundAimHoldingGravityOff = false;
+                poundWindowTimer = 0f;
+                rb.useGravity = true;
+                RevertPoundBoost();
+            }
             airAiming = false;
             chargeTime = 0f;
             aimButtonSpent = true; // closing the aim spends the hold - release before re-aiming
             landingPreview?.SetVisible(false);
             cameraOrbit?.SetFirstPersonMode(false);
             cameraOrbit?.SetAimZoom(0f);
+        }
+
+        // The pound's boost EXTRA (the plain wash was already paid at the crash) lands the
+        // moment a midair aim opens inside the window. Remembered as provisional - measured
+        // against what was actually banked, so a full tank can't be over-debited on revert.
+        void PayPoundBoostedRefund()
+        {
+            if (poundPendingRefund <= 0f) return;
+            float before = energyFraction;
+            energyFraction = Mathf.Clamp01(energyFraction + poundPendingRefund * (groundPoundBoostMultiplier - 1f));
+            poundBoostExtra = Mathf.Max(0f, energyFraction - before);
+            poundPendingRefund = 0f;
+        }
+
+        void RevertPoundBoost()
+        {
+            if (poundBoostExtra <= 0f) return;
+            energyFraction = Mathf.Clamp01(energyFraction - poundBoostExtra);
+            poundBoostExtra = 0f;
         }
 
         // The right stick's raw value, gamepad-only - the look action carries mouse deltas
@@ -951,6 +1053,12 @@ namespace KineticEnergy.Player
         float ChargeFraction()
         {
             return maxChargeTime > 0f ? Mathf.Clamp01(chargeTime / maxChargeTime) : 1f;
+        }
+
+        // The shared acceleration curve for every charge input - see chargeAcceleration.
+        float ChargeRateRamp(float sustainedSeconds)
+        {
+            return 1f + sustainedSeconds * Mathf.Max(chargeAcceleration, 0f);
         }
 
         // chargeTime is capped by BOTH the per-shot maximum and however much energy is left,
@@ -995,6 +1103,15 @@ namespace KineticEnergy.Player
 
         void QueueLaunch(Vector3 direction, float force, float damping)
         {
+            // Firing out of a post-pound aim: the shot is taken, so the boost is earned and
+            // kept; the gravity hold and the window end with the launch.
+            if (poundAimHoldingGravityOff)
+            {
+                poundAimHoldingGravityOff = false;
+                poundWindowTimer = 0f;
+                rb.useGravity = true;
+                poundBoostExtra = 0f;
+            }
             queuedDirection = direction;
             queuedForce = force;
             queuedDamping = damping;
@@ -1011,6 +1128,11 @@ namespace KineticEnergy.Player
             // refund can then never fabricate energy a nearly-empty tank didn't really spend.
             lastLaunchEnergySpent = Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge);
             if (!infiniteEnergy) energyFraction = Mathf.Clamp01(energyFraction - lastLaunchEnergySpent);
+            flightEnergySpent += lastLaunchEnergySpent; // running total for the pound's whole-flight wash
+
+            // The flight speed-up grows with commitment: +1% game speed per 1% of the tank
+            // this launch spent (see flightTimeScaleEnergyBonus).
+            activeFlightTimeScale = launchFlightTimeScale + lastLaunchEnergySpent * flightTimeScaleEnergyBonus;
 
             // Armed here already (not just when FixedUpdate applies the impulse) so
             // AllowGroundedMovement/AllowAirborneNudge are correct the instant firing is
@@ -1035,10 +1157,14 @@ namespace KineticEnergy.Player
         {
             // Freeze the cube for the whole duration of any aim/charge (and while crash-
             // stuck) - continuously, not just on the opening frame, so gravity can't sag an
-            // airborne aim downward tick by tick. Midair deliberation only stays frozen while
-            // the slowdown resource can pay for it; grounded states always freeze.
-            bool frozenDeliberation = isGrounded || SlowdownAvailable();
-            if ((IsAimingOrCharging && frozenDeliberation) || isStuck)
+            // airborne aim downward tick by tick. Only the midair first-person AIM's freeze
+            // is conditional on the slowdown resource; hold-charges (up-launch, ground
+            // pound) and the grounded aim always freeze, exactly as they always have.
+            bool airAimFrozen = airAiming && (isGrounded || SlowdownAvailable());
+            // The post-ground-pound window also freezes the cube in place - the free hop
+            // just hangs there until the window lapses or an aim opens.
+            if (isAiming || holdChargeDirection != HoldChargeDirection.None || airAimFrozen || isStuck
+                || poundWindowTimer > 0f)
             {
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
@@ -1079,6 +1205,7 @@ namespace KineticEnergy.Player
             {
                 launchesSinceGrounded = 0;
                 exactFlightNoNudge = false;
+                flightEnergySpent = 0f; // the flight (and its refund basis) ends on the ground
                 if (!infiniteEnergy) ClampEnergyFloor();
             }
 
@@ -1244,12 +1371,41 @@ namespace KineticEnergy.Player
                 RefundEnergyForCrash();
             }
 
+            // The ground pound doesn't stick - it BOUNCES: a free hop (no energy cost),
+            // gravity back on, and the slow-mo window during which an aim starts fully
+            // charged. Consumed here so the hop's own landing is not treated as a pound.
+            if (lastLaunchWasPound)
+            {
+                transform.position += Vector3.up * groundPoundHopHeight;
+                isStuck = false;
+                nonStickyReleaseTimer = 0f;
+                rb.useGravity = true;
+                poundWindowTimer = groundPoundSlowDuration;
+                lastLaunchWasPound = false;
+                lastLaunchEnergySpent = 0f;
+            }
+
+            flightEnergySpent = 0f; // consumed by the refund above - the next flight starts fresh
+
+            // Solid target spheres: the crash counts exactly like any other surface (energy
+            // included, handled above), then the sphere vanishes - so the cling release is
+            // armed UNCONDITIONALLY (there is no surface left to rest against; hanging there
+            // forever would be a soft-lock) and the hit is reported for the counter/respawn.
+            TargetSphere sphere = surface != null ? surface.GetComponentInParent<TargetSphere>() : null;
+            if (sphere != null)
+            {
+                nonStickyReleaseTimer = nonStickyWallStickDuration;
+                sphere.OnHitByCrash();
+            }
+
             // Variant A: the aim budget refills on every crash.
             if (slowdownMode == SlowdownMode.AimBudget) aimBudgetRemaining = aimBudgetSeconds;
         }
 
-        // The refund rule that survived playtesting: derived ONLY from the last launch's own
-        // spend, by its type - no speed term.
+        // The refund rules: EnergyEconomy1's per-launch economy for ordinary crashes, and
+        // the EnergyEconomy4 pound rule - the WHOLE flight's spend comes back as a wash
+        // immediately, with the boost extra deferred to the slow-mo window (see the Ground
+        // Pound header fields).
         void RefundEnergyForCrash()
         {
             if (infiniteEnergy)
@@ -1258,12 +1414,18 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            float gain;
             if (lastLaunchWasPound)
             {
-                gain = Mathf.Max(lastLaunchEnergySpent * groundPoundRefundMultiplier, groundPoundMinRefund);
+                float flightSpend = flightEnergySpent > 0.0001f ? flightEnergySpent : lastLaunchEnergySpent;
+                energyFraction = Mathf.Clamp01(energyFraction + flightSpend);
+                // The boost extra keys off the POUND launch alone, not the whole flight.
+                poundPendingRefund = lastLaunchEnergySpent;
+                ClampEnergyFloor();
+                return;
             }
-            else if (lastLaunchWasGrounded)
+
+            float gain;
+            if (lastLaunchWasGrounded)
             {
                 gain = lastLaunchEnergySpent; // a grounded launch is a wash
             }
@@ -1282,7 +1444,7 @@ namespace KineticEnergy.Player
         {
             if (trailToggleAction == null || trailToggleAction.action == null || !trailToggleAction.action.WasPressedThisFrame()) return;
             if (landingPreview == null) return;
-            landingPreview.SetMode(landingPreview.CurrentMode == PredictionMode.None ? PredictionMode.Trail : PredictionMode.None);
+            landingPreview.SetMode(landingPreview.CurrentMode == PredictionMode.None ? PredictionMode.TrailAndCrosshair : PredictionMode.None);
         }
 
         // ---------- Direction helpers ----------
@@ -1485,7 +1647,12 @@ namespace KineticEnergy.Player
             {
                 if (col == boxCollider) continue;
                 if (col.GetComponent<Rigidbody>() != null) continue;
-                // Trigger volumes (finish lines, target spheres) aren't solid ground.
+                // Marked colliders (the boundary cage) are invisible to the aim - the trail
+                // passes through and the reticle never focuses them.
+                if (col.GetComponentInParent<AimPreviewIgnored>() != null) continue;
+                // Trigger volumes (finish lines, beat regions) aren't solid ground. Target
+                // spheres are SOLID colliders, so they're included as ordinary geometry -
+                // the trail terminates on them and the reticle/camera focus them.
                 if (col.isTrigger) continue;
 
                 GameObject proxy = new GameObject("PredictionGeometryProxy");
@@ -1495,6 +1662,10 @@ namespace KineticEnergy.Player
                 if (col is BoxCollider)
                 {
                     entry.proxyBox = proxy.AddComponent<BoxCollider>();
+                }
+                else if (col is SphereCollider)
+                {
+                    entry.proxySphere = proxy.AddComponent<SphereCollider>();
                 }
                 else if (col is MeshCollider meshCol)
                 {
@@ -1518,6 +1689,7 @@ namespace KineticEnergy.Player
             public Collider source;
             public GameObject proxy;
             public BoxCollider proxyBox;
+            public SphereCollider proxySphere;
             public MeshCollider proxyMesh;
         }
         readonly List<PredictionGeometryProxy> geometryProxies = new List<PredictionGeometryProxy>();
@@ -1548,6 +1720,11 @@ namespace KineticEnergy.Player
                 if (entry.proxyBox.center != sourceBox.center) entry.proxyBox.center = sourceBox.center;
                 if (entry.proxyBox.size != sourceBox.size) entry.proxyBox.size = sourceBox.size;
             }
+            else if (entry.proxySphere != null && entry.source is SphereCollider sourceSphere)
+            {
+                if (entry.proxySphere.center != sourceSphere.center) entry.proxySphere.center = sourceSphere.center;
+                if (entry.proxySphere.radius != sourceSphere.radius) entry.proxySphere.radius = sourceSphere.radius;
+            }
             else if (entry.proxyMesh != null && entry.source is MeshCollider sourceMesh)
             {
                 if (entry.proxyMesh.sharedMesh != sourceMesh.sharedMesh) entry.proxyMesh.sharedMesh = sourceMesh.sharedMesh;
@@ -1569,8 +1746,9 @@ namespace KineticEnergy.Player
             {
                 controlsHintLabel.text =
                     "Move (on the ground): Left Stick / WASD\n" +
-                    "Grounded: Left Trigger / Right Mouse to aim+charge, Right Trigger / Left\n" +
-                    "  Mouse to launch - or hold South / Space to charge an Up launch\n" +
+                    "Grounded: Left Trigger / Right Mouse to aim+charge - steer the aim with\n" +
+                    "  the Mouse (Left Stick on controller), Right Trigger / Left Mouse to\n" +
+                    "  launch - or hold South / Space to charge an Up launch\n" +
                     "Airborne: hold Right Mouse / Left Trigger to aim (first person), dial the\n" +
                     "  energy with the Mouse Wheel / Right Stick, Left Mouse / Right Trigger\n" +
                     "  fires. West / E charges the GROUND POUND (release to slam down)\n" +
@@ -1583,15 +1761,18 @@ namespace KineticEnergy.Player
             {
                 controlsPanelBody.text =
                     "Left Stick / WASD - Move (on the ground); nudge the flight (in the air)\n" +
-                    "Grounded - Left Trigger / Right Mouse (hold) aims and charges over time,\n" +
-                    "  Left Stick adjusts the aim, Right Trigger / Left Mouse fires.\n" +
+                    "Grounded - Left Trigger / Right Mouse (hold) aims and charges over time.\n" +
+                    "  The MOUSE steers the aim (WASD drives the camera meanwhile); on\n" +
+                    "  controller the Left Stick steers it. Right Trigger / Left Mouse fires.\n" +
                     "  South / Space (hold) charges a straight-UP launch - release to fire.\n" +
                     "Airborne - Right Mouse / Left Trigger (hold) opens a first-person aim\n" +
                     "  with the dotted trail and reticle. Add or remove launch energy with\n" +
                     "  the Mouse Wheel or Right Stick up/down - the blue bar previews the\n" +
                     "  cost. Left Mouse / Right Trigger fires along where you're looking.\n" +
                     "  West / E (hold) charges the GROUND POUND - release to slam straight\n" +
-                    "  down. Pounds smash through cracked panes.\n" +
+                    "  down. Landing a pound BOUNCES you into a brief slow-mo window: open\n" +
+                    "  an aim inside it to claim bonus energy (the orange bar) and start\n" +
+                    "  that shot instantly at full charge.\n" +
                     "Left Bumper - Cancel the current charge without firing.\n" +
                     crashLine +
                     "Right Bumper - Show/hide the trajectory trail\n" +

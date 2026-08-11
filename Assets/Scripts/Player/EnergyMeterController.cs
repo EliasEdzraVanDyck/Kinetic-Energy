@@ -14,6 +14,19 @@ namespace KineticEnergy.Player
     {
         public Image energyFillImage;
         public Image chargeFillImage;
+        // Orange preview bar sitting BEHIND the yellow fill, showing current energy PLUS the
+        // ground pound's still-unclaimed boost extra - so only the extra portion pokes out
+        // past the yellow, in orange, until it's claimed or forfeited.
+        public Image bonusFillImage;
+
+        // totalFraction = energy + pending boost extra; drawn behind the yellow fill (see
+        // the field), so the visible orange sliver is exactly the extra on offer.
+        public void SetBonus(float totalFraction, bool visible)
+        {
+            if (bonusFillImage == null) return;
+            bonusFillImage.gameObject.SetActive(visible);
+            bonusFillImage.fillAmount = visible ? Mathf.Clamp01(totalFraction) : 0f;
+        }
 
         public void SetEnergy(float fraction)
         {

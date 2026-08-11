@@ -27,9 +27,6 @@ namespace KineticEnergy.UI
         {
             if (controller == null) return;
             controller.groundedAimWithMouse = !controller.groundedAimWithMouse;
-            // Masks/unmasks every gamepad gameplay binding - menus stay controller-usable
-            // (their input runs on a separate asset, and pause has a direct Start-button read).
-            controller.ApplyGamepadBlock();
             RefreshLabel();
         }
 

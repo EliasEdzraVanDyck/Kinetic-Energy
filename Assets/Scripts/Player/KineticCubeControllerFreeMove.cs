@@ -40,13 +40,11 @@ namespace KineticEnergy.Player
         [Range(0f, 1f)] public float moveDeadzone = 0.15f;
 
         [Header("Air Correction")]
-        // Raised from 3 - project gravity went from 9.81 to 18 two rounds ago (see
-        // ProjectSettings/DynamicsManager.asset), which alone made this weaker relative to
-        // gravity than it used to feel even before "increase midair control" was asked for
-        // directly. Still kept below gravity so it only ever nudges an existing fall rather than
-        // overriding it outright.
+        // Doubled from 7 (direct request: "increase air control significantly") - still
+        // below gravity (30), so this steers an existing fall rather than replacing it
+        // with player-directed flight.
         [Tooltip("Max acceleration (m/s^2) applied from stick input while airborne - kept below gravity so this only ever nudges the existing fall, never overrides it.")]
-        public float airControlAcceleration = 7f;
+        public float airControlAcceleration = 14f;
         [Range(0f, 1f)] public float airControlDeadzone = 0.1f;
 
         [Header("Leaning")]
