@@ -65,7 +65,11 @@ namespace KineticEnergy.EditorSetup
         const float AirControlAcceleration = 14f;
         const float EnergyCostPerFullCharge = 1f;
         const float MinEnergyReserve = 0.05f;
+        const float GroundedRefundMultiplier = 1f;
+        const float MidairRefundBaseMultiplier = 1f;
         const float MidairRefundSpendFactor = 0.3f;
+        const float PoundFlightRefundMultiplier = 1f;
+        const float PlainFallDamping = 0.2f;
         // The EnergyEconomy4 ground pound (Final-Project branch): bounce hop, slow-mo
         // window, boosted whole-flight refund claimed by aiming inside the window, and the
         // base+growth charge ramp. Values are EnergyEconomy4's scene overrides.
@@ -78,6 +82,10 @@ namespace KineticEnergy.EditorSetup
         // Flight game speed: 200% base, +1% per 1% of the tank spent on the launch.
         const float LaunchFlightTimeScale = 2f;
         const float FlightTimeScaleEnergyBonus = 1f;
+        // Descending adds another ramp: +1% game speed on the first falling frame, growing
+        // in even steps to +50% at the predicted impact.
+        const float FallSpeedUpStart = 0.01f;
+        const float FallSpeedUpEnd = 0.5f;
         const float AimBudgetSeconds = 2f;
         // Parity rule: a full tank must buy about the same slow-time as the aim budget, or
         // the A/B test measures generosity instead of architecture. 1 tank / 2s = 0.5/s.
@@ -105,10 +113,16 @@ namespace KineticEnergy.EditorSetup
             controller.groundPoundChargeSpeedGrowth = GroundPoundChargeSpeedGrowth;
             controller.energyCostPerFullCharge = EnergyCostPerFullCharge;
             controller.minEnergyReserve = MinEnergyReserve;
+            controller.groundedRefundMultiplier = GroundedRefundMultiplier;
+            controller.midairRefundBaseMultiplier = MidairRefundBaseMultiplier;
             controller.midairRefundSpendFactor = MidairRefundSpendFactor;
+            controller.poundFlightRefundMultiplier = PoundFlightRefundMultiplier;
+            controller.plainFallDamping = PlainFallDamping;
             controller.chargeTimeScale = ChargeTimeScale;
             controller.launchFlightTimeScale = LaunchFlightTimeScale;
             controller.flightTimeScaleEnergyBonus = FlightTimeScaleEnergyBonus;
+            controller.fallSpeedUpStart = FallSpeedUpStart;
+            controller.fallSpeedUpEnd = FallSpeedUpEnd;
             controller.aimBudgetSeconds = AimBudgetSeconds;
             controller.tankDrainPerSecond = TankDrainPerSecond;
             controller.dialStickRate = DialStickRate;
@@ -594,10 +608,10 @@ namespace KineticEnergy.EditorSetup
 
         // The level document sizes the quarry in multiples of a MAX-charge launch (L), which
         // at the current tuning is ~107m - far too sparse in practice. This densifies the
-        // whole quarry uniformly (0.35 = roughly a third of the distances everywhere). The
-        // Gauntlet deliberately has no such knob, since its beat difficulty depends on gaps
-        // being honest fractions of a real max launch.
-        const float QuarryScale = 0.35f;
+        // whole quarry uniformly (0.25 = a quarter of the distances everywhere, a bowl about
+        // 80m across). The Gauntlet deliberately has no such knob, since its beat difficulty
+        // depends on gaps being honest fractions of a real max launch.
+        const float QuarryScale = 0.25f;
 
         [MenuItem("Tools/Kinetic Energy/Setup Quarry")]
         public static void SetupQuarry()
@@ -618,9 +632,8 @@ namespace KineticEnergy.EditorSetup
 
             Material rockFloor = MakeMaterial("QuarryFloorMaterial", new Color(0.42f, 0.52f, 0.42f));
             Material rockWall = MakeMaterial("QuarryWallMaterial", new Color(0.32f, 0.45f, 0.36f));
-            Material ledgeMat = MakeMaterial("QuarryLedgeMaterial", new Color(0.30f, 0.62f, 0.40f));
-            Material perchMat = MakeMaterial("QuarryPerchMaterial", new Color(0.45f, 0.55f, 0.72f));
-            Material markerMat = MakeMaterial("QuarryMarkerMaterial", new Color(0.95f, 0.85f, 0.25f));
+            // ONE material for every platform in the level - direct request.
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
 
             // --- Terrain container. NOTHING here is sticky by default: stickiness is
             // strictly opt-in via a StickySurface component on the individual object (see
@@ -651,67 +664,45 @@ namespace KineticEnergy.EditorSetup
             // Spawn ledge, mid-height on the south wall, looking in.
             float ledgeY = rimHeight * 0.5f;
             Vector3 spawnLedgeCenter = new Vector3(0f, ledgeY - 1f, -depth * 0.5f + 8f);
-            CreateBlock(tf, "SpawnLedge", spawnLedgeCenter, new Vector3(16f, 2f, 16f), ledgeMat);
+            CreateBlock(tf, "SpawnLedge", spawnLedgeCenter, new Vector3(16f, 2f, 16f), platformMat);
             Vector3 playerSpawn = spawnLedgeCenter + new Vector3(0f, 1f + 1f, 0f);
 
-            // Zone B - the terraces (west wall): four ledges stepping up, 0.6L apart along
-            // the wall and 0.4H apart vertically, progressively narrower (3, 2, 1.5, 1 cubes).
-            float[] terraceDepths = { 3f, 2f, 1.5f, 1f };
-            for (int i = 0; i < terraceDepths.Length; i++)
+            // Wall platforms: the SAME arrangement on every wall - three full-size green
+            // platforms per wall, spread along its length at staggered heights (each wall's
+            // set is offset a little so opposite walls don't mirror exactly). No wall gets
+            // its own special platform type, and none of the old narrow ledges remain.
+            Vector3[] wallInward = { Vector3.forward, Vector3.back, Vector3.right, Vector3.left };
+            string[] wallNames = { "South", "North", "West", "East" };
+            float[] alongOffsets = { -0.85f * L, 0.05f * L, 0.9f * L };
+            float[] baseHeights = { 0.35f * H, 0.8f * H, 1.25f * H };
+            for (int wall = 0; wall < 4; wall++)
             {
-                float y = 0.4f * H * (i + 1);
-                float z = -0.9f * L + 0.6f * L * i;
-                float terraceDepth = terraceDepths[i];
-                CreateBlock(tf, "Terrace" + (i + 1),
-                    new Vector3(-width * 0.5f + terraceDepth * 0.5f, y - 0.5f, z),
-                    new Vector3(terraceDepth, 1f, 8f), ledgeMat);
+                Vector3 inward = wallInward[wall];
+                Vector3 along = new Vector3(inward.z, 0f, inward.x); // horizontal, parallel to the wall
+                Vector3 wallFaceCenter = -inward * (1.5f * L - 5f);  // just proud of the wall's inner face
+                for (int i = 0; i < 3; i++)
+                {
+                    float height = baseHeights[(i + wall) % 3] + 0.06f * H * wall;
+                    CreateBlock(tf, "Wall" + wallNames[wall] + "Platform" + (i + 1),
+                        wallFaceCenter + along * alongOffsets[i] + Vector3.up * height,
+                        new Vector3(8f, 1f, 8f), platformMat);
+                }
             }
 
-            // Zone C - the cathedral (east wall): two overhangs and a sticky ceiling patch
-            // whose underside is reachable only by a straight-up launch from the floor.
-            // NOTE: nothing in this scene carries StickySurface - assign it by hand in the
-            // editor wherever you decide a surface should hold.
-            float eastInnerX = width * 0.5f;
-            CreateBlock(tf, "CathedralOverhangLow",
-                new Vector3(eastInnerX - 0.075f * L, 0.8f * H, 0.3f * L),
-                new Vector3(0.15f * L, 2f, 0.2f * L), rockWall);
-            CreateBlock(tf, "CathedralOverhangHigh",
-                new Vector3(eastInnerX - 0.06f * L, 1.5f * H, -0.2f * L),
-                new Vector3(0.12f * L, 2f, 0.16f * L), rockWall);
-            // Ceiling patch: sits just under one max-charge straight-up launch from the floor.
-            Vector3 ceilingPatchCenter = new Vector3(eastInnerX - 0.2f * L, 0.92f * H, 0.05f * L);
-            CreateBlock(tf, "CathedralCeilingPatch", ceilingPatchCenter, new Vector3(0.3f * L, 2f, 0.3f * L), rockWall);
-            // The launch spot on the floor directly beneath it, marked.
-            CreateBlock(tf, "CeilingLaunchMarker", new Vector3(ceilingPatchCenter.x, 0.05f, ceilingPatchCenter.z), new Vector3(4f, 0.1f, 4f), markerMat);
-
-            // Zone D - the north-west corner: a climbing cluster of platforms stepping up
-            // and into the corner at varied heights, with a target above the top one.
-            Vector3 cornerBase = new Vector3(-width * 0.5f + 0.35f * L, 0f, depth * 0.5f - 0.35f * L);
-            Vector3[] cornerPlatforms =
-            {
-                cornerBase + new Vector3(0.15f * L, 0.3f * H - 0.5f, -0.15f * L),
-                cornerBase + new Vector3(-0.05f * L, 0.65f * H - 0.5f, 0.05f * L),
-                cornerBase + new Vector3(0.1f * L, 1.0f * H - 0.5f, 0.12f * L),
-                cornerBase + new Vector3(-0.12f * L, 1.35f * H - 0.5f, -0.08f * L),
-            };
-            for (int i = 0; i < cornerPlatforms.Length; i++)
-            {
-                CreateBlock(tf, "CornerPlatform" + (i + 1), cornerPlatforms[i], new Vector3(8f, 1f, 8f), ledgeMat);
-            }
-
-            // Zone E - the perches: the only NON-sticky surfaces in the level (0.3s cling).
-            // A separate container without StickySurface, visually distinct.
+            // Free-floating perches: one per side, a little in from the wall platforms, at
+            // staggered heights - the same green as every other platform. (Nothing in this
+            // scene carries StickySurface; assign it by hand wherever a surface should hold.)
             GameObject perches = new GameObject("QuarryPerches");
             Vector3[] perchPositions =
             {
-                new Vector3(0.5f * L, 0.5f * H, -0.5f * L),
-                new Vector3(-0.4f * L, 0.85f * H, 0.15f * L),
-                new Vector3(0.25f * L, 1.25f * H, 0.55f * L),
-                new Vector3(-0.1f * L, 1.7f * H, -0.25f * L),
+                new Vector3(1.15f * L, 0.55f * H, -0.6f * L),  // east side
+                new Vector3(-1.15f * L, 0.95f * H, 0.55f * L), // west side
+                new Vector3(0.55f * L, 1.35f * H, 1.15f * L),  // north side
+                new Vector3(-0.55f * L, 1.7f * H, -1.15f * L), // south side
             };
             for (int i = 0; i < perchPositions.Length; i++)
             {
-                CreateBlock(perches.transform, "Perch" + (i + 1), perchPositions[i], new Vector3(7f, 1f, 7f), perchMat);
+                CreateBlock(perches.transform, "Perch" + (i + 1), perchPositions[i], new Vector3(8f, 1f, 8f), platformMat);
             }
 
             // Boundary cage: the rim continues upward as INVISIBLE wall borders, tall enough
@@ -723,6 +714,9 @@ namespace KineticEnergy.EditorSetup
             float cageTop = rimHeight + realMaxLaunchHeight + 15f;
             float cageWallHeight = cageTop - rimHeight + 8f;
             float cageCenterY = (rimHeight + cageTop) * 0.5f;
+            // The world's ceiling: solid (nothing gets above it), non-sticky (brief cling,
+            // then you fall back in), and - like the whole cage - invisible to the aim.
+            CreateInvisibleBox(cage.transform, "CageCeiling", new Vector3(0f, cageTop + 2f, 0f), new Vector3(width + 40f, 4f, depth + 40f));
             CreateInvisibleBox(cage.transform, "CageSouth", new Vector3(0f, cageCenterY, -depth * 0.5f - 6f), new Vector3(width + 40f, cageWallHeight, 4f));
             CreateInvisibleBox(cage.transform, "CageNorth", new Vector3(0f, cageCenterY, depth * 0.5f + 6f), new Vector3(width + 40f, cageWallHeight, 4f));
             CreateInvisibleBox(cage.transform, "CageWest", new Vector3(-width * 0.5f - 6f, cageCenterY, 0f), new Vector3(4f, cageWallHeight, depth + 40f));
@@ -753,28 +747,32 @@ namespace KineticEnergy.EditorSetup
             menuTriggerBox.size = new Vector3(3f, 3f, 3f);
             menuTrigger.AddComponent<FinishLineNextScene>().nextSceneName = "MainMenu";
 
-            // Eight respawning target spheres with a small session counter: one per zone,
-            // the rest in awkward mid-air spots. A spine for free play, not an objective.
+            // Eight respawning target spheres with a small session counter - a spine for
+            // free play, not an objective.
             Text counterLabel = BuildHudLabel("TargetCounterHud", "Targets: 0", new Vector2(0.5f, 1f), new Vector2(0f, -24f), TextAnchor.UpperCenter, 30);
             TargetSphereCounter counter = counterLabel.transform.parent.gameObject.AddComponent<TargetSphereCounter>();
             counter.label = counterLabel;
 
             Material sphereMat = MakeMaterial("TargetSphereMaterial", new Color(1f, 0.55f, 0.1f));
+            // Half strung up the CENTRE at rising heights, one out by each wall.
             Vector3[] spherePositions =
             {
-                new Vector3(0f, 0.3f * H, 0.2f * L),                                        // Zone A - over the open bowl
-                new Vector3(-width * 0.5f + 12f, 0.4f * H * 4f + 3f, -0.9f * L + 1.8f * L), // Zone B - above the top terrace
-                ceilingPatchCenter + new Vector3(0f, -4f, 0f),                              // Zone C - hanging under the ceiling patch
-                cornerPlatforms[3] + new Vector3(0f, 5f, 0f),                               // Zone D - above the corner cluster's top platform
-                perchPositions[2] + new Vector3(0f, 4f, 0f),                                // Zone E - over a perch
-                new Vector3(0.9f * L, 1.9f * H, 0.9f * L),                                  // awkward mid-air
-                new Vector3(-1.1f * L, 1.1f * H, -0.9f * L),
-                new Vector3(0.3f * L, 2.6f * H, -0.6f * L),                                 // up among the cage
+                new Vector3(0f, 0.35f * H, 0f),                // centre, low
+                new Vector3(0.12f * L, 0.8f * H, -0.1f * L),   // centre, mid
+                new Vector3(-0.1f * L, 1.3f * H, 0.12f * L),   // centre, high
+                new Vector3(0f, 1.8f * H, 0f),                 // centre, top
+                new Vector3(0f, 0.9f * H, -1.25f * L),         // by the south wall
+                new Vector3(0.2f * L, 1.1f * H, 1.25f * L),    // by the north wall
+                new Vector3(-1.25f * L, 0.6f * H, 0.2f * L),   // by the west wall
+                new Vector3(1.25f * L, 1.5f * H, -0.2f * L),   // by the east wall
             };
+            // Respawns land anywhere inside the arena interior, never above Y = 64.
+            Vector3 respawnMin = new Vector3(-width * 0.5f + 10f, 4f, -depth * 0.5f + 10f);
+            Vector3 respawnMax = new Vector3(width * 0.5f - 10f, Mathf.Min(TargetSphereMaxY, rimHeight - 4f), depth * 0.5f - 10f);
             GameObject spheres = new GameObject("TargetSpheres");
             for (int i = 0; i < spherePositions.Length; i++)
             {
-                CreateTargetSphere(spheres.transform, "TargetSphere" + (i + 1), spherePositions[i], sphereMat, counter);
+                CreateTargetSphere(spheres.transform, "TargetSphere" + (i + 1), spherePositions[i], sphereMat, counter, respawnMin, respawnMax);
             }
 
             // The whole ask, on screen once: mess around, stop whenever.
@@ -1061,18 +1059,24 @@ namespace KineticEnergy.EditorSetup
             return go;
         }
 
-        static void CreateTargetSphere(Transform parent, string name, Vector3 position, Material material, TargetSphereCounter counter)
+        // Targets never sit (or respawn) above this height - direct request.
+        const float TargetSphereMaxY = 64f;
+
+        static void CreateTargetSphere(Transform parent, string name, Vector3 position, Material material, TargetSphereCounter counter, Vector3 respawnMin, Vector3 respawnMax)
         {
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             go.name = name;
             go.transform.SetParent(parent, true);
+            position.y = Mathf.Min(position.y, TargetSphereMaxY);
             go.transform.position = position;
-            go.transform.localScale = Vector3.one * 3f;
+            go.transform.localScale = Vector3.one * 2.25f; // 75% of the original 3m diameter
             go.GetComponent<Renderer>().sharedMaterial = material;
             // SOLID on purpose: the player crash-lands on the sphere (normal refund), it
             // vanishes, and the aim preview treats it as a genuine landing target.
             TargetSphere sphere = go.AddComponent<TargetSphere>();
             sphere.counter = counter;
+            sphere.respawnAreaMin = respawnMin;
+            sphere.respawnAreaMax = respawnMax;
             EditorUtility.SetDirty(sphere);
         }
 

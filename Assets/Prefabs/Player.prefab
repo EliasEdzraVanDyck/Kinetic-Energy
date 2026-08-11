@@ -3477,6 +3477,7 @@ MonoBehaviour:
   minLaunchDamping: 2.8
   maxLaunchDamping: 1
   downLaunchDamping: 0.2
+  plainFallDamping: 0.2
   startingEnergyFraction: 0.2
   energyCostPerFullCharge: 1
   minEnergyReserve: 0.05
@@ -3484,7 +3485,10 @@ MonoBehaviour:
   chargeAcceleration: 1
   infiniteEnergy: 0
   energyMeter: {fileID: 0}
+  groundedRefundMultiplier: 1
+  midairRefundBaseMultiplier: 1
   midairRefundSpendFactor: 0.3
+  poundFlightRefundMultiplier: 1
   groundPoundBoostMultiplier: 1.5
   groundPoundHopHeight: 0.2
   groundPoundSlowDuration: 0.5
@@ -3517,6 +3521,8 @@ MonoBehaviour:
   chargeTimeScale: 0.2
   launchFlightTimeScale: 2
   flightTimeScaleEnergyBonus: 1
+  fallSpeedUpStart: 0.01
+  fallSpeedUpEnd: 0.5
   maxLaunchesPerFlight: 2
   launchGraceDuration: 0.15
   minLaunchClearDistance: 2

@@ -67,6 +67,11 @@ namespace KineticEnergy.Player
         // of a downward launch instead.
         [Tooltip("Fixed low damping used by downward (ground pound) launches instead of the charge curve.")]
         public float downLaunchDamping = 0.2f;
+        // A PLAIN fall (walked off a ledge, dropped from a cling - no launch in flight) must
+        // not inherit the last launch's arc-shaping drag: at damping 2.8 terminal velocity is
+        // only ~11 m/s, which reads as a parachute.
+        [Tooltip("Damping applied while airborne with no launch in flight, so plain falls accelerate naturally.")]
+        public float plainFallDamping = 0.2f;
 
         [Header("Energy")]
         [Tooltip("Fraction of the tank the player starts the level with.")]
@@ -93,8 +98,14 @@ namespace KineticEnergy.Player
         public EnergyMeterController energyMeter;
 
         [Header("Crash Refunds")]
-        [Tooltip("Midair-launch refund: spend * (1 + this * spend). The multiplier RISES with how much was committed.")]
+        [Tooltip("A grounded (first) launch's crash refunds spend * this (1 = an exact wash).")]
+        public float groundedRefundMultiplier = 1f;
+        [Tooltip("A midair launch's refund: spend * (base + factor * spend).")]
+        public float midairRefundBaseMultiplier = 1f;
+        [Tooltip("The 'factor' above - the midair multiplier RISES with how much was committed.")]
         public float midairRefundSpendFactor = 0.3f;
+        [Tooltip("A pound crash immediately refunds the whole flight's spend times this (1 = an exact wash); the boost extra comes on top.")]
+        public float poundFlightRefundMultiplier = 1f;
 
         [Header("Ground Pound (the EnergyEconomy4 mechanic)")]
         // The pound doesn't stick - it BOUNCES: a free hop of groundPoundHopHeight, then a
@@ -180,6 +191,14 @@ namespace KineticEnergy.Player
         // every 1% of the tank the launch spent (a full-tank launch flies at 300%).
         [Tooltip("Added to the flight time scale per full tank of energy spent on the launch (1 = +1% speed per 1% energy).")]
         public float flightTimeScaleEnergyBonus = 1f;
+        // Falling adds ANOTHER ramp on top: from the first descending frame the game speeds
+        // up by fallSpeedUpStart, growing in even steps to fallSpeedUpEnd at the moment of
+        // impact - measured as descent progress from the flight's apex down to the landing
+        // height the aim predicted at fire time.
+        [Tooltip("Extra game speed on the first falling frame of a flight (0.01 = +1%).")]
+        public float fallSpeedUpStart = 0.01f;
+        [Tooltip("Extra game speed at the moment of impact (0.5 = +50%).")]
+        public float fallSpeedUpEnd = 0.5f;
 
         [Header("Launch Limit")]
         [Tooltip("Launches allowed since last standing/crashing (a crash resets the budget). 0 = unlimited.")]
@@ -314,6 +333,10 @@ namespace KineticEnergy.Player
 
         // This flight's time scale - base plus the energy-spend bonus, fixed at fire time.
         float activeFlightTimeScale = 1f;
+        // The descent ramp's endpoints: the highest point this flight has reached, and the
+        // landing height the aim predicted when it fired.
+        float flightApexY;
+        float flightPredictedLandingY;
 
         // Slowdown resource.
         float aimBudgetRemaining;
@@ -591,7 +614,22 @@ namespace KineticEnergy.Player
             // bullet-time is what makes them read as fast.
             bool holdChargeSlow = holdChargeDirection != HoldChargeDirection.None;
 
-            float flightScale = hasLaunched ? activeFlightTimeScale : 1f;
+            float flightScale = 1f;
+            if (hasLaunched)
+            {
+                flightScale = activeFlightTimeScale;
+                // The descent ramp: track the apex, and while falling scale the speed-up by
+                // how far down the descent has come relative to the predicted landing.
+                // Deliberately NOT applied to downward (ground pound) launches - those are
+                // one continuous dive and feel right at the plain flight speed.
+                flightApexY = Mathf.Max(flightApexY, transform.position.y);
+                if (rb.linearVelocity.y < 0f && !currentFlightIsDownward)
+                {
+                    float descentSpan = Mathf.Max(flightApexY - flightPredictedLandingY, 0.01f);
+                    float descentProgress = Mathf.Clamp01((flightApexY - transform.position.y) / descentSpan);
+                    flightScale *= 1f + Mathf.Lerp(fallSpeedUpStart, fallSpeedUpEnd, descentProgress);
+                }
+            }
             Time.timeScale = airAimSlow || holdChargeSlow || poundWindowSlow ? chargeTimeScale : flightScale;
         }
 
@@ -1134,6 +1172,11 @@ namespace KineticEnergy.Player
             // this launch spent (see flightTimeScaleEnergyBonus).
             activeFlightTimeScale = launchFlightTimeScale + lastLaunchEnergySpent * flightTimeScaleEnergyBonus;
 
+            // Arm the descent ramp: apex starts here, and the landing height is whatever the
+            // aim just predicted (a shot into the void ramps toward the fall-reset instead).
+            flightApexY = transform.position.y;
+            flightPredictedLandingY = hasValidPredictedLanding ? lastPredictedLanding.y : fallResetY;
+
             // Armed here already (not just when FixedUpdate applies the impulse) so
             // AllowGroundedMovement/AllowAirborneNudge are correct the instant firing is
             // decided - the free-move component's FixedUpdate can run before ours.
@@ -1207,6 +1250,13 @@ namespace KineticEnergy.Player
                 exactFlightNoNudge = false;
                 flightEnergySpent = 0f; // the flight (and its refund basis) ends on the ground
                 if (!infiniteEnergy) ClampEnergyFloor();
+            }
+
+            // Plain falls (no launch in flight) shed the last launch's arc-shaping drag -
+            // see plainFallDamping.
+            if (!hasLaunched && !isGrounded && !isStuck && rb.linearDamping > plainFallDamping)
+            {
+                rb.linearDamping = plainFallDamping;
             }
 
             // A slam fired from ZERO clearance never actually leaves its surface - PhysX
@@ -1300,6 +1350,25 @@ namespace KineticEnergy.Player
             {
                 breakable.Smash();
                 rb.linearVelocity = velocityBeforePhysicsStep;
+                return;
+            }
+
+            // Target spheres always register, BEFORE every guard below - a floating target
+            // can never be the launch platform spuriously re-reporting contact, so the
+            // grace/clear-distance guards must not swallow the hit (they did: spheres close
+            // to the launch point were phased through). A launch onto one is a full crash;
+            // touching one with no flight in progress still collects it, without the stick.
+            TargetSphere touchedSphere = collision.collider.GetComponentInParent<TargetSphere>();
+            if (touchedSphere != null)
+            {
+                if (hasLaunched && !isStuck)
+                {
+                    RegisterCrash(collision.GetContact(0).normal, velocityBeforePhysicsStep.magnitude, collision.collider);
+                }
+                else
+                {
+                    touchedSphere.OnHitByCrash();
+                }
                 return;
             }
 
@@ -1417,7 +1486,7 @@ namespace KineticEnergy.Player
             if (lastLaunchWasPound)
             {
                 float flightSpend = flightEnergySpent > 0.0001f ? flightEnergySpent : lastLaunchEnergySpent;
-                energyFraction = Mathf.Clamp01(energyFraction + flightSpend);
+                energyFraction = Mathf.Clamp01(energyFraction + flightSpend * poundFlightRefundMultiplier);
                 // The boost extra keys off the POUND launch alone, not the whole flight.
                 poundPendingRefund = lastLaunchEnergySpent;
                 ClampEnergyFloor();
@@ -1427,12 +1496,12 @@ namespace KineticEnergy.Player
             float gain;
             if (lastLaunchWasGrounded)
             {
-                gain = lastLaunchEnergySpent; // a grounded launch is a wash
+                gain = lastLaunchEnergySpent * groundedRefundMultiplier;
             }
             else
             {
-                // spend * (1 + factor * spend): the multiplier rises with how much was committed.
-                gain = lastLaunchEnergySpent * (1f + midairRefundSpendFactor * lastLaunchEnergySpent);
+                // spend * (base + factor * spend): the multiplier rises with how much was committed.
+                gain = lastLaunchEnergySpent * (midairRefundBaseMultiplier + midairRefundSpendFactor * lastLaunchEnergySpent);
             }
             energyFraction = Mathf.Clamp01(energyFraction + gain);
             ClampEnergyFloor();
