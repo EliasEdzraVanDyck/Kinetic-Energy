@@ -36,6 +36,8 @@ namespace KineticEnergy.Camera
         public float positionSmoothTime = 0.08f;
         [Tooltip("Position smoothing while a launch is in flight - larger than positionSmoothTime, so the camera briefly trails the launch and then catches up.")]
         public float launchFollowSmoothTime = 0.25f;
+        [Tooltip("Same trailing effect for VERTICAL launches (up-charge and ground pound) - slightly tighter, so the camera hangs back a touch less on straight up/down flights.")]
+        public float verticalLaunchFollowSmoothTime = 0.18f;
         [Tooltip("Seconds over which the follow relaxes back to normal tightness after a flight ends - stops the camera from lunging at the player the instant a launch lands.")]
         public float followLagRecoverySeconds = 0.5f;
         public float maxDeltaTime = 0.05f;
@@ -43,12 +45,15 @@ namespace KineticEnergy.Camera
         float followSmoothTime; // the eased, currently-active follow smoothing
 
         // Set per frame by KineticCubeController - true for the whole launch flight, so the
-        // orbit follow uses the lazier launchFollowSmoothTime while the cube rockets away.
+        // orbit follow uses the lazier launch smoothing while the cube rockets away.
+        // Vertical flights (up-charge / pound) use their own slightly tighter value.
         bool launchInFlight;
+        bool launchIsVertical;
 
-        public void SetLaunchInFlight(bool inFlight)
+        public void SetLaunchInFlight(bool inFlight, bool vertical)
         {
             launchInFlight = inFlight;
+            launchIsVertical = vertical;
         }
 
         [Header("Auto Recenter")]
@@ -401,7 +406,8 @@ namespace KineticEnergy.Camera
             // Engaging the lag is INSTANT (the launch moment should trail immediately), but
             // releasing it EASES over followLagRecoverySeconds - snapping straight back to
             // the tight follow made the camera lunge at the player the frame a flight ended.
-            float targetFollow = launchInFlight && !firstPerson ? launchFollowSmoothTime : positionSmoothTime;
+            float activeLaunchFollow = launchIsVertical ? verticalLaunchFollowSmoothTime : launchFollowSmoothTime;
+            float targetFollow = launchInFlight && !firstPerson ? activeLaunchFollow : positionSmoothTime;
             if (targetFollow > followSmoothTime)
             {
                 followSmoothTime = targetFollow;

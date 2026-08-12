@@ -317,6 +317,7 @@ namespace KineticEnergy.Player
         // Flight state.
         bool hasLaunched;
         bool currentFlightIsDownward; // slams are EXPECTED to instantly re-strike their own surface - bypasses the crash guards
+        bool currentFlightIsVertical; // up-charge or pound - the camera trails these with its tighter vertical smoothing
         bool exactFlightNoNudge;      // a midair-aimed launch flies the predicted line exactly - the stick must not bend it
         float launchGraceTimer;
         Vector3 launchStartPosition;
@@ -595,11 +596,16 @@ namespace KineticEnergy.Player
             }
             else
             {
-                // Midair, nothing active: West/E starts the ground pound, the aim button opens
-                // the first-person aim.
+                // Midair, nothing active: West/E starts the ground pound, Space/South starts
+                // a straight-UP charge (same commit-from-a-fresh-press rule as the pound),
+                // and the aim button opens the first-person aim - three launch options.
                 if (energyFraction > 0f && CanStartNewLaunch() && PoundPressedThisFrame())
                 {
                     StartHoldCharge(HoldChargeDirection.Down);
+                }
+                else if (energyFraction > 0f && CanStartNewLaunch() && UpChargePressedThisFrame())
+                {
+                    StartHoldCharge(HoldChargeDirection.Up);
                 }
                 else
                 {
@@ -746,8 +752,9 @@ namespace KineticEnergy.Player
             cameraOrbit.SetIgnoreSlowMo(holdChargeDirection == HoldChargeDirection.Up || holdChargeDirection == HoldChargeDirection.Down);
 
             // Launch flights use the lazier follow smoothing - the camera visibly trails the
-            // launch for a moment instead of being glued to it.
-            cameraOrbit.SetLaunchInFlight(hasLaunched);
+            // launch for a moment instead of being glued to it. Vertical flights report
+            // themselves so the camera can use its slightly tighter vertical value.
+            cameraOrbit.SetLaunchInFlight(hasLaunched, currentFlightIsVertical);
 
             // First-person midair aim looks at the cursor at the end of the dotted line.
             bool framingAim = !isGrounded && hasValidPredictedLanding && airAiming;
@@ -1374,6 +1381,9 @@ namespace KineticEnergy.Player
             lastLaunchWasGrounded = isGrounded && !poundAimHoldingGravityOff;
             lastLaunchWasPound = false;   // re-set by the pound's own fire path
             currentFlightIsDownward = Vector3.Dot(direction.normalized, Vector3.down) >= slamDownwardThreshold;
+            // Vertical either way (up-charge or pound) - the camera trails these with its
+            // slightly tighter vertical smoothing. Same threshold as the slam check, mirrored.
+            currentFlightIsVertical = Mathf.Abs(Vector3.Dot(direction.normalized, Vector3.up)) >= slamDownwardThreshold;
 
             // Deduct what was ACTUALLY spendable, not the theoretical charge cost - the
             // refund can then never fabricate energy a nearly-empty tank didn't really spend.
@@ -2071,7 +2081,8 @@ namespace KineticEnergy.Player
                    "  Mouse / Right Stick: Aim\n" +
                    "  Mouse Wheel / Right Stick Up/Down: Add or remove energy\n" +
                    "  Blue bar: Energy cost\n" +
-                   "  Left Mouse / Right Trigger: Fire\n\n" +
+                   "  Left Mouse / Right Trigger: Fire\n" +
+                   "  A / Space (hold): Charge straight up\n\n" +
 
                    "GROUND POUND\n" +
                    "Hold X / E to charge. Release to slam straight down.\n" +
