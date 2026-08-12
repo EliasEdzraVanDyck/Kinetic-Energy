@@ -49,8 +49,10 @@ namespace KineticEnergy.Level
         public float attackLaunchSpeed = 48f;
         [Tooltip("Shortest and longest the attack flight may take, in seconds - keeps close-range attacks dodgeable and long-range ones snappy.")]
         public Vector2 attackFlightTimeRange = new Vector2(0.15f, 0.5f);
-        [Tooltip("Minimum apex height of the attack arc - keeps the flat, fast arc from grazing the ground and landing short of the player.")]
-        public float attackArcHeight = 3f;
+        [Tooltip("Apex height of the attack arc above the launch point - the flight time stretches as needed so the arc genuinely rises and then descends onto the target.")]
+        public float attackArcHeight = 1.5f;
+        [Tooltip("The arc lands this far BEHIND the player's old position (along the attack direction), so the descending tail sweeps through the player instead of stopping at their feet.")]
+        public float attackOvershoot = 1.5f;
         [Tooltip("Impulse applied to the player on a successful hit.")]
         public float knockbackForce = 24f;
         [Tooltip("Energy fraction the player loses on a successful hit.")]
@@ -62,6 +64,8 @@ namespace KineticEnergy.Level
 
         Rigidbody body;
         KineticCubeController player;
+        Collider bodyCollider;
+        Collider playerCollider;
         Renderer bodyRenderer;
         Color restColor;
 
@@ -75,12 +79,16 @@ namespace KineticEnergy.Level
         float cooldownRemaining;
         Vector3 attackTarget;    // the player's position when the windup began
         Vector3 flightVelocity;  // the ballistic arc, integrated manually
+        float flightDuration;    // solved flight time of the current attack arc
+        float flightElapsed;
         float fallVelocity;      // vertical speed while unsupported outside a launch
 
         void Start()
         {
             spawnPoint = transform.position;
             player = FindAnyObjectByType<KineticCubeController>();
+            bodyCollider = GetComponent<Collider>();
+            if (player != null) playerCollider = player.GetComponent<Collider>();
             bodyRenderer = GetComponentInChildren<Renderer>();
             if (bodyRenderer != null) restColor = bodyRenderer.material.color;
 
@@ -255,33 +263,43 @@ namespace KineticEnergy.Level
             state = EnemyState.Launching;
             if (bodyRenderer != null) bodyRenderer.material.color = windUpColor;
 
-            // A player-style ballistic launch, solved for TIME instead of angle: the flight
-            // takes range/attackLaunchSpeed seconds (clamped), and the exit velocity is
-            // whatever ballistic arc lands exactly on the target in that time - height
-            // difference included. Raising attackLaunchSpeed makes the whole attack faster
-            // and flatter without ever overshooting.
+            // A player-style ballistic launch, solved for TIME instead of angle. The landing
+            // point sits attackOvershoot BEHIND the player's old position so the descending
+            // tail of the arc sweeps through the player rather than ending at their feet.
+            // Flight time comes from attackLaunchSpeed (clamped), then stretches if needed
+            // so the arc genuinely peaks at attackArcHeight - a real rise-and-descend arc,
+            // never a ground-skimming line, and never lifted off its exact landing point.
             Vector3 toTarget = attackTarget - body.position;
             Vector3 flat = new Vector3(toTarget.x, 0f, toTarget.z);
             float range = Mathf.Max(flat.magnitude, 0.5f);
-            float flightTime = Mathf.Clamp(range / Mathf.Max(attackLaunchSpeed, 0.1f), attackFlightTimeRange.x, attackFlightTimeRange.y);
+            Vector3 flatDirection = flat / range;
+            range += Mathf.Max(attackOvershoot, 0f);
 
-            // The time-solved vertical speed lands exactly on the target, but at high
-            // horizontal speeds the arc is so flat it grazes the ground and stops short.
-            // Enforce a minimum apex height instead - landing slightly PAST the old
-            // position beats stopping in front of the player.
+            float gravityStrength = Mathf.Abs(Physics.gravity.y);
+            float speedTime = Mathf.Clamp(range / Mathf.Max(attackLaunchSpeed, 0.1f), attackFlightTimeRange.x, attackFlightTimeRange.y);
+            float apexSpeed = Mathf.Sqrt(2f * gravityStrength * Mathf.Max(attackArcHeight, 0.1f));
+            float apexTime = (apexSpeed + Mathf.Sqrt(Mathf.Max(apexSpeed * apexSpeed - 2f * gravityStrength * toTarget.y, 0f))) / gravityStrength;
+            float flightTime = Mathf.Max(speedTime, apexTime);
+
             float verticalSpeed = toTarget.y / flightTime - 0.5f * Physics.gravity.y * flightTime;
-            float apexSpeed = Mathf.Sqrt(2f * Mathf.Abs(Physics.gravity.y) * Mathf.Max(attackArcHeight, 0f));
-            flightVelocity = flat / flightTime + Vector3.up * Mathf.Max(verticalSpeed, apexSpeed);
+            flightVelocity = flatDirection * (range / flightTime) + Vector3.up * verticalSpeed;
+            flightDuration = flightTime;
+            flightElapsed = 0f;
         }
 
         void UpdateFlight(float dt)
         {
+            flightElapsed += dt;
             flightVelocity += Physics.gravity * dt;
             Vector3 next = body.position + flightVelocity * dt;
 
-            // Land on whatever is under the descending arc.
+            // Land on whatever is under the descending arc - but not before most of the
+            // solved flight time has passed. The fast attack arc is nearly flat and skims
+            // the ground the whole way; without this guard the graze registered as a
+            // landing and the enemy stopped short of the player.
             float bodyRadius = transform.localScale.x * 0.5f;
             if (flightVelocity.y < 0f
+                && flightElapsed >= flightDuration * 0.6f
                 && Physics.Raycast(body.position, Vector3.down, out RaycastHit hit, bodyRadius + Mathf.Abs(flightVelocity.y * dt) + 0.1f)
                 && hit.collider.GetComponent<KineticCubeController>() == null)
             {
@@ -311,7 +329,14 @@ namespace KineticEnergy.Level
             state = EnemyState.Wandering;
             spawnPoint = body.position; // radius wandering re-centres on wherever it landed
             pauseRemaining = 0f;
+            SetPlayerCollisionIgnored(false);
             PickNewTarget();
+        }
+
+        void SetPlayerCollisionIgnored(bool ignored)
+        {
+            if (bodyCollider != null && playerCollider != null)
+                Physics.IgnoreCollision(bodyCollider, playerCollider, ignored);
         }
 
         // A mid-flight body-check: hitting the player during the attack launch shoves them
@@ -335,6 +360,11 @@ namespace KineticEnergy.Level
             }
             Vector3 shoveDirection = (away.normalized + Vector3.up * 0.6f).normalized;
             player.ApplyEnemyHit(shoveDirection * knockbackForce, attackEnergyDrain);
+
+            // No further contacts until the enemy is back to wandering: the landed enemy
+            // sits right where the player stood, and its infinite-mass kinematic collider
+            // pinning the player was eating the knockback.
+            SetPlayerCollisionIgnored(true);
 
             // Land on the GROUND below, never on the player - treating the player's
             // collider as the home platform gave the enemy a moving, bogus walkable area
@@ -368,6 +398,7 @@ namespace KineticEnergy.Level
             pauseRemaining = 0f;
             cooldownRemaining = 0f;
             fallVelocity = 0f;
+            SetPlayerCollisionIgnored(false);
             if (bodyRenderer != null) bodyRenderer.material.color = restColor;
             if (Physics.Raycast(spawnPoint, Vector3.down, out RaycastHit hit, 5f)) platformBelow = hit.collider;
             PickNewTarget();

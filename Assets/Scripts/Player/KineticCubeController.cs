@@ -1203,6 +1203,8 @@ namespace KineticEnergy.Player
         [Tooltip("Seconds of lost ground control after an enemy hit, so the knockback actually carries (grounded movement overwrites velocity every tick otherwise).")]
         public float enemyHitControlLossSeconds = 0.35f;
         float knockbackTimer;
+        Vector3 pendingEnemyKnockback;
+        bool hasPendingEnemyKnockback;
 
         // Enemy attack hook: a launching enemy that body-checks the player SHOVES them and
         // drains some energy. The hit interrupts any aim/charge, breaks a crash-stick, and
@@ -1220,7 +1222,12 @@ namespace KineticEnergy.Player
             nonStickyReleaseTimer = 0f;
             rb.useGravity = true;
             rb.linearDamping = plainFallDamping;
-            rb.linearVelocity = impulse; // replaced outright - a clean, readable shove
+            // NOT applied here: OnCollisionEnter fires mid-physics-step, after the solver
+            // has already slammed the player with the kinematic enemy's contact impulse -
+            // a velocity written now loses to it. Deferred one tick so the shove is the
+            // last word (see FixedUpdate).
+            pendingEnemyKnockback = impulse;
+            hasPendingEnemyKnockback = true;
             knockbackTimer = enemyHitControlLossSeconds;
 
             if (!infiniteEnergy) energyFraction = Mathf.Max(energyFraction - energyLoss, 0f);
@@ -1395,6 +1402,11 @@ namespace KineticEnergy.Player
 
             if (launchGraceTimer > 0f) launchGraceTimer -= Time.fixedDeltaTime;
             if (knockbackTimer > 0f) knockbackTimer -= Time.fixedDeltaTime;
+            if (hasPendingEnemyKnockback)
+            {
+                rb.linearVelocity = pendingEnemyKnockback;
+                hasPendingEnemyKnockback = false;
+            }
 
             // Grounded state from a fresh BoxCast across the cube's own footprint each step -
             // continuous collision detection can report contact slightly after a real
