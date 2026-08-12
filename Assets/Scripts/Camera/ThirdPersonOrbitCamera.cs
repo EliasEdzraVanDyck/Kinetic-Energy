@@ -34,7 +34,22 @@ namespace KineticEnergy.Camera
 
         [Header("Smoothing")]
         public float positionSmoothTime = 0.08f;
+        [Tooltip("Position smoothing while a launch is in flight - larger than positionSmoothTime, so the camera briefly trails the launch and then catches up.")]
+        public float launchFollowSmoothTime = 0.25f;
+        [Tooltip("Seconds over which the follow relaxes back to normal tightness after a flight ends - stops the camera from lunging at the player the instant a launch lands.")]
+        public float followLagRecoverySeconds = 0.5f;
         public float maxDeltaTime = 0.05f;
+
+        float followSmoothTime; // the eased, currently-active follow smoothing
+
+        // Set per frame by KineticCubeController - true for the whole launch flight, so the
+        // orbit follow uses the lazier launchFollowSmoothTime while the cube rockets away.
+        bool launchInFlight;
+
+        public void SetLaunchInFlight(bool inFlight)
+        {
+            launchInFlight = inFlight;
+        }
 
         [Header("Auto Recenter")]
         // Used by forward hold-charge launches to swing the camera back behind the player
@@ -163,6 +178,29 @@ namespace KineticEnergy.Camera
         // exactly along this, so the shot always goes exactly where the first-person view points.
         public Vector3 AimForward => Quaternion.Euler(pitch, yaw, 0f) * Vector3.forward;
 
+        // Called the instant a MIDAIR launch fires: the camera jumps straight to its third-
+        // person orbit slot behind the player and follows from there. Without this the
+        // camera exits first person AT the player - the launch simply flies past it and the
+        // catch-up reads as instant, no matter the smooth time. Starting from the orbit slot
+        // makes the launch trailing develop exactly like a grounded launch's.
+        public void SnapToThirdPersonOrbit()
+        {
+            firstPerson = false;
+            modeSwitching = false;
+            if (target == null) return;
+
+            Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
+            Vector3 focusPoint = target.position + Vector3.up * height;
+            transform.position = focusPoint - rotation * Vector3.forward * distance;
+            velocity = Vector3.zero;
+
+            Vector3 lookDir = focusPoint - transform.position;
+            if (lookDir.sqrMagnitude > 0.0001f)
+            {
+                transform.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+            }
+        }
+
         public void SetFirstPersonMode(bool enabled)
         {
             if (firstPerson != enabled) modeSwitching = true; // near-instant transition, see modeSwitchSmoothTime
@@ -206,6 +244,7 @@ namespace KineticEnergy.Camera
         {
             cam = GetComponent<UnityEngine.Camera>();
             if (cam != null) cam.fieldOfView = normalFov;
+            followSmoothTime = positionSmoothTime;
         }
 
         void Start()
@@ -356,8 +395,34 @@ namespace KineticEnergy.Camera
             // A mode switch uses the much shorter smooth time until the camera has essentially
             // arrived - so first <-> third person reads as a snap without the hard teleport
             // (and without the leftover SmoothDamp velocity that a teleport would keep).
-            float smoothTime = modeSwitching ? modeSwitchSmoothTime : positionSmoothTime;
-            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, smoothTime);
+            // Priority: an in-flight launch's lazy trailing beats everything (including the
+            // mode-switch snap - firing out of the midair aim IS a mode switch, and the snap
+            // was eating the launch lag there); the snap still covers aim open/cancel.
+            // Engaging the lag is INSTANT (the launch moment should trail immediately), but
+            // releasing it EASES over followLagRecoverySeconds - snapping straight back to
+            // the tight follow made the camera lunge at the player the frame a flight ended.
+            float targetFollow = launchInFlight && !firstPerson ? launchFollowSmoothTime : positionSmoothTime;
+            if (targetFollow > followSmoothTime)
+            {
+                followSmoothTime = targetFollow;
+            }
+            else
+            {
+                float relaxRate = (launchFollowSmoothTime - positionSmoothTime) / Mathf.Max(followLagRecoverySeconds, 0.01f);
+                followSmoothTime = Mathf.MoveTowards(followSmoothTime, targetFollow, relaxRate * Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
+            }
+
+            float smoothTime;
+            if (launchInFlight && !firstPerson) smoothTime = followSmoothTime;
+            else if (modeSwitching) smoothTime = modeSwitchSmoothTime;
+            else smoothTime = followSmoothTime;
+            // Explicit UNSCALED delta time: SmoothDamp's default is Time.deltaTime, which the
+            // in-flight game-speed-up inflates 2-3x - the camera was catching up that much
+            // faster than the smooth time promised, which read as a near-instant snap on
+            // midair launches. Real-seconds smoothing keeps the trailing consistent at any
+            // game speed (slow-mo included, matching how the rotation input already works).
+            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, smoothTime,
+                Mathf.Infinity, Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
             if (modeSwitching && (transform.position - desiredPosition).sqrMagnitude < 0.0025f) modeSwitching = false;
 
             if (firstPerson)

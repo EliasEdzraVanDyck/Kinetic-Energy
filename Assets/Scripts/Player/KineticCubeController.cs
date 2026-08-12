@@ -745,6 +745,10 @@ namespace KineticEnergy.Player
             // the bullet-time.
             cameraOrbit.SetIgnoreSlowMo(holdChargeDirection == HoldChargeDirection.Up || holdChargeDirection == HoldChargeDirection.Down);
 
+            // Launch flights use the lazier follow smoothing - the camera visibly trails the
+            // launch for a moment instead of being glued to it.
+            cameraOrbit.SetLaunchInFlight(hasLaunched);
+
             // First-person midair aim looks at the cursor at the end of the dotted line.
             bool framingAim = !isGrounded && hasValidPredictedLanding && airAiming;
             cameraOrbit.SetTrajectoryFraming(framingAim, lastPredictedLanding);
@@ -1033,11 +1037,15 @@ namespace KineticEnergy.Player
                 if (poundWindowTimer > 0f)
                 {
                     PayPoundBoostedRefund();
+                    // The flag must be up BEFORE the ceiling is computed - SpendableEnergy
+                    // keys off it to drop the grounded reserve. Computing the ceiling first
+                    // (the old order) held the reserve back, so the aim didn't always start
+                    // with ALL current energy.
+                    poundAimHoldingGravityOff = true;
+                    rb.useGravity = false;
                     // Starts charged with ALL current energy (boost included) - the pound
                     // aim spends the whole tank, no grounded reserve (see SpendableEnergy).
                     chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
-                    poundAimHoldingGravityOff = true;
-                    rb.useGravity = false;
                 }
             }
 
@@ -1099,6 +1107,9 @@ namespace KineticEnergy.Player
                 QueueLaunch(direction, force, damping);
                 exactFlightNoNudge = true; // the shot follows the predicted line exactly
                 CancelAirAim();
+                // Start the launch trailing from the third-person orbit slot, exactly like a
+                // grounded launch - see the camera method's own comment.
+                cameraOrbit?.SnapToThirdPersonOrbit();
             }
         }
 
@@ -1348,15 +1359,6 @@ namespace KineticEnergy.Player
 
         void QueueLaunch(Vector3 direction, float force, float damping)
         {
-            // Firing out of a post-pound aim: the shot is taken, so the boost is earned and
-            // kept; the gravity hold and the window end with the launch.
-            if (poundAimHoldingGravityOff)
-            {
-                poundAimHoldingGravityOff = false;
-                poundWindowTimer = 0f;
-                rb.useGravity = true;
-                poundBoostExtra = 0f;
-            }
             queuedDirection = direction;
             queuedForce = force;
             queuedDamping = damping;
@@ -1366,13 +1368,30 @@ namespace KineticEnergy.Player
             if (launchesRemainingOverride > 0) launchesRemainingOverride--;
             exactFlightNoNudge = false;   // re-armed by the midair fire path right after this call
             aimButtonSpent = true;        // a held aim button does nothing further until released
-            lastLaunchWasGrounded = isGrounded;
+            // A pound-window launch counts as MIDAIR no matter what the ground check says -
+            // the bounce hop sits inside the check's reach, but the whole post-pound flow
+            // (refund rules included) is a midair launch by design.
+            lastLaunchWasGrounded = isGrounded && !poundAimHoldingGravityOff;
             lastLaunchWasPound = false;   // re-set by the pound's own fire path
             currentFlightIsDownward = Vector3.Dot(direction.normalized, Vector3.down) >= slamDownwardThreshold;
 
             // Deduct what was ACTUALLY spendable, not the theoretical charge cost - the
             // refund can then never fabricate energy a nearly-empty tank didn't really spend.
             lastLaunchEnergySpent = Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge);
+
+            // Firing out of a post-pound aim: the shot is taken, so the boost is earned and
+            // kept; the gravity hold and the window end with the launch. Cleared only NOW -
+            // the midair classification and the spendable-energy read above both key off the
+            // flag, and clearing it first (the old order, at the top of this method) made
+            // pound-window launches count as grounded after all: wrong refund formula AND a
+            // reserve-capped spend.
+            if (poundAimHoldingGravityOff)
+            {
+                poundAimHoldingGravityOff = false;
+                poundWindowTimer = 0f;
+                rb.useGravity = true;
+                poundBoostExtra = 0f;
+            }
             if (!infiniteEnergy)
             {
                 if (gradualLaunchDrain)

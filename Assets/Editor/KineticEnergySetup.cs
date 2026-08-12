@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.Events;
 using UnityEditor.SceneManagement;
@@ -237,7 +238,7 @@ namespace KineticEnergy.EditorSetup
             var options = new BuildPlayerOptions
             {
                 scenes = new[] { QuarryScenePath },
-                locationPathName = "Builds/QuarryOnly/KineticEnergy.exe",
+                locationPathName = "Builds/QuarryOnly/GD3 Retake Kinetic Energy.exe",
                 target = BuildTarget.StandaloneWindows64,
                 options = BuildOptions.None,
             };
@@ -247,6 +248,66 @@ namespace KineticEnergy.EditorSetup
                 throw new Exception($"KineticEnergySetup: Quarry-only build FAILED - {report.summary.result}, {report.summary.totalErrors} errors.");
             }
             Debug.Log($"KineticEnergySetup: Quarry-only build complete OK -> {options.locationPathName} ({report.summary.totalSize / (1024 * 1024)} MB)");
+        }
+
+        // Builds exactly what the Build Settings window has ENABLED right now - the scene
+        // list is the user's to manage there; this just executes it under the proper name.
+        [MenuItem("Tools/Kinetic Energy/Build From Build Settings")]
+        public static void BuildFromBuildSettings()
+        {
+            string[] scenes = EditorBuildSettings.scenes
+                .Where(s => s.enabled)
+                .Select(s => s.path)
+                .ToArray();
+            if (scenes.Length == 0)
+            {
+                throw new Exception("KineticEnergySetup: no scenes are enabled in Build Settings - nothing to build.");
+            }
+
+            var options = new BuildPlayerOptions
+            {
+                scenes = scenes,
+                locationPathName = "Builds/GD3RetakeKineticEnergy/GD3 Retake Kinetic Energy.exe",
+                target = BuildTarget.StandaloneWindows64,
+                options = BuildOptions.None,
+            };
+            var report = BuildPipeline.BuildPlayer(options);
+            if (report.summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
+            {
+                throw new Exception($"KineticEnergySetup: build FAILED - {report.summary.result}, {report.summary.totalErrors} errors.");
+            }
+            Debug.Log($"KineticEnergySetup: build complete OK -> {options.locationPathName} ({report.summary.totalSize / (1024 * 1024)} MB, scenes: {string.Join(", ", scenes)})");
+        }
+
+        // Same scene selection as BuildFromBuildSettings, but a WEB (WebGL) build. The
+        // output is a folder (index.html + Build/), servable by any static web host -
+        // opening index.html straight from disk does NOT work in most browsers, it has to
+        // be served (e.g. itch.io upload, or a local server for testing).
+        [MenuItem("Tools/Kinetic Energy/Build Web From Build Settings")]
+        public static void BuildWebFromBuildSettings()
+        {
+            string[] scenes = EditorBuildSettings.scenes
+                .Where(s => s.enabled)
+                .Select(s => s.path)
+                .ToArray();
+            if (scenes.Length == 0)
+            {
+                throw new Exception("KineticEnergySetup: no scenes are enabled in Build Settings - nothing to build.");
+            }
+
+            var options = new BuildPlayerOptions
+            {
+                scenes = scenes,
+                locationPathName = "Builds/GD3RetakeKineticEnergyWeb", // WebGL target is a folder
+                target = BuildTarget.WebGL,
+                options = BuildOptions.None,
+            };
+            var report = BuildPipeline.BuildPlayer(options);
+            if (report.summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
+            {
+                throw new Exception($"KineticEnergySetup: web build FAILED - {report.summary.result}, {report.summary.totalErrors} errors.");
+            }
+            Debug.Log($"KineticEnergySetup: web build complete OK -> {options.locationPathName} ({report.summary.totalSize / (1024 * 1024)} MB, scenes: {string.Join(", ", scenes)})");
         }
 
         static void UpdateBuildSettings()
