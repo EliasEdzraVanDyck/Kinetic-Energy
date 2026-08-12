@@ -162,8 +162,6 @@ namespace KineticEnergy.EditorSetup
             // West's button - the action kept its historical asset name.
             controller.groundPoundAction = FindActionReference("Player", "SelectGhostPreview");
             controller.cancelChargeAction = FindActionReference("Player", "CancelCharge");
-            // Right Bumper - ditto.
-            controller.trailToggleAction = FindActionReference("Player", "SwitchControlScheme");
             controller.airAimAction = FindActionReference("Player", "FastPacedAim");
             controller.airLaunchAction = FindActionReference("Player", "FastPacedLaunch");
         }

@@ -261,8 +261,6 @@ namespace KineticEnergy.Player
         public InputActionReference groundPoundAction;
         [Tooltip("Left Bumper - cancels the current charge without firing.")]
         public InputActionReference cancelChargeAction;
-        [Tooltip("Right Bumper - shows/hides the trajectory trail.")]
-        public InputActionReference trailToggleAction;
         [Tooltip("Right Mouse / Left Trigger - holds the midair first-person aim open.")]
         public InputActionReference airAimAction;
         [Tooltip("Left Mouse / Right Trigger - confirms the midair launch.")]
@@ -473,7 +471,6 @@ namespace KineticEnergy.Player
             EnableAction(upLaunchAction);
             EnableAction(groundPoundAction);
             EnableAction(cancelChargeAction);
-            EnableAction(trailToggleAction);
             EnableAction(airAimAction);
             EnableAction(airLaunchAction);
         }
@@ -486,7 +483,6 @@ namespace KineticEnergy.Player
             DisableAction(upLaunchAction);
             DisableAction(groundPoundAction);
             DisableAction(cancelChargeAction);
-            DisableAction(trailToggleAction);
             DisableAction(airAimAction);
             DisableAction(airLaunchAction);
         }
@@ -548,7 +544,6 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            HandleTrailToggle();
             UpdateSlowdownResource();
             ApplyChargeTimeScale();
             UpdateCameraCoordination();
@@ -1782,15 +1777,6 @@ namespace KineticEnergy.Player
             ClampEnergyFloor();
         }
 
-        // ---------- Trail toggle ----------
-
-        void HandleTrailToggle()
-        {
-            if (trailToggleAction == null || trailToggleAction.action == null || !trailToggleAction.action.WasPressedThisFrame()) return;
-            if (landingPreview == null) return;
-            landingPreview.SetMode(landingPreview.CurrentMode == PredictionMode.None ? PredictionMode.TrailAndCrosshair : PredictionMode.None);
-        }
-
         // ---------- Landing prediction ----------
 
         void ShowLandingPreview(Vector3 initialVelocity, float damping)
@@ -2053,24 +2039,35 @@ namespace KineticEnergy.Player
             if (controlsPanelBody != null)
             {
                 controlsPanelBody.text =
-                    "Left Stick / WASD - Move (on the ground); nudge the flight (in the air)\n" +
-                    "Grounded - Left Trigger / Right Mouse (hold) aims and charges over time.\n" +
-                    "  The MOUSE steers the aim (WASD drives the camera meanwhile); on\n" +
-                    "  controller the Left Stick steers it. Right Trigger / Left Mouse fires.\n" +
-                    "  South / Space (hold) charges a straight-UP launch - release to fire.\n" +
-                    "Airborne - Right Mouse / Left Trigger (hold) opens a first-person aim\n" +
-                    "  with the dotted trail and reticle. Add or remove launch energy with\n" +
-                    "  the Mouse Wheel or Right Stick up/down - the blue bar previews the\n" +
-                    "  cost. Left Mouse / Right Trigger fires along where you're looking.\n" +
-                    "  West / E (hold) charges the GROUND POUND - release to slam straight\n" +
-                    "  down. Landing a pound BOUNCES you into a brief slow-mo window: open\n" +
-                    "  an aim inside it to claim bonus energy (the orange bar) and start\n" +
-                    "  that shot instantly at full charge.\n" +
-                    "Left Bumper - Cancel the current charge without firing.\n" +
-                    crashLine +
-                    "Right Bumper - Show/hide the trajectory trail\n" +
-                    "Mouse / Right Stick - Camera\n" +
-                    "Start / Options / Esc - Pause";
+                   "WHILE GROUNDED\n" +
+                   "Hold Left Bumper / Right Mouse to aim and charge.\n" +
+                   "  Mouse: Aim       WASD: Camera\n" +
+                   "  Left Stick: Aim  Right Stick: Camera\n" +
+                   "  Right Trigger / Left Mouse: Fire\n" +
+                   "  A / Space (hold): Charge straight up\n" +
+                   "  Release to launch\n\n" +
+
+                   "AIRBORNE\n" +
+                   "Hold Left Bumper / Right Mouse to enter first-person aim.\n" +
+                   "  Mouse / Right Stick: Aim\n" +
+                   "  Mouse Wheel / Right Stick Up/Down: Add or remove energy\n" +
+                   "  Blue bar: Energy cost\n" +
+                   "  Left Mouse / Right Trigger: Fire\n\n" +
+
+                   "GROUND POUND\n" +
+                   "Hold X / E to charge. Release to slam straight down.\n" +
+                   "  Landing a pound triggers brief slow motion.\n" +
+                   "  Aim during slow motion to gain BONUS ENERGY.\n" +
+                   "  Orange bar: Bonus energy\n" +
+                   "  The shot fires instantly at full charge.\n\n" +
+
+                   "CANCEL CHARGE\n" +
+                   "Release Left Bumper / Right Mouse.\n\n" +
+
+                   crashLine +
+
+                   "Mouse / Right Stick: Camera\n" +
+                   "Start / Options / Esc: Pause";
             }
         }
     }
