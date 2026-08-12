@@ -73,6 +73,18 @@ namespace KineticEnergy.Player
         [Tooltip("Damping applied while airborne with no launch in flight, so plain falls accelerate naturally.")]
         public float plainFallDamping = 0.2f;
 
+        [Header("Zero-Damping Test Mode")]
+        // A/B test flag (the QuarryNoDamping scene): launches fire with ZERO damping, at a
+        // force solved per launch so the landing distance exactly matches what the damped
+        // tuning would have flown - same dial, same distances, different flight feel.
+        // Ground pounds are exempt (straight down - distance is fixed by geometry anyway).
+        [Tooltip("TEST MODE: fire all launches with zero damping, using the matched min/max forces computed at startup. Leave OFF outside the dedicated test scene.")]
+        public bool zeroDampingMatchedLaunches = false;
+        [Tooltip("Computed at startup (when the test mode is on): the zero-damping launch force whose 45-degree flat-ground distance matches a zero-charge damped launch. Charge lerps between this and the max, exactly like the damped pair.")]
+        public float zeroDampingMinLaunchForce;
+        [Tooltip("Computed at startup (when the test mode is on): the zero-damping launch force whose 45-degree flat-ground distance matches a full-charge damped launch.")]
+        public float zeroDampingMaxLaunchForce;
+
         [Header("Energy")]
         [Tooltip("Fraction of the tank the player starts the level with.")]
         [Range(0f, 1f)] public float startingEnergyFraction = 0.2f;
@@ -158,14 +170,6 @@ namespace KineticEnergy.Player
         public KineticEnergy.Camera.ThirdPersonOrbitCamera cameraOrbit;
         [Tooltip("Yellow direction arrow shown while a charge is being aimed.")]
         public AimArrowIndicator aimArrow;
-
-        [Header("Hold-To-Charge Directions")]
-        [Tooltip("Degrees above horizontal a direction-switched Forward charge fires at while the stick is held.")]
-        public float stickAimForwardAngle = 30f;
-        [Tooltip("Degrees above horizontal a Forward charge fires at with the stick centered (toward current facing).")]
-        public float stickAimForwardNeutralAngle = 5f;
-        [Tooltip("Stick deflection needed before a Forward charge counts the stick as 'held'.")]
-        [Range(0f, 1f)] public float stickAimDeadzone = 0.9f;
 
         [Header("Midair Energy Dial")]
         [Tooltip("Charge added/removed per second while the right stick is pushed up/down during the midair aim.")]
@@ -283,10 +287,8 @@ namespace KineticEnergy.Player
         float aimPitch;
 
         // Hold-to-charge state (straight up, ground pound, and the direction-switched forward).
-        enum HoldChargeDirection { None, Up, Down, Forward }
+        enum HoldChargeDirection { None, Up, Down }
         HoldChargeDirection holdChargeDirection = HoldChargeDirection.None;
-        Vector3 holdChargeLastStickDirection;
-        bool holdChargeStickWasHeld;
         float holdChargeHeldSeconds; // real seconds this charge has been held - drives the rate ramp
         float aimChargeHeldSeconds;  // ditto for the grounded aim's charge
 
@@ -460,6 +462,7 @@ namespace KineticEnergy.Player
         void Start()
         {
             WriteControlsText();
+            if (zeroDampingMatchedLaunches) ComputeZeroDampingForces();
         }
 
         void OnEnable()
@@ -520,7 +523,11 @@ namespace KineticEnergy.Player
             // tank, no launch available) is dead for its entire hold - release and re-press
             // once the block ends. Without this, holding the button through the block bought
             // raw slow-mo the moment the lock expired, with no aim ever opening.
-            if (AimButtonPressedThisFrame() && (launchLockTimer > 0f || energyFraction <= 0f || !CanStartNewLaunch()))
+            // The post-pound window is exempt: its aim may open even on an empty tank,
+            // because claiming the boost is what refills it.
+            bool poundBoostClaimable = poundWindowTimer > 0f && poundPendingRefund > 0f;
+            if (AimButtonPressedThisFrame() && !poundBoostClaimable
+                && (launchLockTimer > 0f || energyFraction <= 0f || !CanStartNewLaunch()))
             {
                 aimButtonSpent = true;
             }
@@ -571,12 +578,17 @@ namespace KineticEnergy.Player
             else if (airAiming)
             {
                 // The first-person aim exists only midair - the moment the cube is grounded
-                // again the ordinary grounded controls take over, even mid-hold.
-                if (isGrounded) CancelAirAim();
+                // again the ordinary grounded controls take over, even mid-hold. EXCEPT the
+                // post-pound aim: the bounce hop (0.2) is lower than the ground check (0.6),
+                // so the cube COUNTS as grounded while legitimately hanging in the window.
+                if (isGrounded && !poundAimHoldingGravityOff) CancelAirAim();
                 else UpdateAirAim();
             }
-            else if (isGrounded)
+            else if (isGrounded && poundWindowTimer <= 0f)
             {
+                // NOT during the post-pound window: the bounce hop is lower than the ground
+                // check, so the cube reads as grounded there - but a window aim must open
+                // the MIDAIR aim (which claims the boost), never the grounded one.
                 if (energyFraction > 0f && CanStartNewLaunch() && UpChargePressedThisFrame())
                 {
                     StartHoldCharge(HoldChargeDirection.Up);
@@ -852,6 +864,7 @@ namespace KineticEnergy.Player
 
                 float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
                 float damping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
+                ApplyZeroDampingMatch(chargeFraction, ref force, ref damping);
                 ShowLandingPreview(direction * force / rb.mass + rb.linearVelocity, damping);
 
                 bool firePressed = groundedLaunchAction != null && groundedLaunchAction.action != null && groundedLaunchAction.action.WasPressedThisFrame();
@@ -909,7 +922,6 @@ namespace KineticEnergy.Player
             holdChargeDirection = direction;
             chargeTime = 0f;
             holdChargeHeldSeconds = 0f;
-            holdChargeStickWasHeld = false;
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
             aimArrow?.SetVisible(true);
@@ -934,61 +946,23 @@ namespace KineticEnergy.Player
 
             bool keyboardAvailable = Keyboard.current != null;
 
-            // Pressing a DIFFERENT direction button mid-charge switches the charge to that
-            // direction - the accumulated charge carries over, and firing then happens on the
-            // new button's release. Deliberately NO switch INTO the ground pound: a pound
-            // must be committed to from the start (a fresh midair West/E press), never
-            // smuggled in through a cheaper up/forward charge.
-            bool upSwitch = (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
-                || (keyboardAvailable && Keyboard.current.spaceKey.wasPressedThisFrame);
-            bool forwardSwitch = groundedLaunchAction != null && groundedLaunchAction.action != null && groundedLaunchAction.action.WasPressedThisFrame();
-            if (upSwitch && holdChargeDirection != HoldChargeDirection.Up && holdChargeDirection != HoldChargeDirection.Down) holdChargeDirection = HoldChargeDirection.Up;
-            else if (forwardSwitch && holdChargeDirection == HoldChargeDirection.Up) holdChargeDirection = HoldChargeDirection.Forward;
-
             bool releasedNow = holdChargeDirection switch
             {
                 HoldChargeDirection.Up => (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasReleasedThisFrame())
                     || (keyboardAvailable && Keyboard.current.spaceKey.wasReleasedThisFrame),
                 HoldChargeDirection.Down => (groundPoundAction != null && groundPoundAction.action != null && groundPoundAction.action.WasReleasedThisFrame())
                     || (keyboardAvailable && Keyboard.current.eKey.wasReleasedThisFrame),
-                _ => groundedLaunchAction != null && groundedLaunchAction.action != null && groundedLaunchAction.action.WasReleasedThisFrame(),
+                _ => false,
             };
 
-            // Every hold-charge ACCELERATES - the rate grows the longer the button is held.
-            // Up/down fill in REAL time (the bullet-time must not slow their meter) with the
-            // pound's own base+growth ramp; forward uses the shared acceleration curve.
+            // Every hold-charge ACCELERATES - the rate grows the longer the button is held,
+            // filling in REAL time (the bullet-time must not slow the meter).
             holdChargeHeldSeconds += Time.unscaledDeltaTime;
-            if (holdChargeDirection == HoldChargeDirection.Up || holdChargeDirection == HoldChargeDirection.Down)
-            {
-                float chargeSpeed = groundPoundChargeBaseSpeed + groundPoundChargeSpeedGrowth * holdChargeHeldSeconds;
-                AccumulateCharge(Time.unscaledDeltaTime * chargeAccumulationRate * chargeSpeed);
-            }
-            else
-            {
-                AccumulateCharge(Time.deltaTime * chargeAccumulationRate * ChargeRateRamp(holdChargeHeldSeconds));
-            }
+            float chargeSpeed = groundPoundChargeBaseSpeed + groundPoundChargeSpeedGrowth * holdChargeHeldSeconds;
+            AccumulateCharge(Time.unscaledDeltaTime * chargeAccumulationRate * chargeSpeed);
 
-            // Direction: up and down always fire dead vertical. Forward fires toward the
-            // stick when held past the deadzone (frozen to the last held direction when let
-            // go), or toward the cube's current facing before any stick input.
-            Vector2 stick = moveAction != null && moveAction.action != null
-                ? moveAction.action.ReadValue<Vector2>()
-                : Vector2.zero;
-            bool stickHeld = stick.sqrMagnitude > stickAimDeadzone * stickAimDeadzone;
-            if (stickHeld)
-            {
-                holdChargeLastStickDirection = StickWorldDirection(stick);
-                holdChargeStickWasHeld = true;
-            }
-
-            Vector3 direction = holdChargeDirection switch
-            {
-                HoldChargeDirection.Up => Vector3.up,
-                HoldChargeDirection.Down => Vector3.down,
-                _ => stickHeld
-                    ? TiltedDirection(holdChargeLastStickDirection, stickAimForwardAngle)
-                    : TiltedDirection(holdChargeStickWasHeld ? holdChargeLastStickDirection : FacingFlatDirection(), stickAimForwardNeutralAngle),
-            };
+            // Both hold-charges fire dead vertical.
+            Vector3 direction = holdChargeDirection == HoldChargeDirection.Down ? Vector3.down : Vector3.up;
 
             float chargeFraction = ChargeFraction();
             aimArrow?.SetAim(direction, chargeFraction);
@@ -997,6 +971,10 @@ namespace KineticEnergy.Player
             float damping = holdChargeDirection == HoldChargeDirection.Down
                 ? downLaunchDamping
                 : Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
+            if (holdChargeDirection != HoldChargeDirection.Down)
+            {
+                ApplyZeroDampingMatch(chargeFraction, ref force, ref damping);
+            }
 
             // Velocity is held at zero for the whole charge, so the preview starts from rest.
             ShowLandingPreview(direction * force / rb.mass, damping);
@@ -1006,9 +984,6 @@ namespace KineticEnergy.Player
                 bool firedPound = holdChargeDirection == HoldChargeDirection.Down && !isGrounded;
                 QueueLaunch(direction, force, damping);
                 lastLaunchWasPound = firedPound;
-                // Only a FORWARD launch swings the camera back behind the player - vertical
-                // launches leave the view exactly where it was.
-                if (holdChargeDirection == HoldChargeDirection.Forward) RecenterCameraBehindLaunch(direction);
                 CancelHoldCharge();
             }
         }
@@ -1040,7 +1015,9 @@ namespace KineticEnergy.Player
             {
                 // No energy, or no launch available (the wall-crash limit / launch budget
                 // spent) - then there is nothing to aim WITH, so aim mode must not open.
-                if (energyFraction <= 0f || !CanStartNewLaunch()) return;
+                // The post-pound window is exempt: claiming its boost IS the energy source.
+                bool poundBoostClaimable = poundWindowTimer > 0f && poundPendingRefund > 0f;
+                if (!poundBoostClaimable && (energyFraction <= 0f || !CanStartNewLaunch())) return;
                 // Opening the aim always needs a FRESH press - a button still held from
                 // before a launch/crash does nothing until released and re-pressed.
                 if (!(airAimAction != null && airAimAction.action != null && airAimAction.action.WasPressedThisFrame())) return;
@@ -1061,6 +1038,8 @@ namespace KineticEnergy.Player
                 if (poundWindowTimer > 0f)
                 {
                     PayPoundBoostedRefund();
+                    // Starts charged with ALL current energy (boost included) - the pound
+                    // aim spends the whole tank, no grounded reserve (see SpendableEnergy).
                     chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
                     poundAimHoldingGravityOff = true;
                     rb.useGravity = false;
@@ -1101,6 +1080,7 @@ namespace KineticEnergy.Player
             float fireFraction = Mathf.Min(ChargeFraction(), energyCostPerFullCharge > 0f ? SpendableEnergy() / energyCostPerFullCharge : 1f);
             float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, fireFraction);
             float damping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, fireFraction);
+            ApplyZeroDampingMatch(fireFraction, ref force, ref damping);
 
             // The camera zooms in with the dialed charge, so a long shot's distant landing
             // spot stays legible.
@@ -1203,10 +1183,13 @@ namespace KineticEnergy.Player
         }
 
         // GROUNDED launches keep a small reserve so you can never strand yourself standing
-        // still; a MIDAIR launch may commit the whole tank as a save-throw.
+        // still; a MIDAIR launch may commit the whole tank as a save-throw. The post-pound
+        // aim counts as midair even though the tiny bounce hop sits inside the ground
+        // check's reach - its launch may commit ALL current energy.
         float SpendableEnergy()
         {
-            return isGrounded ? Mathf.Max(energyFraction - minEnergyReserve, 0f) : energyFraction;
+            bool treatAsGrounded = isGrounded && !poundAimHoldingGravityOff;
+            return treatAsGrounded ? Mathf.Max(energyFraction - minEnergyReserve, 0f) : energyFraction;
         }
 
         // On landing only: never end a flight with less than the reserve.
@@ -1304,6 +1287,70 @@ namespace KineticEnergy.Player
 
         // ---------- Firing ----------
 
+        // Zero-damping test mode. The matched min/max forces are solved ONCE at startup
+        // (see ComputeZeroDampingForces); firing just lerps between them by charge -
+        // structurally identical to the damped pair, so the dial feels the same.
+        void ApplyZeroDampingMatch(float chargeFraction, ref float force, ref float damping)
+        {
+            if (!zeroDampingMatchedLaunches || damping <= 0f) return;
+            force = Mathf.Lerp(zeroDampingMinLaunchForce, zeroDampingMaxLaunchForce, chargeFraction);
+            damping = 0f;
+        }
+
+        // Solves the two zero-damping endpoint forces at startup: each matches the flat-
+        // ground distance of its damped counterpart on a 45-degree reference arc (the
+        // angle where range is maximal and charge-to-distance is cleanest to compare).
+        void ComputeZeroDampingForces()
+        {
+            Vector3 reference = new Vector3(0f, Mathf.Sin(45f * Mathf.Deg2Rad), Mathf.Cos(45f * Mathf.Deg2Rad));
+            zeroDampingMinLaunchForce = SolveMatchedForce(reference, minLaunchForce, minLaunchDamping);
+            zeroDampingMaxLaunchForce = SolveMatchedForce(reference, maxLaunchForce, maxLaunchDamping);
+            Debug.Log($"[ZeroDampingTest] matched forces solved at startup: min {minLaunchForce} -> {zeroDampingMinLaunchForce:F2}, max {maxLaunchForce} -> {zeroDampingMaxLaunchForce:F2}");
+        }
+
+        // Bisection: the undamped force whose reference-arc range equals the damped one's.
+        float SolveMatchedForce(Vector3 direction, float dampedForce, float damping)
+        {
+            SimulateFlatFlight(direction * (dampedForce / rb.mass), damping, out float targetRange, out _);
+            float low = 0.05f, high = 1f;
+            for (int i = 0; i < 32; i++)
+            {
+                float mid = (low + high) * 0.5f;
+                SimulateFlatFlight(direction * (mid * dampedForce / rb.mass), 0f, out float range, out _);
+                if (range < targetRange) low = mid;
+                else high = mid;
+            }
+            return dampedForce * (low + high) * 0.5f;
+        }
+
+        // Semi-implicit Euler with PhysX's damping model (velocity += gravity, then the
+        // 1/(1+damping*dt) drag, then position), flown from the origin until it falls back
+        // through its start height. Returns horizontal distance covered and apex height.
+        static void SimulateFlatFlight(Vector3 v0, float damping, out float range, out float apex)
+        {
+            float dt = Time.fixedDeltaTime;
+            Vector3 p = Vector3.zero;
+            Vector3 v = v0;
+            apex = 0f;
+            for (int step = 0; step < 3000; step++)
+            {
+                v += Physics.gravity * dt;
+                v /= 1f + damping * dt;
+                Vector3 prev = p;
+                p += v * dt;
+                if (p.y > apex) apex = p.y;
+                if (p.y < 0f && v.y < 0f)
+                {
+                    // Interpolate the ground crossing for sub-step-accurate range.
+                    float t = prev.y / Mathf.Max(prev.y - p.y, 0.0001f);
+                    Vector3 landing = Vector3.Lerp(prev, p, t);
+                    range = new Vector3(landing.x, 0f, landing.z).magnitude;
+                    return;
+                }
+            }
+            range = new Vector3(p.x, 0f, p.z).magnitude;
+        }
+
         void QueueLaunch(Vector3 direction, float force, float damping)
         {
             // Firing out of a post-pound aim: the shot is taken, so the boost is earned and
@@ -1363,15 +1410,6 @@ namespace KineticEnergy.Player
             launchGraceTimer = launchGraceDuration;
 
             LaunchFired?.Invoke();
-        }
-
-        void RecenterCameraBehindLaunch(Vector3 direction)
-        {
-            Vector3 flat = new Vector3(direction.x, 0f, direction.z);
-            float launchYaw = flat.sqrMagnitude > 0.0001f
-                ? Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg
-                : (freeMoveController != null ? freeMoveController.FacingYaw : 0f);
-            cameraOrbit?.RecenterBehindTarget(launchYaw);
         }
 
         // ---------- Physics step ----------
@@ -1751,46 +1789,6 @@ namespace KineticEnergy.Player
             if (trailToggleAction == null || trailToggleAction.action == null || !trailToggleAction.action.WasPressedThisFrame()) return;
             if (landingPreview == null) return;
             landingPreview.SetMode(landingPreview.CurrentMode == PredictionMode.None ? PredictionMode.TrailAndCrosshair : PredictionMode.None);
-        }
-
-        // ---------- Direction helpers ----------
-
-        // Tilts a flat (Y=0) direction angleDeg above horizontal into a unit launch direction.
-        static Vector3 TiltedDirection(Vector3 flatDirection, float angleDeg)
-        {
-            float rad = angleDeg * Mathf.Deg2Rad;
-            Vector3 flat = flatDirection.sqrMagnitude > 0.0001f ? flatDirection.normalized : Vector3.forward;
-            return flat * Mathf.Cos(rad) + Vector3.up * Mathf.Sin(rad);
-        }
-
-        Vector3 StickWorldDirection(Vector2 stick)
-        {
-            Vector3 direction = CameraForwardFlat() * stick.y + CameraRightFlat() * stick.x;
-            return direction.sqrMagnitude > 0.0001f ? direction.normalized : Vector3.forward;
-        }
-
-        // The cube's own current facing, not the camera's - "launch forward" means the way
-        // the cube is pointing.
-        Vector3 FacingFlatDirection()
-        {
-            float yaw = freeMoveController != null ? freeMoveController.FacingYaw : 0f;
-            return Quaternion.Euler(0f, yaw, 0f) * Vector3.forward;
-        }
-
-        Vector3 CameraForwardFlat()
-        {
-            if (cameraTransform == null) return Vector3.forward;
-            Vector3 forward = cameraTransform.forward;
-            forward.y = 0f;
-            return forward.sqrMagnitude > 0.0001f ? forward.normalized : Vector3.forward;
-        }
-
-        Vector3 CameraRightFlat()
-        {
-            if (cameraTransform == null) return Vector3.right;
-            Vector3 right = cameraTransform.right;
-            right.y = 0f;
-            return right.sqrMagnitude > 0.0001f ? right.normalized : Vector3.right;
         }
 
         // ---------- Landing prediction ----------

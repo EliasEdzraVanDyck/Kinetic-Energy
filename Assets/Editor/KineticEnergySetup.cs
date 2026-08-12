@@ -131,9 +131,6 @@ namespace KineticEnergy.EditorSetup
             controller.dialStickRate = DialStickRate;
             controller.dialWheelStep = DialWheelStep;
             controller.defaultAimPitch = -ReferenceAimPitchDegrees; // negative tilts UP
-            controller.stickAimForwardAngle = 30f;
-            controller.stickAimForwardNeutralAngle = 5f;
-            controller.stickAimDeadzone = 0.9f;
             controller.aimDeadzone = 0.15f;
             controller.aimRotationSpeed = 90f;
             controller.minAimPitch = -80f;
@@ -615,6 +612,40 @@ namespace KineticEnergy.EditorSetup
             AddSlowdownMeterUi(pauseCanvas, controller);
             SaveOpenScene(Level1ScenePath);
             Debug.Log("KineticEnergySetup: slowdown meter added to Level 1 OK");
+        }
+
+        // Adds the SlowdownMeter PREFAB to QuarryNew and wires it to the Player - scene
+        // ADDITION only, nothing existing is moved or re-valued. The controller keeps it
+        // hidden while the scene's slowdown mode isn't AimBudget.
+        [MenuItem("Tools/Kinetic Energy/Add Slowdown Meter To QuarryNew")]
+        public static void AddSlowdownMeterToQuarryNew()
+        {
+            const string scenePath = "Assets/Scenes/QuarryNew.unity";
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+            KineticCubeController controller = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            GameObject pauseSystem = GameObject.Find("PauseSystem");
+            Transform pauseCanvas = pauseSystem != null ? pauseSystem.transform.Find("PauseCanvas") : null;
+            if (controller == null || pauseCanvas == null)
+            {
+                throw new Exception("KineticEnergySetup: QuarryNew.unity is missing its Player or PauseSystem/PauseCanvas.");
+            }
+
+            Transform existing = pauseCanvas.Find("SlowdownMeter");
+            if (existing != null && PrefabUtility.IsPartOfPrefabInstance(existing.gameObject))
+            {
+                controller.slowdownMeter = existing.GetComponent<EnergyMeterController>();
+                EditorUtility.SetDirty(controller);
+            }
+            else
+            {
+                if (existing != null) UnityEngine.Object.DestroyImmediate(existing.gameObject);
+                GameObject meter = InstantiatePrefab("SlowdownMeter");
+                meter.transform.SetParent(pauseCanvas, false);
+                controller.slowdownMeter = meter.GetComponent<EnergyMeterController>();
+                EditorUtility.SetDirty(controller);
+            }
+            SaveOpenScene(scenePath);
+            Debug.Log("KineticEnergySetup: slowdown meter added to QuarryNew OK");
         }
 
         // A small always-on HUD label on its own canvas (below the pause canvas's order).
@@ -1774,6 +1805,34 @@ namespace KineticEnergy.EditorSetup
 
             SaveOpenScene(MainMenuScenePath);
             Debug.Log("KineticEnergySetup: main menu setup complete OK");
+        }
+
+        // ADDITIVE: drops a Feedback button (opens the playtest form URL) into the existing
+        // main menu, next to Quit - nothing existing is moved or re-valued. The playable
+        // scenes get theirs through the PauseSystem prefab's converted Scenes button.
+        [MenuItem("Tools/Kinetic Energy/Add Feedback Button To Main Menu")]
+        public static void AddFeedbackButtonToMainMenu()
+        {
+            EditorSceneManager.OpenScene(MainMenuScenePath, OpenSceneMode.Single);
+            MainMenuController menu = UnityEngine.Object.FindAnyObjectByType<MainMenuController>(FindObjectsInactive.Include);
+            GameObject menuPanel = menu != null ? menu.menuPanel : null;
+            if (menu == null || menuPanel == null)
+            {
+                throw new Exception("KineticEnergySetup: MainMenu.unity is missing its MainMenuController/MenuPanel.");
+            }
+
+            Transform existing = menuPanel.transform.Find("FeedbackButton");
+            if (existing != null) UnityEngine.Object.DestroyImmediate(existing.gameObject);
+
+            Font font = FindBestFont();
+            Color accent = new Color(1f, 0.82f, 0.2f);
+            GameObject feedbackBtn = CreateButton("FeedbackButton", menuPanel.transform, "Feedback", font, accent,
+                new Vector2(340f, -190f), new Vector2(300f, 70f)); // beside Quit, same row
+            WireButton(feedbackBtn, menu.OnFeedbackClicked);
+            EditorUtility.SetDirty(menu);
+
+            SaveOpenScene(MainMenuScenePath);
+            Debug.Log("KineticEnergySetup: feedback button added to main menu OK");
         }
 
         // ==================== Scene / geometry helpers ====================

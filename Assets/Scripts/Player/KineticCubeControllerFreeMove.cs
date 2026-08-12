@@ -66,6 +66,12 @@ namespace KineticEnergy.Player
         public InputActionReference moveAction;
         public Transform cameraTransform;
 
+        [Header("Test Movement Toggle")]
+        // Walking and air-nudging are being phased out of the control scheme - kept only
+        // for testing. OFF at start; the M key toggles them during play.
+        [Tooltip("Grounded WASD/stick walking and midair nudging. Disabled by default; press M in play mode to toggle. Aiming controls are unaffected either way.")]
+        public bool movementInputEnabled = false;
+
         Rigidbody rb;
         BoxCollider boxCollider;
         KineticCubeController launchController;
@@ -77,10 +83,6 @@ namespace KineticEnergy.Player
         public Vector3 GroundPlatformVelocity { get; private set; }
         Quaternion visualTargetRotation = Quaternion.identity;
         float launchFacingYaw;
-
-        // Read by KineticCubeController - the forward hold-charge's neutral direction is
-        // "which way is the cube currently facing", which this already tracks for the visual.
-        public float FacingYaw => launchFacingYaw;
 
         void Awake()
         {
@@ -108,6 +110,12 @@ namespace KineticEnergy.Player
             // without this guard a fall-reset could still trigger while the pause menu is up.
             if (Time.timeScale <= 0f) return;
 
+            if (Keyboard.current != null && Keyboard.current.mKey.wasPressedThisFrame)
+            {
+                movementInputEnabled = !movementInputEnabled;
+                Debug.Log($"[FreeMove] movement input {(movementInputEnabled ? "ENABLED" : "disabled")} (M to toggle)");
+            }
+
             if (transform.position.y < fallResetY)
             {
                 Time.timeScale = 1f;
@@ -119,7 +127,11 @@ namespace KineticEnergy.Player
         {
             UpdateGrounded();
 
-            Vector2 stick = moveAction != null && moveAction.action != null
+            // With movement input disabled (the default - M toggles it for testing), the
+            // stick reads as centered here: no walking, no air nudge. Everything else this
+            // component does - platform carry, launch facing, lean/level-out - stays live,
+            // and the aiming schemes read this action themselves, unaffected.
+            Vector2 stick = movementInputEnabled && moveAction != null && moveAction.action != null
                 ? moveAction.action.ReadValue<Vector2>()
                 : Vector2.zero;
 

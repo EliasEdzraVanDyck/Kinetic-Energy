@@ -28,6 +28,10 @@ namespace KineticEnergy.UI
         // matches whichever scheme is actually active instead of a fixed string baked in here.
         public Text controlsBodyText;
 
+        [Header("Feedback")]
+        [Tooltip("Opened in the system browser by the pause menu's Feedback button.")]
+        public string feedbackFormUrl = "https://forms.gle/c7TVCoLzkktTWJFc7";
+
         [Header("Win")]
         // Hidden by default, inside PausePanel - The Gauntlet's finish line
         // (GauntletFinishLine) shows it via ShowWin(). Lives here rather than on its own
@@ -122,6 +126,13 @@ namespace KineticEnergy.UI
             controlsPanel?.SetActive(false);
             pausePanel?.SetActive(true);
             Select(firstPauseButton);
+        }
+
+        // Opens the playtest feedback form in the system browser. The game keeps running
+        // paused underneath - testers alt-tab back when done.
+        public void OnFeedbackClicked()
+        {
+            Application.OpenURL(feedbackFormUrl);
         }
 
         public void OnScenesClicked()

@@ -57,6 +57,15 @@ namespace KineticEnergy.UI
             SceneManager.LoadScene(sceneName);
         }
 
+        [Header("Feedback")]
+        [Tooltip("Opened in the system browser by the menu's Feedback button.")]
+        public string feedbackFormUrl = "https://forms.gle/c7TVCoLzkktTWJFc7";
+
+        public void OnFeedbackClicked()
+        {
+            Application.OpenURL(feedbackFormUrl);
+        }
+
         public void OnQuitClicked()
         {
             Application.Quit();
