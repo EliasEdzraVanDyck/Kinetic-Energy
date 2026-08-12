@@ -13,11 +13,62 @@ namespace KineticEnergy.Player
     public class EnergyMeterController : MonoBehaviour
     {
         public Image energyFillImage;
+        [Tooltip("Fill colour while the player is launch-locked after an enemy hit.")]
+        public Color lockedColor = new Color(0.9f, 0.15f, 0.1f);
+        [Tooltip("How much the yellow fill grows at the peak of each lock pulse (1 = no growth).")]
+        public float lockPulseScale = 1.08f;
+        [Tooltip("Grow-and-shrink pulses per second while locked.")]
+        public float lockPulsesPerSecond = 4f;
         public Image chargeFillImage;
         // Orange preview bar sitting BEHIND the yellow fill, showing current energy PLUS the
         // ground pound's still-unclaimed boost extra - so only the extra portion pokes out
         // past the yellow, in orange, until it's claimed or forfeited.
         public Image bonusFillImage;
+
+        bool lockActive;
+        float lockStartTime;
+        Color normalEnergyColor;
+        Vector3 normalScale;
+        Vector2 normalPosition;
+
+        // Launch-lock feedback (enemy hit): the YELLOW fill alone turns red and gently
+        // pulses - grows and shrinks back - until launching is available again. Driven
+        // every frame from KineticCubeController alongside SetEnergy.
+        public void SetLaunchLocked(bool locked)
+        {
+            if (energyFillImage == null) return;
+
+            RectTransform rect = energyFillImage.rectTransform;
+            if (locked)
+            {
+                if (!lockActive)
+                {
+                    lockActive = true;
+                    lockStartTime = Time.unscaledTime;
+                    normalEnergyColor = energyFillImage.color;
+                    normalScale = rect.localScale;
+                    normalPosition = rect.anchoredPosition;
+                }
+                energyFillImage.color = lockedColor;
+                float wave = Mathf.Abs(Mathf.Sin((Time.unscaledTime - lockStartTime) * Mathf.PI * lockPulsesPerSecond));
+                float scale = Mathf.Lerp(1f, lockPulseScale, wave);
+                rect.localScale = normalScale * scale;
+                // Scaling happens around the rect's pivot; shift the rect so the fixed point
+                // of the pulse is the CENTRE of the currently filled portion of the bar
+                // (fill is Horizontal/Left, so that centre sits at fillAmount/2 of the width).
+                Vector2 filledCentre = new Vector2(
+                    (energyFillImage.fillAmount * 0.5f - rect.pivot.x) * rect.rect.width,
+                    (0.5f - rect.pivot.y) * rect.rect.height);
+                rect.anchoredPosition = normalPosition + filledCentre * (1f - scale);
+            }
+            else if (lockActive)
+            {
+                lockActive = false;
+                energyFillImage.color = normalEnergyColor;
+                rect.localScale = normalScale;
+                rect.anchoredPosition = normalPosition;
+            }
+        }
 
         // Shows/hides the whole meter (the UI container the fill bars live in) - used to
         // disable a meter whose corresponding mode is off (e.g. energy meter under infinite

@@ -57,6 +57,8 @@ namespace KineticEnergy.Level
         public float knockbackForce = 24f;
         [Tooltip("Energy fraction the player loses on a successful hit.")]
         [Range(0f, 1f)] public float attackEnergyDrain = 0.15f;
+        [Tooltip("Seconds the player is blocked from launching after being hit.")]
+        public float postHitLaunchLockSeconds = 0.5f;
         [Tooltip("Colour flashed during the windup.")]
         public Color windUpColor = new Color(1f, 0.35f, 0.1f);
 
@@ -69,7 +71,8 @@ namespace KineticEnergy.Level
         Renderer bodyRenderer;
         Color restColor;
 
-        Vector3 spawnPoint;
+        Vector3 spawnPoint;    // wander centre - re-centres wherever an attack lands
+        Vector3 originalSpawn; // the scene position, immutable - respawns always come back here
         Collider platformBelow;
         Vector3 currentTarget;
         float pauseRemaining;
@@ -86,6 +89,7 @@ namespace KineticEnergy.Level
         void Start()
         {
             spawnPoint = transform.position;
+            originalSpawn = spawnPoint;
             player = FindAnyObjectByType<KineticCubeController>();
             bodyCollider = GetComponent<Collider>();
             if (player != null) playerCollider = player.GetComponent<Collider>();
@@ -114,14 +118,14 @@ namespace KineticEnergy.Level
             switch (state)
             {
                 case EnemyState.Wandering:
-                    body.MovePosition(WithGroundedY(WanderStep(dt), dt));
+                    if (MoveGrounded(WanderStep(dt), dt)) break;
                     if (cooldownRemaining <= 0f && PlayerIsAttackable()) BeginWindUp();
                     break;
 
                 case EnemyState.WindingUp:
                     stateTimer -= dt;
                     FlashWarning();
-                    body.MovePosition(WithGroundedY(body.position, dt));
+                    if (MoveGrounded(body.position, dt)) break;
                     if (stateTimer <= 0f) BeginLaunch();
                     break;
 
@@ -131,10 +135,24 @@ namespace KineticEnergy.Level
 
                 case EnemyState.Recovering:
                     stateTimer -= dt;
-                    body.MovePosition(WithGroundedY(body.position, dt));
+                    if (MoveGrounded(body.position, dt)) break;
                     if (stateTimer <= 0f) BeginWander();
                     break;
             }
+        }
+
+        // Grounded movement with the void catch: returns true if the enemy fell far enough
+        // to self-reset (the caller must then stop touching state for this tick).
+        bool MoveGrounded(Vector3 horizontalTarget, float dt)
+        {
+            Vector3 next = WithGroundedY(horizontalTarget, dt);
+            if (next.y < originalSpawn.y - 40f)
+            {
+                ResetToSpawn();
+                return true;
+            }
+            body.MovePosition(next);
+            return false;
         }
 
         // Kinematic bodies ignore gravity, so ground contact is enforced by hand: the enemy
@@ -311,7 +329,7 @@ namespace KineticEnergy.Level
             body.MovePosition(next);
 
             // Overshot into the void (the player baited it off the edge) - self-reset.
-            if (next.y < spawnPoint.y - 40f) ResetToSpawn();
+            if (next.y < originalSpawn.y - 40f) ResetToSpawn();
         }
 
         void Land(Collider landedOn)
@@ -359,7 +377,7 @@ namespace KineticEnergy.Level
                 if (away.sqrMagnitude < 0.01f) away = transform.forward;
             }
             Vector3 shoveDirection = (away.normalized + Vector3.up * 0.6f).normalized;
-            player.ApplyEnemyHit(shoveDirection * knockbackForce, attackEnergyDrain);
+            player.ApplyEnemyHit(shoveDirection * knockbackForce, attackEnergyDrain, postHitLaunchLockSeconds);
 
             // No further contacts until the enemy is back to wandering: the landed enemy
             // sits right where the player stood, and its infinite-mass kinematic collider
@@ -392,6 +410,7 @@ namespace KineticEnergy.Level
         // wander state reset - as if the level had just started for this enemy.
         public void ResetToSpawn()
         {
+            spawnPoint = originalSpawn; // undo any wander re-centring from past attacks
             transform.position = spawnPoint;
             if (body != null) body.position = spawnPoint;
             state = EnemyState.Wandering;

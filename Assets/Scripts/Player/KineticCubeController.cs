@@ -516,6 +516,15 @@ namespace KineticEnergy.Player
             // Re-arm the spent-aim-button latch only once both aim buttons are genuinely up.
             if (aimButtonSpent && !AimButtonHeld()) aimButtonSpent = false;
 
+            // A press that lands while the aim CANNOT open (enemy-hit launch lock, empty
+            // tank, no launch available) is dead for its entire hold - release and re-press
+            // once the block ends. Without this, holding the button through the block bought
+            // raw slow-mo the moment the lock expired, with no aim ever opening.
+            if (AimButtonPressedThisFrame() && (launchLockTimer > 0f || energyFraction <= 0f || !CanStartNewLaunch()))
+            {
+                aimButtonSpent = true;
+            }
+
             // The post-ground-pound slow-mo window - real seconds, so it isn't stretched by
             // the slow-mo it is itself causing. Lapsing with no aim opened forfeits the
             // boost extra for good (the plain wash refund was already paid at the crash).
@@ -649,7 +658,9 @@ namespace KineticEnergy.Player
             // press and the state change). Grounded aiming runs at full speed on purpose.
             // The raw aim-button hold only bridges press-to-open - with no launch available
             // the aim can't open, so the hold must not slow time either.
-            bool rawAimHeld = AimButtonHeld() && !aimButtonSpent && CanStartNewLaunch();
+            // Mirrors the FULL aim-open gate (energy AND launch availability) - if the aim
+            // can never open, the bridging hold must not buy slow-mo either.
+            bool rawAimHeld = AimButtonHeld() && !aimButtonSpent && energyFraction > 0f && CanStartNewLaunch();
             bool airAimSlow = !isGrounded && (airAiming || rawAimHeld) && SlowdownAvailable();
             // The post-ground-pound window holds the slow-mo for its duration - part of the
             // pound itself, so never metered by the slowdown resource.
@@ -675,13 +686,23 @@ namespace KineticEnergy.Player
                     flightScale *= 1f + Mathf.Lerp(fallSpeedUpStart, fallSpeedUpEnd, descentProgress);
                 }
             }
-            Time.timeScale = airAimSlow || holdChargeSlow || poundWindowSlow ? chargeTimeScale : flightScale;
+            // The enemy-hit launch lock vetoes ALL slow-mo sources for its duration - if the
+            // player can't aim or launch, they must not be able to buy time either.
+            bool slowRequested = (airAimSlow || holdChargeSlow || poundWindowSlow) && launchLockTimer <= 0f;
+            Time.timeScale = slowRequested ? chargeTimeScale : flightScale;
         }
 
         bool AimButtonHeld()
         {
             if (groundedAimAction != null && groundedAimAction.action != null && groundedAimAction.action.IsPressed()) return true;
             if (airAimAction != null && airAimAction.action != null && airAimAction.action.IsPressed()) return true;
+            return false;
+        }
+
+        bool AimButtonPressedThisFrame()
+        {
+            if (groundedAimAction != null && groundedAimAction.action != null && groundedAimAction.action.WasPressedThisFrame()) return true;
+            if (airAimAction != null && airAimAction.action != null && airAimAction.action.WasPressedThisFrame()) return true;
             return false;
         }
 
@@ -730,6 +751,7 @@ namespace KineticEnergy.Player
             {
                 energyMeter.SetVisible(!infiniteEnergy);
                 energyMeter.SetEnergy(energyFraction);
+                energyMeter.SetLaunchLocked(launchLockTimer > 0f);
                 bool charging = isAiming || holdChargeDirection != HoldChargeDirection.None || airAiming;
                 energyMeter.SetCharge(ChargeFraction(), charging);
                 // While the pound's boost extra is still on offer, preview it in orange
@@ -1203,6 +1225,7 @@ namespace KineticEnergy.Player
         [Tooltip("Seconds of lost ground control after an enemy hit, so the knockback actually carries (grounded movement overwrites velocity every tick otherwise).")]
         public float enemyHitControlLossSeconds = 0.35f;
         float knockbackTimer;
+        float launchLockTimer; // enemy hits block launching briefly - duration set by the enemy
         Vector3 pendingEnemyKnockback;
         bool hasPendingEnemyKnockback;
 
@@ -1210,8 +1233,10 @@ namespace KineticEnergy.Player
         // drains some energy. The hit interrupts any aim/charge, breaks a crash-stick, and
         // suppresses grounded movement briefly - without that window the walk code would
         // erase the shove on the very next physics tick.
-        public void ApplyEnemyHit(Vector3 impulse, float energyLoss)
+        public void ApplyEnemyHit(Vector3 impulse, float energyLoss, float launchLockSeconds)
         {
+            launchLockTimer = Mathf.Max(launchLockTimer, launchLockSeconds);
+            poundWindowTimer = 0f; // getting hit forfeits any post-pound window outright
             if (airAiming) CancelAirAim();
             CancelHoldCharge();
             CloseGroundedAim();
@@ -1269,6 +1294,8 @@ namespace KineticEnergy.Player
 
         bool CanStartNewLaunch()
         {
+            // Freshly hit by an enemy - launching is locked out for a moment.
+            if (launchLockTimer > 0f) return false;
             // The wall-crash limit, when armed, replaces the normal budget outright.
             if (launchesRemainingOverride == 0) return false;
             if (launchesRemainingOverride > 0) return true;
@@ -1402,6 +1429,7 @@ namespace KineticEnergy.Player
 
             if (launchGraceTimer > 0f) launchGraceTimer -= Time.fixedDeltaTime;
             if (knockbackTimer > 0f) knockbackTimer -= Time.fixedDeltaTime;
+            if (launchLockTimer > 0f) launchLockTimer -= Time.fixedDeltaTime;
             if (hasPendingEnemyKnockback)
             {
                 rb.linearVelocity = pendingEnemyKnockback;

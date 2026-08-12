@@ -128,5 +128,17 @@ MonoBehaviour:
   wanderMode: 0
   wanderRadius: 8
   edgeMargin: 1.5
-  moveSpeed: 4.5
-  pauseRange: {x: 0.4, y: 1.5}
+  moveSpeed: 6
+  pauseRange: {x: 0.4, y: 0.8}
+  detectionRadius: 12
+  windUpSeconds: 0.3
+  recoverSeconds: 0.5
+  attackCooldown: 1.5
+  attackLaunchSpeed: 80
+  attackFlightTimeRange: {x: 0.1, y: 0.3}
+  attackArcHeight: 3
+  attackOvershoot: 1.5
+  knockbackForce: 24
+  attackEnergyDrain: 0.2
+  postHitLaunchLockSeconds: 0.5
+  windUpColor: {r: 1, g: 0.35, b: 0.1, a: 1}
