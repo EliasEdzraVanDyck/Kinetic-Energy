@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
+using KineticEnergy.Level;
 
 namespace KineticEnergy.Player
 {
@@ -70,6 +71,10 @@ namespace KineticEnergy.Player
         KineticCubeController launchController;
         bool isGrounded;
         bool wasGrounded;
+        // Velocity of the (kinematic) moving platform currently under the player's feet -
+        // added into the grounded velocity so movers CARRY their rider smoothly. Read by
+        // KineticCubeController too, so a grounded aim frozen on a mover rides along.
+        public Vector3 GroundPlatformVelocity { get; private set; }
         Quaternion visualTargetRotation = Quaternion.identity;
         float launchFacingYaw;
 
@@ -139,7 +144,9 @@ namespace KineticEnergy.Player
                     ? (forward * stick.y + right * stick.x).normalized
                     : Vector3.zero;
 
-                Vector3 horizontalVelocity = moveDirection * moveSpeed;
+                // Walking speed rides ON TOP of whatever the platform underfoot is doing -
+                // standing still on a moving platform means moving WITH it.
+                Vector3 horizontalVelocity = moveDirection * moveSpeed + new Vector3(GroundPlatformVelocity.x, 0f, GroundPlatformVelocity.z);
                 rb.linearVelocity = new Vector3(horizontalVelocity.x, rb.linearVelocity.y, horizontalVelocity.z);
 
                 // Face the movement direction instantly while walking - "launch forward"
@@ -256,7 +263,13 @@ namespace KineticEnergy.Player
             Vector3 halfExtents = boxCollider != null
                 ? new Vector3(boxCollider.bounds.extents.x * 0.9f, 0.05f, boxCollider.bounds.extents.z * 0.9f)
                 : new Vector3(0.4f, 0.05f, 0.4f);
-            isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out _, transform.rotation, groundCheckDistance);
+            isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out RaycastHit hit, transform.rotation, groundCheckDistance);
+
+            // Moving platform underfoot? Its velocity becomes the rider's base velocity.
+            MovingPlatform platform = isGrounded && hit.collider != null && hit.collider.attachedRigidbody != null
+                ? hit.collider.attachedRigidbody.GetComponent<MovingPlatform>()
+                : null;
+            GroundPlatformVelocity = platform != null ? platform.CurrentVelocity : Vector3.zero;
         }
 
         Vector3 CameraRelativeForward()

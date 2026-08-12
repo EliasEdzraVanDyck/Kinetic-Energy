@@ -37,6 +37,8 @@ namespace KineticEnergy.EditorSetup
     {
         const string QuarryScenePath = "Assets/Scenes/Quarry.unity";
         const string Level1ScenePath = "Assets/Scenes/Level1.unity";
+        const string Level2ScenePath = "Assets/Scenes/Level2.unity";
+        const string Level3ScenePath = "Assets/Scenes/Level3.unity";
         const string GauntletScenePath = "Assets/Scenes/Gauntlet.unity";
         const string MainMenuScenePath = "Assets/Scenes/MainMenu.unity";
         const string ActionsPath = "Assets/InputSystem_Actions.inputactions";
@@ -1387,6 +1389,299 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
+        // The moving platform as a drag-and-drop prefab: green 8x8 block + MovingPlatform
+        // (public moveOffset, lapSeconds, arrow settings). The lead arrow builds itself at
+        // runtime, so the prefab stays one self-contained piece.
+        [MenuItem("Tools/Kinetic Energy/Create MovingPlatform Prefab")]
+        public static void CreateMovingPlatformPrefab()
+        {
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            try
+            {
+                go.name = "MovingPlatform";
+                go.transform.localScale = new Vector3(8f, 1f, 8f);
+                go.GetComponent<Renderer>().sharedMaterial = platformMat;
+                go.AddComponent<MovingPlatform>();
+                PrefabUtility.SaveAsPrefabAsset(go, PrefabFolder + "/MovingPlatform.prefab");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: MovingPlatform prefab created OK");
+        }
+
+        // Gives the MovingPlatform prefab its own blueish-green (teal) material so movers
+        // read differently from static platforms at a glance - applied on the prefab
+        // asset, so every placed instance updates automatically.
+        [MenuItem("Tools/Kinetic Energy/Apply Moving Platform Material")]
+        public static void ApplyMovingPlatformMaterial()
+        {
+            Material moverMat = MakeMaterial("MovingPlatformMaterial", new Color(0.16f, 0.58f, 0.56f));
+            string path = PrefabFolder + "/MovingPlatform.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(path);
+            try
+            {
+                Renderer renderer = root.GetComponentInChildren<Renderer>(true);
+                if (renderer != null) renderer.sharedMaterial = moverMat;
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: moving platform material applied OK");
+        }
+
+        // ==================== Level 2 - moving platforms ====================
+        // Static platforms interleaved with MovingPlatform prefab instances: a sideways
+        // ferry, an along-the-path shuttle and a vertical lift, over a DamageWalls floor.
+        // Player/camera tuning is copied from the Quarry's current hand-tuned instances,
+        // exactly like Level 1 - nothing existing is rebuilt or re-valued.
+        [MenuItem("Tools/Kinetic Energy/Setup Level 2")]
+        public static void SetupLevel2()
+        {
+            // Capture the hand-tuned Player/camera state from the Quarry first.
+            EditorSceneManager.OpenScene(QuarryScenePath, OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find the Quarry's Player/camera to copy tuning from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            CreateMovingPlatformPrefab();
+            MeasureLaunchDistances(out float L, out float H);
+            NewEmptyScene(Level2ScenePath);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("Level2Course");
+            Transform tf = course.transform;
+            Vector3 platformSize = new Vector3(10f, 2f, 10f);
+
+            // Static stepping stones...
+            CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
+            Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
+            CreateBlock(tf, "Static1", new Vector3(0.3f * L, -1f, 0f), platformSize, platformMat);
+            CreateBlock(tf, "Static2", new Vector3(0.95f * L, -1f, 0.3f * L), platformSize, platformMat);
+            CreateBlock(tf, "Static3", new Vector3(1.75f * L, -1f, 0.3f * L), platformSize, platformMat);
+            CreateBlock(tf, "EndPlatform", new Vector3(2.3f * L, -1f, 0.3f * L), platformSize, platformMat);
+
+            // ...interleaved with movers. The blue lead arrow appears on each while aiming
+            // midair, its tip at the centre's position when the previewed shot lands.
+            SpawnMovingPlatform("Mover1_SidewaysFerry", new Vector3(0.62f * L, -1f, 0f), new Vector3(0f, 0f, 0.3f * L), 7f);
+            SpawnMovingPlatform("Mover2_PathShuttle", new Vector3(1.25f * L, -1f, 0.3f * L), new Vector3(0.25f * L, 0f, 0f), 5f);
+            SpawnMovingPlatform("Mover3_Lift", new Vector3(2.05f * L, -1f, 0.3f * L), new Vector3(0f, 14f, 0f), 6f);
+
+            // The hazard floor: touch it and you respawn at the start instantly.
+            GameObject respawnPoint = new GameObject("RespawnPoint");
+            respawnPoint.transform.position = playerSpawn;
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(1.15f * L, -12f, 0.15f * L), new Vector3(2.3f * L + 60f, 2f, L + 60f), damageMat);
+            DamageWalls damage = damageFloor.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(damage);
+
+            // The finish, as the FinishTrigger prefab.
+            GameObject finish = InstantiatePrefab("FinishTrigger");
+            finish.transform.position = new Vector3(2.3f * L, 2f, 0.3f * L);
+            FinishLineNextScene finishComp = finish.GetComponent<FinishLineNextScene>();
+            if (finishComp != null) finishComp.nextSceneName = "MainMenu";
+            EditorUtility.SetDirty(finish);
+
+            CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
+            PointCameraAt(rig, new Vector3(0.3f * L, 0f, 0f));
+
+            // Stamp the Quarry's hand-tuned values over the fresh instances, keeping this
+            // scene's own object wiring intact.
+            OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
+
+            SaveOpenScene(Level2ScenePath);
+            Debug.Log($"KineticEnergySetup: Level 2 setup complete OK (L={L:F1}m, 3 movers)");
+        }
+
+        // The wandering ground enemy as a drag-and-drop prefab: magenta sphere + Enemy
+        // (wander mode dropdown, radius, edge margin, speed - all public per instance).
+        [MenuItem("Tools/Kinetic Energy/Create Enemy Prefab")]
+        public static void CreateEnemyPrefab()
+        {
+            Material enemyMat = MakeMaterial("EnemyMaterial", new Color(0.72f, 0.15f, 0.6f));
+            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            try
+            {
+                go.name = "Enemy";
+                go.transform.localScale = Vector3.one * 2f;
+                go.GetComponent<Renderer>().sharedMaterial = enemyMat;
+                go.AddComponent<Enemy>();
+                PrefabUtility.SaveAsPrefabAsset(go, PrefabFolder + "/Enemy.prefab");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: Enemy prefab created OK");
+        }
+
+        // Updates the Enemy prefab's stored walking speed to the new default (4.5 - 50%
+        // faster) - instances without their own speed override follow automatically.
+        [MenuItem("Tools/Kinetic Energy/Update Enemy Prefab Speed")]
+        public static void UpdateEnemyPrefabSpeed()
+        {
+            string path = PrefabFolder + "/Enemy.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(path);
+            try
+            {
+                Enemy enemy = root.GetComponent<Enemy>();
+                if (enemy != null) enemy.moveSpeed = 4.5f;
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: enemy prefab speed updated OK");
+        }
+
+        // ==================== Level 3 - enemies ====================
+        // Wandering enemies on an open arena and on platforms - launch through them to
+        // clear the way. Player/camera tuning is copied from LEVEL 1's current instances,
+        // so all three levels share the exact same values.
+        [MenuItem("Tools/Kinetic Energy/Setup Level 3")]
+        public static void SetupLevel3()
+        {
+            EditorSceneManager.OpenScene(Level1ScenePath, OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find Level 1's Player/camera to copy tuning from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            CreateEnemyPrefab();
+            MeasureLaunchDistances(out float L, out float H);
+            NewEmptyScene(Level3ScenePath);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("Level3Course");
+            Transform tf = course.transform;
+            Vector3 platformSize = new Vector3(10f, 2f, 10f);
+
+            // Start pad, then an open arena patrolled by radius-mode enemies.
+            CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
+            Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
+            CreateBlock(tf, "Arena", new Vector3(0.5f * L, -1f, 0f), new Vector3(0.45f * L, 2f, 0.45f * L), platformMat);
+            SpawnEnemy("ArenaEnemy1", new Vector3(0.42f * L, 1f, -6f), EnemyWanderMode.WithinRadius, 10f, 1.5f);
+            SpawnEnemy("ArenaEnemy2", new Vector3(0.58f * L, 1f, 6f), EnemyWanderMode.WithinRadius, 12f, 1.5f);
+
+            // Two platform hops, each patrolled edge-to-edge by a platform-surface enemy.
+            CreateBlock(tf, "Hop1", new Vector3(0.95f * L, -1f, 0.1f * L), new Vector3(14f, 2f, 14f), platformMat);
+            SpawnEnemy("Hop1Enemy", new Vector3(0.95f * L, 1f, 0.1f * L), EnemyWanderMode.PlatformSurface, 8f, 1.5f);
+            CreateBlock(tf, "Hop2", new Vector3(1.35f * L, -1f, -0.05f * L), new Vector3(14f, 2f, 14f), platformMat);
+            SpawnEnemy("Hop2Enemy", new Vector3(1.35f * L, 1f, -0.05f * L), EnemyWanderMode.PlatformSurface, 8f, 2f);
+
+            CreateBlock(tf, "EndPlatform", new Vector3(1.7f * L, -1f, 0f), platformSize, platformMat);
+
+            // Hazard floor + respawn + finish, as in the other levels.
+            GameObject respawnPoint = new GameObject("RespawnPoint");
+            respawnPoint.transform.position = playerSpawn;
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(0.85f * L, -12f, 0f), new Vector3(1.7f * L + 60f, 2f, L + 60f), damageMat);
+            DamageWalls damage = damageFloor.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(damage);
+
+            GameObject finish = InstantiatePrefab("FinishTrigger");
+            finish.transform.position = new Vector3(1.7f * L, 2f, 0f);
+            FinishLineNextScene finishComp = finish.GetComponent<FinishLineNextScene>();
+            if (finishComp != null) finishComp.nextSceneName = "MainMenu";
+            EditorUtility.SetDirty(finish);
+
+            CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
+            PointCameraAt(rig, new Vector3(0.5f * L, 0f, 0f));
+
+            OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
+
+            SaveOpenScene(Level3ScenePath);
+            Debug.Log($"KineticEnergySetup: Level 3 setup complete OK (L={L:F1}m, 4 enemies)");
+        }
+
+        static void SpawnEnemy(string name, Vector3 position, EnemyWanderMode mode, float radius, float margin)
+        {
+            GameObject instance = InstantiatePrefab("Enemy");
+            instance.name = name;
+            instance.transform.position = position;
+            Enemy enemy = instance.GetComponent<Enemy>();
+            enemy.wanderMode = mode;
+            enemy.wanderRadius = radius;
+            enemy.edgeMargin = margin;
+            EditorUtility.SetDirty(enemy);
+        }
+
+        // Copies EVERY serialized value on Level 1's Player/free-move/camera onto Level 2's
+        // instances (keeping Level 2's own object wiring) - the two levels then play with
+        // exactly the same tuning, flags included.
+        [MenuItem("Tools/Kinetic Energy/Copy Player Values Level 1 -> Level 2")]
+        public static void CopyPlayerValuesLevel1ToLevel2()
+        {
+            EditorSceneManager.OpenScene(Level1ScenePath, OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find Level 1's Player/camera to copy from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            EditorSceneManager.OpenScene(Level2ScenePath, OpenSceneMode.Single);
+            KineticCubeController targetController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove targetMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera targetCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (targetController == null || targetMove == null || targetCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find Level 2's Player/camera to copy onto.");
+            }
+            OverwriteSerializedValuesKeepObjectRefs(targetController, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(targetMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(targetCamera, cameraJson);
+            SaveOpenScene(Level2ScenePath);
+            Debug.Log("KineticEnergySetup: player values copied Level 1 -> Level 2 OK");
+        }
+
+        static void SpawnMovingPlatform(string name, Vector3 position, Vector3 moveOffset, float lapSeconds)
+        {
+            GameObject instance = InstantiatePrefab("MovingPlatform");
+            instance.name = name;
+            instance.transform.position = position;
+            MovingPlatform mover = instance.GetComponent<MovingPlatform>();
+            mover.moveOffset = moveOffset;
+            mover.lapSeconds = lapSeconds;
+            EditorUtility.SetDirty(mover);
+        }
+
         // Stamps another component's serialized state (as EditorJsonUtility JSON) onto
         // target, then restores every UnityEngine.Object reference target had before - the
         // JSON's refs are instance IDs from a scene no longer loaded, while the target's own
@@ -1613,11 +1908,27 @@ namespace KineticEnergy.EditorSetup
         }
 
         // A flat dark disc kept directly under the player by PlayerShadow - the only shadow
-        // the player casts (its renderers don't cast real ones).
+        // the player casts (its renderers don't cast real ones). Instantiates the
+        // PlayerShadow prefab when it exists (and wires the cross-hierarchy player ref);
+        // the from-scratch construction below is the fallback for before the prefab existed.
         static void BuildPlayerShadow(Transform player)
         {
             GameObject existing = GameObject.Find("PlayerShadow");
             if (existing != null) UnityEngine.Object.DestroyImmediate(existing);
+
+            GameObject shadowPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PlayerShadow.prefab");
+            if (shadowPrefab != null)
+            {
+                GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(shadowPrefab);
+                instance.name = "PlayerShadow";
+                PlayerShadow prefabShadow = instance.GetComponent<PlayerShadow>();
+                if (prefabShadow != null)
+                {
+                    prefabShadow.player = player;
+                    EditorUtility.SetDirty(prefabShadow);
+                }
+                return;
+            }
 
             GameObject shadowGo = new GameObject("PlayerShadow");
             PlayerShadow shadowScript = shadowGo.AddComponent<PlayerShadow>();

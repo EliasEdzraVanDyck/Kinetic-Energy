@@ -27,6 +27,13 @@ namespace KineticEnergy.Level
             KineticCubeController controller = other.GetComponent<KineticCubeController>();
             if (controller == null) return;
             controller.RespawnAtPoint(respawnPoint != null ? respawnPoint.position : Vector3.zero);
+
+            // The player's respawn also resets every (surviving) enemy to its original
+            // position, so a retry faces the level as it started.
+            foreach (Enemy enemy in Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include))
+            {
+                enemy.ResetToSpawn();
+            }
         }
     }
 }

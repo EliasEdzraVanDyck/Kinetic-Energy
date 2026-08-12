@@ -298,6 +298,10 @@ namespace KineticEnergy.Player
         // Midair first-person aim state. Aiming (the camera/reticle) and charging are separate
         // on purpose: the aim can stay open across the energy dial's whole adjustment.
         bool airAiming;
+        // The flight velocity captured the instant the midair aim opened (the freeze zeroes
+        // it) - restored when the aim is released WITHOUT firing, so the original arc
+        // resumes instead of dropping straight down.
+        Vector3 preAirAimVelocity;
 
         // Shared charge amount for whichever charge system is active, in seconds of charging.
         float chargeTime;
@@ -363,6 +367,9 @@ namespace KineticEnergy.Player
         float gradualDrainPerSecond;
         // Predicted flight duration of the last previewed shot, captured for the drain pace.
         float lastPredictedFlightSeconds;
+        // The same duration as estimated REAL seconds - game seconds divided by the flight
+        // speed-up the current dial would produce (plus the average descent ramp).
+        float lastPredictedFlightRealSeconds;
 
         // Slowdown resource.
         float aimBudgetRemaining;
@@ -400,6 +407,14 @@ namespace KineticEnergy.Player
         public float SlowdownSecondsUsed => slowdownSecondsUsed;
         public float AimBudgetRemaining => aimBudgetRemaining;
 
+        // Read by MovingPlatform's lead arrow: whether the midair aim is open, and the
+        // currently previewed shot's predicted flight duration - in game seconds, and
+        // converted to estimated REAL seconds (flights run sped-up, platforms run on real
+        // time, so the lead must be in the platform's clock).
+        public bool IsAirAiming => airAiming;
+        public float PredictedFlightSecondsLive => lastPredictedFlightSeconds;
+        public float PredictedFlightRealSecondsLive => lastPredictedFlightRealSeconds;
+
         // Fired the frame a midair aim opens / the slowdown resource runs dry / a launch
         // fires - the Gauntlet's run logger subscribes to these.
         public event System.Action MidairAimOpened;
@@ -410,7 +425,9 @@ namespace KineticEnergy.Player
         // different risk. Directly SETTING velocity (walking) must be blocked for a launch's
         // whole flight - a shallow shot can read "grounded" mid-flight and be silently
         // overwritten. An ADDITIVE nudge only needs to wait out the brief post-launch grace.
-        public bool AllowGroundedMovement => !IsAimingOrCharging && !hasLaunched && !isStuck;
+        public bool AllowGroundedMovement => !IsAimingOrCharging && !hasLaunched && !isStuck
+            // An enemy hit's knockback window - the walk code must not stomp the shove.
+            && knockbackTimer <= 0f;
         public bool AllowAirborneNudge => !IsAimingOrCharging && !isStuck && launchGraceTimer <= 0f
             // A midair-aimed launch promises the predicted line exactly - see exactFlightNoNudge.
             && !exactFlightNoNudge;
@@ -982,7 +999,18 @@ namespace KineticEnergy.Player
 
             if (!aimHeld)
             {
-                if (airAiming) CancelAirAim();
+                if (airAiming)
+                {
+                    // Released without firing: the suspended flight RESUMES on its original
+                    // path - the velocity captured at aim-open is handed back. (Not after a
+                    // pound bounce or on the ground, where there is no flight to resume.)
+                    bool resumeFlight = hasLaunched && !isGrounded && !poundAimHoldingGravityOff;
+                    CancelAirAim();
+                    if (resumeFlight)
+                    {
+                        rb.linearVelocity = preAirAimVelocity;
+                    }
+                }
                 return;
             }
 
@@ -996,6 +1024,7 @@ namespace KineticEnergy.Player
                 if (!(airAimAction != null && airAimAction.action != null && airAimAction.action.WasPressedThisFrame())) return;
 
                 airAiming = true;
+                preAirAimVelocity = rb.linearVelocity; // captured before the freeze zeroes it
                 chargeTime = 0f; // each fresh aim starts from a clean dial
                 dialRampSeconds = 0f;
                 dialRampDirection = 0;
@@ -1059,6 +1088,12 @@ namespace KineticEnergy.Player
             // holds, the cube is frozen (velocity zero) - once it runs dry the cube keeps
             // falling through the aim and the preview accounts for that live velocity.
             ShowLandingPreview(rb.linearVelocity + direction * force / rb.mass, damping);
+
+            // Real-time estimate of that flight for the moving platforms' lead arrows: the
+            // flight runs sped up (base + energy bonus, plus the descent ramp on average).
+            float estimatedFlightScale = (launchFlightTimeScale + fireFraction * flightTimeScaleEnergyBonus)
+                * (1f + (fallSpeedUpStart + fallSpeedUpEnd) * 0.25f);
+            lastPredictedFlightRealSeconds = lastPredictedFlightSeconds / Mathf.Max(estimatedFlightScale, 0.01f);
 
             bool firePressed = airLaunchAction != null && airLaunchAction.action != null && airLaunchAction.action.WasPressedThisFrame();
             if (firePressed && energyFraction > 0f && CanStartNewLaunch())
@@ -1163,6 +1198,32 @@ namespace KineticEnergy.Player
         {
             if (infiniteEnergy) return;
             energyFraction = Mathf.Min(energyFraction, Mathf.Clamp01(fraction));
+        }
+
+        [Tooltip("Seconds of lost ground control after an enemy hit, so the knockback actually carries (grounded movement overwrites velocity every tick otherwise).")]
+        public float enemyHitControlLossSeconds = 0.35f;
+        float knockbackTimer;
+
+        // Enemy attack hook: a launching enemy that body-checks the player SHOVES them and
+        // drains some energy. The hit interrupts any aim/charge, breaks a crash-stick, and
+        // suppresses grounded movement briefly - without that window the walk code would
+        // erase the shove on the very next physics tick.
+        public void ApplyEnemyHit(Vector3 impulse, float energyLoss)
+        {
+            if (airAiming) CancelAirAim();
+            CancelHoldCharge();
+            CloseGroundedAim();
+            waitingForAimRelease = true;
+            aimButtonSpent = true;
+
+            isStuck = false;
+            nonStickyReleaseTimer = 0f;
+            rb.useGravity = true;
+            rb.linearDamping = plainFallDamping;
+            rb.linearVelocity = impulse; // replaced outright - a clean, readable shove
+            knockbackTimer = enemyHitControlLossSeconds;
+
+            if (!infiniteEnergy) energyFraction = Mathf.Max(energyFraction - energyLoss, 0f);
         }
 
         // Hazard hook (DamageWalls): a full instant respawn - every aim, charge, flight and
@@ -1295,7 +1356,12 @@ namespace KineticEnergy.Player
                 || poundWindowTimer > 0f;
             if (frozenThisTick)
             {
-                rb.linearVelocity = Vector3.zero;
+                // On a moving platform, "frozen" means frozen RELATIVE TO THE PLATFORM -
+                // the ride continues through a grounded aim instead of the platform
+                // sliding out from under it.
+                rb.linearVelocity = isGrounded && freeMoveController != null
+                    ? freeMoveController.GroundPlatformVelocity
+                    : Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
             }
 
@@ -1328,6 +1394,7 @@ namespace KineticEnergy.Player
             }
 
             if (launchGraceTimer > 0f) launchGraceTimer -= Time.fixedDeltaTime;
+            if (knockbackTimer > 0f) knockbackTimer -= Time.fixedDeltaTime;
 
             // Grounded state from a fresh BoxCast across the cube's own footprint each step -
             // continuous collision detection can report contact slightly after a real
@@ -1446,6 +1513,26 @@ namespace KineticEnergy.Player
             {
                 breakable.Smash();
                 rb.linearVelocity = velocityBeforePhysicsStep;
+                return;
+            }
+
+            // Enemies: a launch KILLS the enemy and registers a full crash (refund and the
+            // wall-crash launch limit apply, the flight ends) - but with NO cling window
+            // for now: the enemy is gone, so you drop into a normal fall immediately.
+            // Relaunching happens midair, within whatever launches the crash granted.
+            // Walking into one is harmless; it just shoves you.
+            Enemy enemy = collision.collider.GetComponentInParent<Enemy>();
+            if (enemy != null)
+            {
+                if (hasLaunched && !isStuck)
+                {
+                    RegisterCrash(collision.GetContact(0).normal, velocityBeforePhysicsStep.magnitude, collision.collider);
+                    isStuck = false;
+                    nonStickyReleaseTimer = 0f;
+                    rb.useGravity = true;
+                    rb.linearDamping = plainFallDamping;
+                    enemy.OnHitByLaunch();
+                }
                 return;
             }
 
@@ -1826,7 +1913,10 @@ namespace KineticEnergy.Player
             foreach (Collider col in colliders)
             {
                 if (col == boxCollider) continue;
-                if (col.GetComponent<Rigidbody>() != null) continue;
+                // Dynamic bodies are excluded, but KINEMATIC ones (moving platforms) are
+                // genuine landable geometry - their proxies mirror position every frame.
+                Rigidbody colBody = col.attachedRigidbody;
+                if (colBody != null && !colBody.isKinematic) continue;
                 // Marked colliders (the boundary cage) are invisible to the aim - the trail
                 // passes through and the reticle never focuses them.
                 if (col.GetComponentInParent<AimPreviewIgnored>() != null) continue;
