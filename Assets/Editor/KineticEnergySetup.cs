@@ -414,6 +414,83 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: aim camera variants setup complete OK");
         }
 
+        // Levels 2 and 3 were copied BEFORE the HUD-prefab replacement pass and never got
+        // meter instances - their Player meter references point at nothing (or at the old
+        // deactivated embedded UI), so the bars never update. This drops the EnergyMeter +
+        // SlowdownMeter prefabs into each scene's pause canvas and wires the Player, same
+        // as every other scene. Additive + wiring only.
+        [MenuItem("Tools/Kinetic Energy/Add Hud Meters To Levels 2 And 3")]
+        public static void AddHudMetersToLevels2And3()
+        {
+            foreach (string scenePath in new[] { Level2ScenePath, Level3ScenePath })
+            {
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                KineticCubeController controller = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+                GameObject pauseSystemGo = GameObject.Find("PauseSystem");
+                Transform pauseCanvas = pauseSystemGo != null ? pauseSystemGo.transform.Find("PauseCanvas") : null;
+                if (controller == null || pauseCanvas == null)
+                {
+                    throw new Exception($"KineticEnergySetup: {scenePath} is missing its Player or PauseSystem/PauseCanvas.");
+                }
+
+                // The PauseSystem prefab's embedded meter UI (if still active here) is
+                // superseded by the standalone prefabs - deactivate, never delete.
+                Transform embeddedUi = pauseCanvas.Find("EnergyMeter");
+                if (embeddedUi != null && !PrefabUtility.IsAnyPrefabInstanceRoot(embeddedUi.gameObject))
+                {
+                    embeddedUi.gameObject.SetActive(false);
+                }
+                Transform embeddedController = pauseSystemGo.transform.Find("EnergyMeter");
+                if (embeddedController != null) embeddedController.gameObject.SetActive(false);
+
+                GameObject energyMeter = InstantiatePrefab("EnergyMeter");
+                energyMeter.transform.SetParent(pauseCanvas, false);
+                controller.energyMeter = energyMeter.GetComponent<EnergyMeterController>();
+
+                GameObject slowdownMeter = InstantiatePrefab("SlowdownMeter");
+                slowdownMeter.transform.SetParent(pauseCanvas, false);
+                controller.slowdownMeter = slowdownMeter.GetComponent<EnergyMeterController>();
+
+                EditorUtility.SetDirty(controller);
+                SaveOpenScene(scenePath);
+                Debug.Log($"KineticEnergySetup: HUD meters added to {scenePath} OK");
+            }
+        }
+
+        // ADDITIVE: puts a Resume button at the TOP of the pause menu's button column and
+        // makes it the gamepad's first-selected button. Wired to TogglePause, which resumes
+        // when paused. Nothing existing is moved.
+        [MenuItem("Tools/Kinetic Energy/Add Resume Button To Pause Menu")]
+        public static void AddResumeButtonToPauseMenu()
+        {
+            string pausePath = PrefabFolder + "/PauseSystem.prefab";
+            GameObject pauseRoot = PrefabUtility.LoadPrefabContents(pausePath);
+            try
+            {
+                Transform pausePanel = pauseRoot.transform.Find("PauseCanvas/PausePanel");
+                PauseController pauseController = pauseRoot.GetComponentInChildren<PauseController>(true);
+                if (pausePanel == null || pauseController == null)
+                {
+                    throw new Exception("KineticEnergySetup: PauseSystem.prefab is missing PauseCanvas/PausePanel or PauseController.");
+                }
+
+                DestroyDirectChildIfExists(pausePanel, "ResumeButton");
+                Font font = FindBestFont();
+                Color accent = new Color(1f, 0.82f, 0.2f);
+                GameObject resume = CreateButton("ResumeButton", pausePanel, "Resume", font, accent,
+                    new Vector2(0f, 185f), new Vector2(300f, 70f)); // one column step above Restart (95)
+                resume.transform.SetSiblingIndex(0);
+                WireButton(resume, pauseController.TogglePause);
+                pauseController.firstPauseButton = resume;
+                EditorUtility.SetDirty(pauseController);
+
+                PrefabUtility.SaveAsPrefabAsset(pauseRoot, pausePath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(pauseRoot); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: resume button added to pause menu OK");
+        }
+
         static AimCameraPreset LoadOrCreatePreset(string path, Action<AimCameraPreset> initialize)
         {
             AimCameraPreset preset = AssetDatabase.LoadAssetAtPath<AimCameraPreset>(path);

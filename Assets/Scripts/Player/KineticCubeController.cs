@@ -429,6 +429,7 @@ namespace KineticEnergy.Player
         public event System.Action MidairAimReleased;
         public event System.Action<UnityEngine.Vector3> CrashRegistered;
         bool suppressAimReleasedEvent; // the fire path closes the aim without a "released"
+        bool justUnpaused; // swallow the first unpaused frame - menu clicks must not leak into gameplay
 
         // Split in two because the two things the free-move component can do carry very
         // different risk. Directly SETTING velocity (walking) must be blocked for a launch's
@@ -517,7 +518,23 @@ namespace KineticEnergy.Player
 
             // timeScale 0 freezes deltaTime-scaled logic for free, but not raw edge-detected
             // input - nothing below may run while the pause menu is up.
-            if (paused) return;
+            if (paused)
+            {
+                justUnpaused = true;
+                return;
+            }
+
+            // The frame AFTER unpausing is swallowed too: clicking Resume (or submitting it
+            // with Space/South) restores the timescale during UI event processing, and this
+            // very Update would otherwise read that same press as a fresh gameplay edge -
+            // Space resumed the menu AND started an up-charge.
+            if (justUnpaused)
+            {
+                justUnpaused = false;
+                waitingForAimRelease = true;
+                aimButtonSpent = true;
+                return;
+            }
 
             if (infiniteEnergy) energyFraction = 1f;
 
@@ -750,7 +767,8 @@ namespace KineticEnergy.Player
                 : Vector2.zero;
             if (aimStick.sqrMagnitude < aimDeadzone * aimDeadzone) aimStick = Vector2.zero;
             if (groundedAimWithMouse && isAiming && moveIsKeyboardDriven) aimStick *= wasdCameraTurnMultiplier;
-            cameraOrbit.SetAimStickOverride(aimWithMoveStick, aimStick);
+            cameraOrbit.SetAimStickOverride(aimWithMoveStick, aimStick,
+                groundedAimWithMouse && isAiming && moveIsKeyboardDriven);
 
             // While the mouse steers the grounded aim it must not also orbit the camera.
             cameraOrbit.SetMouseLookSuppressed(groundedAimWithMouse && isAiming);
@@ -763,6 +781,7 @@ namespace KineticEnergy.Player
             // launch for a moment instead of being glued to it. Vertical flights report
             // themselves so the camera can use its slightly tighter vertical value.
             cameraOrbit.SetLaunchInFlight(hasLaunched, currentFlightIsVertical, currentFlightIntensity);
+            cameraOrbit.SetPlayerGrounded(isGrounded);
 
             // First-person midair aim looks at the cursor at the end of the dotted line.
             bool framingAim = !isGrounded && hasValidPredictedLanding && airAiming;
@@ -960,12 +979,16 @@ namespace KineticEnergy.Player
 
             bool keyboardAvailable = Keyboard.current != null;
 
+            // STATE-based release, not edge-based: "the button is not held" fires the
+            // charge. WasReleasedThisFrame is a one-frame edge, and an edge that lands on
+            // a frame this code doesn't run (pausing mid-charge, most commonly) was lost
+            // forever - the charge stuck ON with the key up until a fresh press+release.
             bool releasedNow = holdChargeDirection switch
             {
-                HoldChargeDirection.Up => (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasReleasedThisFrame())
-                    || (keyboardAvailable && Keyboard.current.spaceKey.wasReleasedThisFrame),
-                HoldChargeDirection.Down => (groundPoundAction != null && groundPoundAction.action != null && groundPoundAction.action.WasReleasedThisFrame())
-                    || (keyboardAvailable && Keyboard.current.eKey.wasReleasedThisFrame),
+                HoldChargeDirection.Up => !((upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.IsPressed())
+                    || (keyboardAvailable && Keyboard.current.spaceKey.isPressed)),
+                HoldChargeDirection.Down => !((groundPoundAction != null && groundPoundAction.action != null && groundPoundAction.action.IsPressed())
+                    || (keyboardAvailable && Keyboard.current.eKey.isPressed)),
                 _ => false,
             };
 
@@ -1021,6 +1044,11 @@ namespace KineticEnergy.Player
                     {
                         rb.linearVelocity = preAirAimVelocity;
                     }
+                    // Same treatment as firing: exit to the third-person orbit slot in one
+                    // cut. Without this, a resumed flight kept the LAUNCH-lag smoothing
+                    // while the camera was still sitting at the player's eyeball - it
+                    // drifted lazily outward during the whole fall, which read as broken.
+                    cameraOrbit?.SnapToThirdPersonOrbit();
                 }
                 return;
             }

@@ -31,6 +31,8 @@ namespace KineticEnergy.Camera
         // degenerate zone while still allowing a dramatically steep, near-top-down view.
         public float maxPitch = 75f;
         public bool invertY = false;
+        [Tooltip("Yaw speed floor at the steepest pitch (fraction of normal). At high angles the orbit circle shrinks toward the pole, so an unscaled yaw rate visually WHIRLS the world - yaw speed scales down by cos(pitch), never below this floor. Third person only; the first-person aim keeps raw yaw.")]
+        [Range(0.1f, 1f)] public float highAngleYawFloor = 0.35f;
 
         [Header("Smoothing")]
         public float positionSmoothTime = 0.08f;
@@ -38,8 +40,8 @@ namespace KineticEnergy.Camera
         public float launchFollowSmoothTime = 0.25f;
         [Tooltip("Same trailing effect for VERTICAL launches (up-charge and ground pound) - slightly tighter, so the camera hangs back a touch less on straight up/down flights.")]
         public float verticalLaunchFollowSmoothTime = 0.18f;
-        [Tooltip("Seconds over which the follow relaxes back to normal tightness after a flight ends - stops the camera from lunging at the player the instant a launch lands.")]
-        public float followLagRecoverySeconds = 0.5f;
+        [Tooltip("Time constant of the follow relaxing back to normal tightness after a flight ends - long enough to avoid a lunge, short enough that the camera doesn't feel drugged after landing.")]
+        public float followLagRecoverySeconds = 0.3f;
         public float maxDeltaTime = 0.05f;
 
         float followSmoothTime; // the eased, currently-active follow smoothing
@@ -76,15 +78,44 @@ namespace KineticEnergy.Camera
         // only applies when the look action isn't mouse-driven.
         bool aimStickOverrideActive;
         Vector2 aimStickOverrideValue;
+        bool aimStickOverrideKeyboard; // the override is WASD (grounded aim), not a gamepad stick
+
+        [Header("Keyboard & Mouse Speed")]
+        // Direct feedback: with mouse the camera is too fast outside aiming and slightly
+        // too fast while aiming. These scale MOUSE/WASD-driven look only - gamepad sticks
+        // are untouched.
+        [Tooltip("Mouse look speed multiplier for the ordinary third-person orbit (not aiming).")]
+        [Range(0.1f, 1f)] public float mouseOrbitSpeedMultiplier = 0.6f;
+        [Tooltip("Mouse look speed multiplier during the midair first-person aim.")]
+        [Range(0.1f, 1f)] public float mouseAimSpeedMultiplier = 0.85f;
+        [Tooltip("Speed multiplier for the WASD-driven camera during the grounded aim.")]
+        [Range(0.1f, 1f)] public float wasdAimCameraSpeedMultiplier = 0.85f;
+
+        [Header("Gamepad Speed")]
+        // Direct feedback: the stick camera should be a bit quicker than baseline - +20%
+        // grounded, +10% airborne. Mouse/WASD input never touches these.
+        [Tooltip("Gamepad look speed multiplier while the player is GROUNDED.")]
+        [Range(0.5f, 2f)] public float gamepadGroundedSpeedMultiplier = 1.2f;
+        [Tooltip("Gamepad look speed multiplier while the player is AIRBORNE (flights and midair aim).")]
+        [Range(0.5f, 2f)] public float gamepadAirborneSpeedMultiplier = 1.1f;
+
+        // Fed per frame by KineticCubeController - the gamepad multipliers key off it.
+        bool playerGrounded;
+
+        public void SetPlayerGrounded(bool grounded)
+        {
+            playerGrounded = grounded;
+        }
         // While the grounded aim's "Aim: Mouse" option is steering the launch direction with
         // mouse delta (KineticCubeController.groundedAimWithMouse), mouse-driven look input is
         // ignored so one hand motion doesn't rotate the camera and the aim arrow together.
         bool mouseLookSuppressed;
 
-        public void SetAimStickOverride(bool active, Vector2 stick)
+        public void SetAimStickOverride(bool active, Vector2 stick, bool keyboardDriven = false)
         {
             aimStickOverrideActive = active;
             aimStickOverrideValue = active ? stick : Vector2.zero;
+            aimStickOverrideKeyboard = active && keyboardDriven;
         }
 
         public void SetMouseLookSuppressed(bool suppressed)
@@ -197,13 +228,26 @@ namespace KineticEnergy.Camera
         float driftAmpFactor;    // 0..1 ramp of the drift amplitude
 
         // Which shoulder the OTS offset sits over: +1 = right (player appears left of
-        // centre), -1 = left. Toggled by Q / Right Stick Click (AimCameraVariantController),
-        // works mid-aim, remembered between aims - the standard shooter shoulder swap.
-        int aimShoulderSign = 1;
+        // centre), -1 = left. AUTO mode picks the clearer side while aiming (obstruction-
+        // based, the way cover shooters do it) and glides across rather than snapping;
+        // Q / Right Stick Click still swaps manually and holds that choice for the rest of
+        // the current aim window (auto resumes on the next aim).
+        [Tooltip("Automatically hold the clearer shoulder during OTS aims: when geometry squeezes the current side and the mirrored side is clear, the camera glides across. Manual swaps (Q / Right Stick Click) override it for the rest of that aim.")]
+        public bool autoShoulder = true;
+        [Tooltip("Extra clearance (fraction of the offset span) the OTHER side must have before an auto-swap triggers - hysteresis so the camera never flip-flops.")]
+        [Range(0.05f, 0.6f)] public float autoShoulderMargin = 0.25f;
+        [Tooltip("Unscaled seconds the shoulder-swap glide takes.")]
+        public float shoulderSwapSmoothTime = 0.22f;
+
+        float shoulderTarget = 1f;
+        float shoulderCurrent = 1f;
+        float shoulderVelocity;
+        bool shoulderManualHold; // Q was pressed during this aim - auto stays out of it
 
         public void ToggleAimShoulder()
         {
-            aimShoulderSign = -aimShoulderSign;
+            shoulderTarget = -shoulderTarget;
+            shoulderManualHold = true;
         }
 
         public void SetAimCameraPreset(AimCameraPreset preset)
@@ -247,11 +291,12 @@ namespace KineticEnergy.Camera
             if (enabled)
             {
                 // Fresh aim window: drift starts from rest and ramps in; the dolly starts
-                // at the near OTS distance.
+                // at the near OTS distance; a manual shoulder hold expires (auto resumes).
                 driftClock = 0f;
                 driftAmpFactor = 0f;
                 currentOtsBack = aimPreset != null ? aimPreset.otsBack : 1.4f;
                 otsBackVelocity = 0f;
+                shoulderManualHold = false;
             }
             else
             {
@@ -408,6 +453,13 @@ namespace KineticEnergy.Camera
                 fineAimScale = Mathf.Lerp(fineAimMinFactor, 1f, t);
             }
 
+            // Keyboard & mouse speed scaling (direct feedback: mouse camera too fast outside
+            // aiming, slightly too fast while aiming) - gamepad sticks pass through at 1.
+            float deviceSpeedScale = 1f;
+            if (lookIsMouseDriven) deviceSpeedScale = firstPerson ? mouseAimSpeedMultiplier : mouseOrbitSpeedMultiplier;
+            else if (aimStickOverrideActive && aimStickOverrideKeyboard) deviceSpeedScale = wasdAimCameraSpeedMultiplier;
+            else deviceSpeedScale = playerGrounded ? gamepadGroundedSpeedMultiplier : gamepadAirborneSpeedMultiplier;
+
             // Manual input always wins outright, the instant there is any - recentering only
             // ever happens while the player isn't already telling the camera what to do.
             if (look.sqrMagnitude > 0.0001f) recentering = false;
@@ -428,9 +480,14 @@ namespace KineticEnergy.Camera
             }
             else
             {
-                yaw += look.x * rotationSpeed * fineAimScale * fovSensitivityScale * dt;
+                // See highAngleYawFloor: steep orbit pitches damp the yaw rate so near-top-
+                // down views don't spin around the player uncontrollably fast.
+                float pitchYawScale = firstPerson
+                    ? 1f
+                    : Mathf.Max(Mathf.Abs(Mathf.Cos(pitch * Mathf.Deg2Rad)), highAngleYawFloor);
+                yaw += look.x * rotationSpeed * fineAimScale * fovSensitivityScale * pitchYawScale * deviceSpeedScale * dt;
             }
-            float pitchDelta = (invertY ? look.y : -look.y) * rotationSpeed * fineAimScale * fovSensitivityScale * dt;
+            float pitchDelta = (invertY ? look.y : -look.y) * rotationSpeed * fineAimScale * fovSensitivityScale * deviceSpeedScale * dt;
             pitch = Mathf.Clamp(pitch + pitchDelta,
                 firstPerson ? firstPersonMinPitch : minPitch,
                 firstPerson ? firstPersonMaxPitch : maxPitch);
@@ -483,7 +540,11 @@ namespace KineticEnergy.Camera
             }
             else
             {
-                float relaxRate = (launchFollowSmoothTime - positionSmoothTime) / Mathf.Max(followLagRecoverySeconds, 0.01f);
+                // Rate derives from the REMAINING gap (an exponential-style decay with
+                // followLagRecoverySeconds as its time constant). The old fixed rate came
+                // from the base values only, so relaxing from a short-launch-stretched
+                // smoothing took over a second - the camera felt drugged after landing.
+                float relaxRate = Mathf.Max((followSmoothTime - targetFollow) / Mathf.Max(followLagRecoverySeconds, 0.01f), 0.05f);
                 followSmoothTime = Mathf.MoveTowards(followSmoothTime, targetFollow, relaxRate * Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
             }
 
@@ -597,10 +658,24 @@ namespace KineticEnergy.Camera
             // Position derives from the LAUNCH VECTOR (yaw/pitch, which input steers) with
             // the drift angles applied to the offset direction only.
             Quaternion offsetRotation = Quaternion.Euler(pitch + driftPitch, yaw + driftYaw, 0f);
-            Vector3 desired = target.position
+            Vector3 basePosition = target.position
                 - offsetRotation * Vector3.forward * currentOtsBack
-                + Vector3.up * aimPreset.otsRise
-                + offsetRotation * Vector3.right * (aimPreset.otsSide * aimShoulderSign);
+                + Vector3.up * aimPreset.otsRise;
+            Vector3 sideVector = offsetRotation * Vector3.right * aimPreset.otsSide;
+
+            // Auto shoulder: hold the CLEARER side. Only swaps when the mirrored side beats
+            // the current one by the hysteresis margin, so it can't flip-flop in doorways;
+            // a manual Q swap suspends auto for the rest of this aim.
+            if (autoShoulder && !shoulderManualHold)
+            {
+                float currentClear = ShoulderClearance(basePosition + sideVector * shoulderTarget);
+                float otherClear = ShoulderClearance(basePosition - sideVector * shoulderTarget);
+                if (otherClear > currentClear + autoShoulderMargin) shoulderTarget = -shoulderTarget;
+            }
+            shoulderCurrent = Mathf.SmoothDamp(shoulderCurrent, shoulderTarget, ref shoulderVelocity,
+                shoulderSwapSmoothTime, Mathf.Infinity, udt);
+
+            Vector3 desired = basePosition + sideVector * shoulderCurrent;
 
             // Clearance: a camera clipping into a wall or perch during aim destroys the
             // depth read outright. Spherecast player -> desired, pull in on any hit that
@@ -617,6 +692,22 @@ namespace KineticEnergy.Camera
                 }
             }
             return desired;
+        }
+
+        // Fraction (0..1) of the player-to-position span that is unobstructed - the auto
+        // shoulder compares both sides with this.
+        float ShoulderClearance(Vector3 position)
+        {
+            Vector3 toCamera = position - target.position;
+            float span = toCamera.magnitude;
+            if (span < 0.001f || aimPreset == null) return 1f;
+            if (Physics.SphereCast(target.position, aimPreset.camCollisionRadius, toCamera / span,
+                out RaycastHit hit, span, occlusionMask, QueryTriggerInteraction.Ignore))
+            {
+                bool isPlayer = hit.collider.transform == target || hit.collider.transform.IsChildOf(target);
+                if (!isPlayer) return hit.distance / span;
+            }
+            return 1f;
         }
 
         // Hides any renderer whose collider sits directly between the camera and the player,
