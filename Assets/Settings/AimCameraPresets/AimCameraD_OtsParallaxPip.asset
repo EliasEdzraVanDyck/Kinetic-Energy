@@ -10,10 +10,10 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8d0d3558fa4b4b743a05a189e228221d, type: 3}
-  m_Name: AimCameraB_OtsDrift
+  m_Name: AimCameraD_OtsParallaxPip
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Camera.AimCameraPreset
-  variant: 1
-  displayName: Behind the player
+  variant: 3
+  displayName: Behind player + landing window
   otsBack: 1.8
   otsRise: 0.6
   otsSide: 0.7
@@ -27,7 +27,7 @@ MonoBehaviour:
   driftRampOut: 0.1
   pauseDriftWhileAiming: 0
   freeLookConeAngle: 45
-  pipEnabled: 0
+  pipEnabled: 1
   pipViewport:
     serializedVersion: 2
     x: 0.015

@@ -10,22 +10,30 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8d0d3558fa4b4b743a05a189e228221d, type: 3}
-  m_Name: AimCameraC_OtsDriftDolly
+  m_Name: AimCameraC_BaselinePip
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Camera.AimCameraPreset
   variant: 2
-  displayName: OTS + drift + dolly
-  otsBack: 2.4
-  otsRise: 0.6
-  otsSide: 0.7
+  displayName: First person + landing window
+  otsBack: 1.4
+  otsRise: 0.35
+  otsSide: 0.3
   camCollisionRadius: 0.25
   blendInTime: 0.12
-  driftYawAmplitude: 0
-  driftPitchAmplitude: 0
+  driftYawAmplitude: 4
+  driftPitchAmplitude: 1.5
   driftPeriod: 2.6
   driftPhaseOffset: 90
   driftRampIn: 0.2
   driftRampOut: 0.1
   pauseDriftWhileAiming: 0
-  dollyInsteadOfZoom: 1
-  dollyMaxBack: 5
-  dollySmoothTime: 0.15
+  freeLookConeAngle: 45
+  pipEnabled: 1
+  pipViewport:
+    serializedVersion: 2
+    x: 0.015
+    y: 0.675
+    width: 0.3
+    height: 0.3
+  pipArcFraction: 0.55
+  pipMinDistance: 8
+  pipFieldOfView: 50

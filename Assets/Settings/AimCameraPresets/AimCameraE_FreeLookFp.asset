@@ -10,22 +10,30 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8d0d3558fa4b4b743a05a189e228221d, type: 3}
-  m_Name: AimCameraD_OtsParallax
+  m_Name: AimCameraE_FreeLookFp
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Camera.AimCameraPreset
-  variant: 3
-  displayName: OTS + parallax drift
-  otsBack: 2.4
-  otsRise: 0.6
-  otsSide: 0.7
+  variant: 4
+  displayName: First person + look around
+  otsBack: 1.4
+  otsRise: 0.35
+  otsSide: 0.3
   camCollisionRadius: 0.25
   blendInTime: 0.12
-  driftYawAmplitude: 1.5
-  driftPitchAmplitude: 0.5
-  driftPeriod: 3.5
+  driftYawAmplitude: 4
+  driftPitchAmplitude: 1.5
+  driftPeriod: 2.6
   driftPhaseOffset: 90
   driftRampIn: 0.2
   driftRampOut: 0.1
   pauseDriftWhileAiming: 0
-  dollyInsteadOfZoom: 0
-  dollyMaxBack: 5
-  dollySmoothTime: 0.15
+  freeLookConeAngle: 45
+  pipEnabled: 0
+  pipViewport:
+    serializedVersion: 2
+    x: 0.015
+    y: 0.675
+    width: 0.3
+    height: 0.3
+  pipArcFraction: 0.55
+  pipMinDistance: 8
+  pipFieldOfView: 50

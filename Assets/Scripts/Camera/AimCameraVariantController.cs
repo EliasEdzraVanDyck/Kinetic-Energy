@@ -18,13 +18,16 @@ namespace KineticEnergy.Camera
     {
         public AimCameraVariant currentVariant = AimCameraVariant.Baseline;
         public AimCameraPreset baselinePreset;
-        public AimCameraPreset otsDriftPreset;
-        public AimCameraPreset otsDriftDollyPreset;
         public AimCameraPreset otsParallaxPreset;
+        public AimCameraPreset baselinePipPreset;
+        public AimCameraPreset otsParallaxPipPreset;
+        public AimCameraPreset freeLookFirstPersonPreset;
+        public AimCameraPreset freeLookOtsPreset;
 
         ThirdPersonOrbitCamera cameraOrbit;
         KineticCubeController controller;
         Text hudLabel;
+        Text hudEnergyNote;
 
         // Raised on every variant change - the pause menu label and the logger listen.
         public event Action<AimCameraVariant, AimCameraPreset> VariantChanged;
@@ -32,18 +35,29 @@ namespace KineticEnergy.Camera
         public AimCameraPreset ActivePreset => PresetFor(currentVariant);
         public string CurrentLabel => LabelFor(currentVariant, ActivePreset);
 
+        // The controller-energy warning, shown as its OWN text element ABOVE the variant
+        // label (HUD and pause menu alike) - empty for variants with the normal dial.
+        public string EnergyControlsNote => ActivePreset != null && ActivePreset.UsesFreeLook
+            ? "Controller energy: RB adds / LB removes (this variant only)"
+            : "";
+
         AimCameraPreset PresetFor(AimCameraVariant variant) => variant switch
         {
-            AimCameraVariant.OtsDrift => otsDriftPreset,
-            AimCameraVariant.OtsDriftDolly => otsDriftDollyPreset,
             AimCameraVariant.OtsParallax => otsParallaxPreset,
+            AimCameraVariant.BaselinePip => baselinePipPreset,
+            AimCameraVariant.OtsParallaxPip => otsParallaxPipPreset,
+            AimCameraVariant.FreeLookFirstPerson => freeLookFirstPersonPreset,
+            AimCameraVariant.FreeLookOts => freeLookOtsPreset,
             _ => baselinePreset,
         };
+
+        LandingPipCamera pipCamera;
 
         void Start()
         {
             controller = GetComponent<KineticCubeController>();
             cameraOrbit = FindAnyObjectByType<ThirdPersonOrbitCamera>();
+            pipCamera = LandingPipCamera.Create(controller);
             BuildHudTag();
             SetVariant(currentVariant);
         }
@@ -66,9 +80,12 @@ namespace KineticEnergy.Camera
             // whole camera mid-aim pops.
             if (controller != null && controller.IsAimingOrCharging) return;
 
-            bool pressed = (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
+            bool forwardPressed = (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
                 || (Gamepad.current != null && Gamepad.current.dpad.right.wasPressedThisFrame);
-            if (pressed) CycleVariant();
+            bool backPressed = (Keyboard.current != null && Keyboard.current.cKey.wasPressedThisFrame)
+                || (Gamepad.current != null && Gamepad.current.dpad.left.wasPressedThisFrame);
+            if (forwardPressed) CycleVariant();
+            else if (backPressed) CycleVariantBack();
         }
 
         // Also wired to the pause menu's selector button (PauseController.OnCameraVariantClicked).
@@ -76,7 +93,14 @@ namespace KineticEnergy.Camera
         public void CycleVariant()
         {
             if (controller != null && controller.IsAimingOrCharging) return;
-            SetVariant((AimCameraVariant)(((int)currentVariant + 1) % 4));
+            SetVariant((AimCameraVariant)(((int)currentVariant + 1) % 6));
+        }
+
+        // C / D-pad Left steps BACK through the cycle - same aim-window block.
+        public void CycleVariantBack()
+        {
+            if (controller != null && controller.IsAimingOrCharging) return;
+            SetVariant((AimCameraVariant)(((int)currentVariant + 5) % 6));
         }
 
         public void SetVariant(AimCameraVariant variant)
@@ -84,7 +108,9 @@ namespace KineticEnergy.Camera
             currentVariant = variant;
             AimCameraPreset preset = ActivePreset;
             if (cameraOrbit != null) cameraOrbit.SetAimCameraPreset(preset);
+            if (pipCamera != null) pipCamera.SetPreset(preset);
             if (hudLabel != null) hudLabel.text = CurrentLabel;
+            if (hudEnergyNote != null) hudEnergyNote.text = EnergyControlsNote;
             VariantChanged?.Invoke(variant, preset);
         }
 
@@ -92,9 +118,11 @@ namespace KineticEnergy.Camera
         {
             string letter = variant switch
             {
-                AimCameraVariant.OtsDrift => "B",
-                AimCameraVariant.OtsDriftDolly => "C",
-                AimCameraVariant.OtsParallax => "D",
+                AimCameraVariant.OtsParallax => "B",
+                AimCameraVariant.BaselinePip => "C",
+                AimCameraVariant.OtsParallaxPip => "D",
+                AimCameraVariant.FreeLookFirstPerson => "E",
+                AimCameraVariant.FreeLookOts => "F",
                 _ => "A",
             };
             string name = preset != null ? preset.displayName : variant.ToString();
@@ -128,6 +156,23 @@ namespace KineticEnergy.Camera
             hudLabel.alignment = TextAnchor.LowerRight;
             hudLabel.color = new Color(1f, 1f, 1f, 0.55f);
             hudLabel.text = CurrentLabel;
+
+            // The controller-energy note sits in its OWN box directly above the label.
+            GameObject noteGo = new GameObject("EnergyNote", typeof(RectTransform));
+            noteGo.transform.SetParent(root.transform, false);
+            RectTransform noteRect = noteGo.GetComponent<RectTransform>();
+            noteRect.anchorMin = new Vector2(1f, 0f);
+            noteRect.anchorMax = new Vector2(1f, 0f);
+            noteRect.pivot = new Vector2(1f, 0f);
+            noteRect.anchoredPosition = new Vector2(-24f, 52f);
+            noteRect.sizeDelta = new Vector2(620f, 30f);
+
+            hudEnergyNote = noteGo.AddComponent<Text>();
+            hudEnergyNote.font = hudLabel.font;
+            hudEnergyNote.fontSize = 20;
+            hudEnergyNote.alignment = TextAnchor.LowerRight;
+            hudEnergyNote.color = new Color(1f, 0.82f, 0.2f, 0.85f); // accent - it's a warning
+            hudEnergyNote.text = EnergyControlsNote;
         }
     }
 }

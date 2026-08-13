@@ -222,10 +222,22 @@ namespace KineticEnergy.Camera
         // point. Which one is active comes from AimCameraVariantController via the preset.
         AimCameraPreset aimPreset;
         float aimZoomFraction;   // last energy-dial fraction fed to SetAimZoom
-        float currentOtsBack;    // eased back-distance (the Variant C dolly moves this)
-        float otsBackVelocity;
         float driftClock;        // unscaled seconds into the drift ellipse
         float driftAmpFactor;    // 0..1 ramp of the drift amplitude
+
+        // Free-look (variants E/F): rotates the VIEW only - the launch vector (yaw/pitch)
+        // and the predicted landing stay exactly where they are. Fed per frame by
+        // KineticCubeController; reset when a fresh aim opens.
+        bool freeLookActive;
+        Vector2 freeLookInput;
+        float freeLookYaw;
+        float freeLookPitch;
+
+        public void SetFreeLook(bool active, Vector2 input)
+        {
+            freeLookActive = active;
+            freeLookInput = active ? input : Vector2.zero;
+        }
 
         // Which shoulder the OTS offset sits over: +1 = right (player appears left of
         // centre), -1 = left. AUTO mode picks the clearer side while aiming (obstruction-
@@ -255,7 +267,7 @@ namespace KineticEnergy.Camera
             aimPreset = preset;
         }
 
-        bool OtsAimActive => firstPerson && aimPreset != null && aimPreset.variant != AimCameraVariant.Baseline;
+        bool OtsAimActive => firstPerson && aimPreset != null && aimPreset.UsesOverShoulder;
 
         // World-space direction this camera is currently looking - the midair aim fires
         // exactly along this, so the shot always goes exactly where the first-person view points.
@@ -290,13 +302,13 @@ namespace KineticEnergy.Camera
             firstPerson = enabled;
             if (enabled)
             {
-                // Fresh aim window: drift starts from rest and ramps in; the dolly starts
-                // at the near OTS distance; a manual shoulder hold expires (auto resumes).
+                // Fresh aim window: drift starts from rest and ramps in; a manual shoulder
+                // hold expires (auto resumes); any free-look offset resets to centred.
                 driftClock = 0f;
                 driftAmpFactor = 0f;
-                currentOtsBack = aimPreset != null ? aimPreset.otsBack : 1.4f;
-                otsBackVelocity = 0f;
                 shoulderManualHold = false;
+                freeLookYaw = 0f;
+                freeLookPitch = 0f;
             }
             else
             {
@@ -310,10 +322,7 @@ namespace KineticEnergy.Camera
             if (cam == null) cam = GetComponent<UnityEngine.Camera>();
             if (cam == null) return;
             aimZoomFraction = Mathf.Clamp01(chargeFraction01);
-            // Variant C: FOV stays CONSTANT for the whole aim - the energy dial dollies the
-            // camera backward instead (see the OTS position math). A and B keep the zoom.
-            bool dolly = aimPreset != null && aimPreset.dollyInsteadOfZoom;
-            cam.fieldOfView = dolly ? normalFov : Mathf.Lerp(normalFov, maxZoomFov, aimZoomFraction);
+            cam.fieldOfView = Mathf.Lerp(normalFov, maxZoomFov, aimZoomFraction);
         }
 
         [Header("Wall Occlusion")]
@@ -603,8 +612,30 @@ namespace KineticEnergy.Camera
                     viewPitch = Mathf.MoveTowards(viewPitch, targetPitch, turnStep);
                 }
 
+                // Free-look (E and F): the accumulated offset rotates the VIEW in place, on
+                // top of the aim framing - the aim vector, cursor, and camera POSITION never
+                // move with it. Clamped to a cone around the default view (direct request:
+                // 45 degrees in all directions, on the preset).
+                if (freeLookActive)
+                {
+                    float fdt = Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime);
+                    freeLookYaw += freeLookInput.x * rotationSpeed * fdt;
+                    freeLookPitch -= freeLookInput.y * rotationSpeed * fdt;
+
+                    float cone = aimPreset != null ? Mathf.Max(aimPreset.freeLookConeAngle, 1f) : 45f;
+                    Vector2 offset = new Vector2(freeLookYaw, freeLookPitch);
+                    if (offset.magnitude > cone)
+                    {
+                        offset = offset.normalized * cone;
+                        freeLookYaw = offset.x;
+                        freeLookPitch = offset.y;
+                    }
+                }
+
                 // Built from yaw/pitch alone - the roll (Z) component is always exactly zero.
-                transform.rotation = Quaternion.Euler(viewPitch, viewYaw, 0f);
+                transform.rotation = freeLookActive
+                    ? Quaternion.Euler(viewPitch + freeLookPitch, viewYaw + freeLookYaw, 0f)
+                    : Quaternion.Euler(viewPitch, viewYaw, 0f);
             }
             else
             {
@@ -648,18 +679,13 @@ namespace KineticEnergy.Camera
             float driftPitch = Mathf.Sin(phase + aimPreset.driftPhaseOffset * Mathf.Deg2Rad)
                 * aimPreset.driftPitchAmplitude * driftAmpFactor;
 
-            // Variant C dolly: the dial eases the back-distance out; B keeps it fixed.
-            float targetBack = aimPreset.dollyInsteadOfZoom
-                ? Mathf.Lerp(aimPreset.otsBack, aimPreset.dollyMaxBack, Mathf.SmoothStep(0f, 1f, aimZoomFraction))
-                : aimPreset.otsBack;
-            currentOtsBack = Mathf.SmoothDamp(currentOtsBack, targetBack, ref otsBackVelocity,
-                aimPreset.dollySmoothTime, Mathf.Infinity, udt);
-
             // Position derives from the LAUNCH VECTOR (yaw/pitch, which input steers) with
-            // the drift angles applied to the offset direction only.
+            // the drift angles applied to the offset direction only. Free-look (F) is NOT
+            // part of the position - it rotates the view in place (direct request), see the
+            // rotation block.
             Quaternion offsetRotation = Quaternion.Euler(pitch + driftPitch, yaw + driftYaw, 0f);
             Vector3 basePosition = target.position
-                - offsetRotation * Vector3.forward * currentOtsBack
+                - offsetRotation * Vector3.forward * aimPreset.otsBack
                 + Vector3.up * aimPreset.otsRise;
             Vector3 sideVector = offsetRotation * Vector3.right * aimPreset.otsSide;
 

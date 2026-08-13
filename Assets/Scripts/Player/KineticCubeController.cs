@@ -382,6 +382,7 @@ namespace KineticEnergy.Player
         Vector3[] trajectoryBuffer;
         Vector3 lastPredictedLanding;
         bool hasValidPredictedLanding;
+        int lastTrajectoryStepCount;
         Vector3 lastPredictedLandingNormal = Vector3.up;
         GameObject predictionClone;
         Rigidbody predictionRb;
@@ -414,6 +415,19 @@ namespace KineticEnergy.Player
         // converted to estimated REAL seconds (flights run sped-up, platforms run on real
         // time, so the lead must be in the platform's clock).
         public bool IsAirAiming => airAiming;
+
+        // Landing PiP support (LandingPipCamera): a vantage point along the CURRENT
+        // predicted arc. Fraction 0 = at the player, 1 = at the landing. Only meaningful
+        // while the midair aim is open with a valid landing prediction.
+        public bool TryGetPredictedArcPoint(float fraction, out Vector3 point, out Vector3 landing)
+        {
+            point = Vector3.zero;
+            landing = lastPredictedLanding;
+            if (!airAiming || !hasValidPredictedLanding || lastTrajectoryStepCount < 2) return false;
+            int index = Mathf.Clamp(Mathf.RoundToInt(lastTrajectoryStepCount * fraction), 0, lastTrajectoryStepCount - 1);
+            point = trajectoryBuffer[index];
+            return true;
+        }
         public float PredictedFlightSecondsLive => lastPredictedFlightSeconds;
         public float PredictedFlightRealSecondsLive => lastPredictedFlightRealSeconds;
 
@@ -430,6 +444,12 @@ namespace KineticEnergy.Player
         public event System.Action<UnityEngine.Vector3> CrashRegistered;
         bool suppressAimReleasedEvent; // the fire path closes the aim without a "released"
         bool justUnpaused; // swallow the first unpaused frame - menu clicks must not leak into gameplay
+        KineticEnergy.Camera.AimCameraVariantController aimVariants; // the playtest harness, same object
+
+        // E/F free-look variants: the view rotates independently of the aim, and the
+        // energy dial moves to the bumpers (the right stick is busy free-looking).
+        bool FreeLookAimActive => aimVariants != null && aimVariants.ActivePreset != null
+            && aimVariants.ActivePreset.UsesFreeLook;
 
         // Split in two because the two things the free-move component can do carry very
         // different risk. Directly SETTING velocity (walking) must be blocked for a launch's
@@ -449,6 +469,7 @@ namespace KineticEnergy.Player
             rb = GetComponent<Rigidbody>();
             boxCollider = GetComponent<BoxCollider>();
             freeMoveController = GetComponent<KineticCubeControllerFreeMove>();
+            aimVariants = GetComponent<KineticEnergy.Camera.AimCameraVariantController>();
             trajectoryBuffer = new Vector3[Mathf.Max(maxPredictionSteps, 1)];
             ApplyGravity();
             energyFraction = infiniteEnergy ? 1f : startingEnergyFraction;
@@ -759,12 +780,28 @@ namespace KineticEnergy.Player
             // the left stick moved.
             bool moveIsKeyboardDriven = moveAction != null && moveAction.action != null
                 && moveAction.action.activeControl != null && moveAction.action.activeControl.device is Keyboard;
-            bool aimWithMoveStick = airAiming
+
+            // E/F free-look: WASD (keyboard) and the right stick rotate the VIEW only, so
+            // keyboard WASD is routed to the free-look channel instead of the aim override.
+            // Gamepad LEFT stick keeps steering the aim in every variant.
+            bool freeLookAim = FreeLookAimActive && airAiming;
+            bool aimWithMoveStick = (airAiming && !(freeLookAim && moveIsKeyboardDriven))
                 || (groundedAimWithMouse && isAiming && moveIsKeyboardDriven);
 
             Vector2 aimStick = aimWithMoveStick && moveAction != null && moveAction.action != null
                 ? moveAction.action.ReadValue<Vector2>()
                 : Vector2.zero;
+
+            Vector2 freeLook = Vector2.zero;
+            if (freeLookAim)
+            {
+                if (moveIsKeyboardDriven && moveAction != null && moveAction.action != null)
+                {
+                    freeLook += moveAction.action.ReadValue<Vector2>();
+                }
+                freeLook += GamepadLookValue(); // right stick - freed up by the bumper dial
+            }
+            cameraOrbit.SetFreeLook(freeLookAim, freeLook);
             if (aimStick.sqrMagnitude < aimDeadzone * aimDeadzone) aimStick = Vector2.zero;
             if (groundedAimWithMouse && isAiming && moveIsKeyboardDriven) aimStick *= wasdCameraTurnMultiplier;
             cameraOrbit.SetAimStickOverride(aimWithMoveStick, aimStick,
@@ -1098,10 +1135,23 @@ namespace KineticEnergy.Player
             // the longer it keeps moving in one direction, and FLIPPING between adding and
             // removing resets the ramp - so lowering energy also lowers faster over time.
             float dialDelta = 0f;
-            float stickY = GamepadLookValue().y;
-            if (Mathf.Abs(stickY) > 0.5f)
+            if (FreeLookAimActive)
             {
-                dialDelta += Mathf.Sign(stickY) * dialStickRate * maxChargeTime * Time.unscaledDeltaTime;
+                // E/F: RB adds energy, LB removes it - the right stick is the free-look.
+                if (Gamepad.current != null)
+                {
+                    float bumpers = (Gamepad.current.rightShoulder.isPressed ? 1f : 0f)
+                        - (Gamepad.current.leftShoulder.isPressed ? 1f : 0f);
+                    if (bumpers != 0f) dialDelta += bumpers * dialStickRate * maxChargeTime * Time.unscaledDeltaTime;
+                }
+            }
+            else
+            {
+                float stickY = GamepadLookValue().y;
+                if (Mathf.Abs(stickY) > 0.5f)
+                {
+                    dialDelta += Mathf.Sign(stickY) * dialStickRate * maxChargeTime * Time.unscaledDeltaTime;
+                }
             }
             if (Mouse.current != null)
             {
@@ -1863,6 +1913,7 @@ namespace KineticEnergy.Player
             Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, damping, out int stepCount, out bool didLand);
             lastPredictedLanding = landingPoint;
             hasValidPredictedLanding = didLand;
+            lastTrajectoryStepCount = stepCount;
             lastPredictedFlightSeconds = Mathf.Max(stepCount * Time.fixedDeltaTime, 0.1f);
 
             if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)

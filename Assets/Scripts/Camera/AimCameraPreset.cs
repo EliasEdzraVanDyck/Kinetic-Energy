@@ -4,10 +4,12 @@ namespace KineticEnergy.Camera
 {
     public enum AimCameraVariant
     {
-        Baseline,      // A - frozen first person, FOV zoom (current behaviour)
-        OtsDrift,      // B - over-the-shoulder follower, FOV zoom (drift zeroed in its preset)
-        OtsDriftDolly, // C - as B, but the energy dial dollies back instead of zooming FOV
-        OtsParallax,   // D - as B plus the subtle drift orbit: isolates the motion-parallax question
+        Baseline,           // A - frozen first person, FOV zoom (current behaviour)
+        OtsParallax,        // B - over-the-shoulder with the subtle drift parallax
+        BaselinePip,        // C - A plus the landing picture-in-picture window
+        OtsParallaxPip,     // D - B plus the landing picture-in-picture window
+        FreeLookFirstPerson,// E - A, but WASD / right stick rotates the VIEW without moving the aim (energy on RB/LB)
+        FreeLookOts,        // F - the same free-look concept on the OTS camera
     }
 
     // All tuning for one midair-aim camera variant, kept as an asset so the numbers live
@@ -18,8 +20,19 @@ namespace KineticEnergy.Camera
     public class AimCameraPreset : ScriptableObject
     {
         public AimCameraVariant variant = AimCameraVariant.Baseline;
-        [Tooltip("Shown on the HUD tag and the pause-menu selector, e.g. \"OTS + drift\".")]
+        [Tooltip("Shown on the HUD tag and the pause-menu selector, e.g. \"OTS + parallax\".")]
         public string displayName = "Baseline";
+
+        // Which subsystems this variant runs - derived from the variant so the camera and
+        // the PiP owner don't each hardcode the mapping.
+        public bool UsesOverShoulder => variant == AimCameraVariant.OtsParallax
+            || variant == AimCameraVariant.OtsParallaxPip
+            || variant == AimCameraVariant.FreeLookOts;
+        public bool UsesPip => pipEnabled;
+        // E/F: WASD / right stick rotates the view only (aim untouched); the energy dial
+        // moves to RB (add) / LB (remove) because the right stick is busy free-looking.
+        public bool UsesFreeLook => variant == AimCameraVariant.FreeLookFirstPerson
+            || variant == AimCameraVariant.FreeLookOts;
 
         [Header("Over-the-shoulder placement (ignored by Baseline)")]
         [Tooltip("Metres behind the player along the launch vector (player 'radius' is ~0.5).")]
@@ -46,11 +59,19 @@ namespace KineticEnergy.Camera
         [Tooltip("Open test question: freeze the drift while look input is active. Expected OFF.")]
         public bool pauseDriftWhileAiming = false;
 
-        [Header("Dolly (Variant C)")]
-        [Tooltip("ON: the energy dial keeps FOV constant and dollies the camera back instead.")]
-        public bool dollyInsteadOfZoom = false;
-        [Tooltip("otsBack at a fully-dialled shot - eased across the energy range.")]
-        public float dollyMaxBack = 5f;
-        public float dollySmoothTime = 0.15f;
+        [Header("Free look (E/F)")]
+        [Tooltip("The view may rotate at most this many degrees from the default aim view, in any direction (a cone). Pure rotation - the camera never changes position for the free look.")]
+        public float freeLookConeAngle = 45f;
+
+        [Header("Landing picture-in-picture (C/D)")]
+        [Tooltip("ON: a second camera in the top-left corner watches the landing point from a vantage along the predicted arc, live for the whole midair aim.")]
+        public bool pipEnabled = false;
+        [Tooltip("Normalized screen rect of the PiP window (origin bottom-left; defaults sit it top-left).")]
+        public Rect pipViewport = new Rect(0.015f, 0.675f, 0.30f, 0.30f);
+        [Tooltip("Where along the predicted arc the PiP camera sits: 0 = at the player, 1 = at the landing.")]
+        [Range(0f, 0.95f)] public float pipArcFraction = 0.55f;
+        [Tooltip("Minimum distance the PiP camera keeps from the landing point - short arcs push the vantage back along the arc direction.")]
+        public float pipMinDistance = 8f;
+        public float pipFieldOfView = 50f;
     }
 }

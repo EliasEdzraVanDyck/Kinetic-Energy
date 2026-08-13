@@ -322,36 +322,93 @@ namespace KineticEnergy.EditorSetup
             const string presetFolder = "Assets/Settings/AimCameraPresets";
             if (!AssetDatabase.IsValidFolder(presetFolder)) AssetDatabase.CreateFolder("Assets/Settings", "AimCameraPresets");
 
+            // The dolly and standalone-parallax variants are SCRAPPED (direct request) -
+            // their assets go, and their letters are reused by the PiP variants below.
+            AssetDatabase.DeleteAsset(presetFolder + "/AimCameraC_OtsDriftDolly.asset");
+            AssetDatabase.DeleteAsset(presetFolder + "/AimCameraD_OtsParallax.asset");
+
             AimCameraPreset a = LoadOrCreatePreset(presetFolder + "/AimCameraA_Baseline.asset", p =>
             {
                 p.variant = AimCameraVariant.Baseline;
                 p.displayName = "Frozen first person";
             });
+
+            // B absorbs the parallax drift (subtle values - the original amplitudes read as
+            // illogical rocking during bullet-time). Placement values the user may have
+            // tuned are preserved; only the drift fields and name are (re)stamped.
             AimCameraPreset b = LoadOrCreatePreset(presetFolder + "/AimCameraB_OtsDrift.asset", p =>
             {
-                p.variant = AimCameraVariant.OtsDrift;
-                p.displayName = "OTS + drift";
-            });
-            AimCameraPreset c = LoadOrCreatePreset(presetFolder + "/AimCameraC_OtsDriftDolly.asset", p =>
-            {
-                p.variant = AimCameraVariant.OtsDriftDolly;
-                p.displayName = "OTS + drift + dolly";
-                p.dollyInsteadOfZoom = true;
-            });
-            // D isolates the motion-parallax question: identical placement to B, plus the
-            // SUBTLE drift orbit (the brief's original amplitudes read as illogical rocking
-            // during bullet-time - direct feedback).
-            AimCameraPreset d = LoadOrCreatePreset(presetFolder + "/AimCameraD_OtsParallax.asset", p =>
-            {
                 p.variant = AimCameraVariant.OtsParallax;
-                p.displayName = "OTS + parallax drift";
                 p.otsBack = 2.4f;
+                p.otsRise = 0.6f;
+                p.otsSide = 0.7f;
+            });
+            b.variant = AimCameraVariant.OtsParallax;
+            b.driftYawAmplitude = 1.5f;
+            b.driftPitchAmplitude = 0.5f;
+            b.driftPeriod = 3.5f;
+            EditorUtility.SetDirty(b);
+
+            // C = baseline aim + the landing picture-in-picture window.
+            AimCameraPreset c = LoadOrCreatePreset(presetFolder + "/AimCameraC_BaselinePip.asset", p =>
+            {
+                p.variant = AimCameraVariant.BaselinePip;
+                p.displayName = "First person + landing view";
+                p.pipEnabled = true;
+            });
+
+            // D = B (OTS + parallax) + the landing picture-in-picture window.
+            AimCameraPreset d = LoadOrCreatePreset(presetFolder + "/AimCameraD_OtsParallaxPip.asset", p =>
+            {
+                p.variant = AimCameraVariant.OtsParallaxPip;
+                p.displayName = "OTS + parallax + landing view";
+                p.pipEnabled = true;
                 p.otsRise = 0.6f;
                 p.otsSide = 0.7f;
                 p.driftYawAmplitude = 1.5f;
                 p.driftPitchAmplitude = 0.5f;
                 p.driftPeriod = 3.5f;
             });
+
+            // Direct request: the player should sit a bit closer to the screen in the OTS
+            // variants - stamp the tighter back-distance on every OTS preset.
+            b.otsBack = 1.8f;
+            d.otsBack = 1.8f;
+            EditorUtility.SetDirty(b);
+            EditorUtility.SetDirty(d);
+
+            // E = first person + FREE LOOK: WASD / right stick rotates the view without
+            // moving the aim; energy dial on RB/LB (see the preset's UsesFreeLook).
+            AimCameraPreset e = LoadOrCreatePreset(presetFolder + "/AimCameraE_FreeLookFp.asset", p =>
+            {
+                p.variant = AimCameraVariant.FreeLookFirstPerson;
+                p.displayName = "First person + free look";
+            });
+
+            // F = the same free-look concept on the OTS camera.
+            AimCameraPreset f = LoadOrCreatePreset(presetFolder + "/AimCameraF_FreeLookOts.asset", p =>
+            {
+                p.variant = AimCameraVariant.FreeLookOts;
+                p.otsBack = 1.8f;
+                p.otsRise = 0.6f;
+                p.otsSide = 0.7f;
+                p.driftYawAmplitude = 1.5f;
+                p.driftPitchAmplitude = 0.5f;
+                p.driftPeriod = 3.5f;
+            });
+
+            // Concise tester-facing names (direct request) - restamped on every run so a
+            // rename here reaches existing assets too.
+            a.displayName = "First person";
+            b.displayName = "Behind the player";
+            c.displayName = "First person + landing window";
+            d.displayName = "Behind player + landing window";
+            e.displayName = "First person + look around";
+            f.displayName = "Behind player + look around";
+            EditorUtility.SetDirty(a);
+            EditorUtility.SetDirty(c);
+            EditorUtility.SetDirty(e);
+            EditorUtility.SetDirty(f);
 
             string playerPath = PrefabFolder + "/Player.prefab";
             GameObject playerRoot = PrefabUtility.LoadPrefabContents(playerPath);
@@ -360,9 +417,11 @@ namespace KineticEnergy.EditorSetup
                 AimCameraVariantController variants = playerRoot.GetComponent<AimCameraVariantController>();
                 if (variants == null) variants = playerRoot.AddComponent<AimCameraVariantController>();
                 variants.baselinePreset = a;
-                variants.otsDriftPreset = b;
-                variants.otsDriftDollyPreset = c;
-                variants.otsParallaxPreset = d;
+                variants.otsParallaxPreset = b;
+                variants.baselinePipPreset = c;
+                variants.otsParallaxPipPreset = d;
+                variants.freeLookFirstPersonPreset = e;
+                variants.freeLookOtsPreset = f;
                 if (playerRoot.GetComponent<AimCameraLogger>() == null) playerRoot.AddComponent<AimCameraLogger>();
                 PrefabUtility.SaveAsPrefabAsset(playerRoot, playerPath);
             }
@@ -381,28 +440,48 @@ namespace KineticEnergy.EditorSetup
 
                 DestroyDirectChildIfExists(pausePanel, "CameraVariantButton");
                 DestroyDirectChildIfExists(pausePanel, "CameraVariantHint");
+                DestroyDirectChildIfExists(pausePanel, "CameraVariantEnergyNote");
 
                 Font font = FindBestFont();
                 Color accent = new Color(1f, 0.82f, 0.2f);
                 GameObject button = CreateButton("CameraVariantButton", pausePanel, "Camera: Variant A", font, accent,
-                    Vector2.zero, new Vector2(440f, 56f));
+                    Vector2.zero, new Vector2(600f, 60f));
                 RectTransform buttonRect = button.GetComponent<RectTransform>();
                 buttonRect.anchorMin = Vector2.zero;
                 buttonRect.anchorMax = Vector2.zero;
                 buttonRect.pivot = Vector2.zero;
                 buttonRect.anchoredPosition = new Vector2(24f, 24f);
                 WireButton(button, pauseController.OnCameraVariantClicked);
-                pauseController.cameraVariantLabel = button.GetComponentInChildren<Text>(true);
+                Text buttonLabel = button.GetComponentInChildren<Text>(true);
+                // Long variant names must always FIT: best-fit shrinks the font before the
+                // text can clip the button's edges.
+                buttonLabel.resizeTextForBestFit = true;
+                buttonLabel.resizeTextMinSize = 12;
+                buttonLabel.resizeTextMaxSize = 26;
+                pauseController.cameraVariantLabel = buttonLabel;
                 EditorUtility.SetDirty(pauseController);
 
+                // The controller-energy warning gets its OWN box directly above the variant
+                // button (filled/emptied at runtime by PauseController).
+                Text energyNote = CreateText("CameraVariantEnergyNote", pausePanel, "",
+                    font, 20, Vector2.zero, new Vector2(640f, 30f));
+                RectTransform energyNoteRect = energyNote.rectTransform;
+                energyNoteRect.anchorMin = Vector2.zero;
+                energyNoteRect.anchorMax = Vector2.zero;
+                energyNoteRect.pivot = Vector2.zero;
+                energyNoteRect.anchoredPosition = new Vector2(24f, 84f);
+                energyNote.alignment = TextAnchor.LowerLeft;
+                energyNote.color = accent;
+                pauseController.cameraVariantEnergyNote = energyNote;
+
                 Text hint = CreateText("CameraVariantHint", pausePanel,
-                    "V / D-pad Right switches the aim camera variant. Q / Right Stick Click swaps the shoulder.\nThe feedback form asks which variant you preferred.",
-                    font, 20, Vector2.zero, new Vector2(760f, 64f));
+                    "V / D-pad Right: next camera variant. C / D-pad Left: previous. Q / Right Stick Click: swap shoulder.\nThe feedback form asks which variant you preferred.",
+                    font, 20, Vector2.zero, new Vector2(820f, 64f));
                 RectTransform hintRect = hint.rectTransform;
                 hintRect.anchorMin = Vector2.zero;
                 hintRect.anchorMax = Vector2.zero;
                 hintRect.pivot = Vector2.zero;
-                hintRect.anchoredPosition = new Vector2(24f, 88f);
+                hintRect.anchoredPosition = new Vector2(24f, 122f);
                 hint.alignment = TextAnchor.LowerLeft;
                 hint.color = new Color(1f, 1f, 1f, 0.75f);
 
@@ -455,6 +534,39 @@ namespace KineticEnergy.EditorSetup
                 SaveOpenScene(scenePath);
                 Debug.Log($"KineticEnergySetup: HUD meters added to {scenePath} OK");
             }
+        }
+
+        // Wires the top-left ControlsHintLabel into PauseController so pausing hides it
+        // (the "open the pause menu" hint is pointless while the menu is open). Pure wiring.
+        [MenuItem("Tools/Kinetic Energy/Wire Controls Hint To Pause")]
+        public static void WireControlsHintToPause()
+        {
+            string pausePath = PrefabFolder + "/PauseSystem.prefab";
+            GameObject pauseRoot = PrefabUtility.LoadPrefabContents(pausePath);
+            try
+            {
+                PauseController pauseController = pauseRoot.GetComponentInChildren<PauseController>(true);
+                Transform hint = FindChildRecursive(pauseRoot.transform, "ControlsHintLabel");
+                if (pauseController == null || hint == null)
+                {
+                    throw new Exception("KineticEnergySetup: PauseSystem.prefab is missing PauseController or ControlsHintLabel.");
+                }
+                pauseController.controlsHintLabel = hint.gameObject;
+                EditorUtility.SetDirty(pauseController);
+                PrefabUtility.SaveAsPrefabAsset(pauseRoot, pausePath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(pauseRoot); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: controls hint wired to pause OK");
+        }
+
+        static Transform FindChildRecursive(Transform root, string childName)
+        {
+            foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (child.name == childName) return child;
+            }
+            return null;
         }
 
         // ADDITIVE: puts a Resume button at the TOP of the pause menu's button column and

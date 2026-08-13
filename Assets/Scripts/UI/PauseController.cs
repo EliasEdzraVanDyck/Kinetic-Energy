@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
@@ -22,6 +23,15 @@ namespace KineticEnergy.UI
         public GameObject firstControlsButton;
         public GameObject firstScenesButton;
 
+        [Header("Corner Hint (wired by setup)")]
+        // The top-left "Open the pause menu ..." label - pointless while the menu is
+        // actually open, so pausing hides it and resuming brings it back.
+        public GameObject controlsHintLabel;
+        [Tooltip("Scene-local hint objects (found by name at Start) that also hide while the menu is open - e.g. QuarryNew's QuarryIntroHud.")]
+        public string[] sceneHintObjectNames = { "QuarryIntroHud" };
+
+        readonly List<GameObject> hintObjects = new List<GameObject>();
+
         [Header("Controls Text")]
         // Content is no longer static - KineticCubeController writes into this directly
         // (UpdateControlsText) whenever the active control scheme changes, so the panel always
@@ -37,6 +47,9 @@ namespace KineticEnergy.UI
         // (blocked while an aim is open, same as the V hotkey), the label names the active
         // one so testers who never find the hotkey can still switch.
         public Text cameraVariantLabel;
+        // Its own text box ABOVE the variant button: the controller-energy warning for the
+        // free-look variants (empty otherwise).
+        public Text cameraVariantEnergyNote;
 
         [Header("Win")]
         // Hidden by default, inside PausePanel - The Gauntlet's finish line
@@ -62,6 +75,24 @@ namespace KineticEnergy.UI
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
             winLabel?.gameObject.SetActive(false);
+
+            // Everything that should vanish while the menu is open: the prefab's wired
+            // corner hint plus any scene-local hint canvases found by name.
+            hintObjects.Clear();
+            if (controlsHintLabel != null) hintObjects.Add(controlsHintLabel);
+            foreach (string hintName in sceneHintObjectNames)
+            {
+                GameObject sceneHint = GameObject.Find(hintName);
+                if (sceneHint != null) hintObjects.Add(sceneHint);
+            }
+        }
+
+        void SetHintsVisible(bool visible)
+        {
+            foreach (GameObject hint in hintObjects)
+            {
+                if (hint != null) hint.SetActive(visible);
+            }
         }
 
         // The finish line's win state - the ordinary pause screen with the win label showing.
@@ -98,6 +129,7 @@ namespace KineticEnergy.UI
             Time.timeScale = 0f;
             controlsPanel?.SetActive(false);
             pausePanel?.SetActive(true);
+            SetHintsVisible(false);
             RefreshCameraVariantLabel();
             Select(firstPauseButton);
         }
@@ -109,6 +141,7 @@ namespace KineticEnergy.UI
             pausePanel?.SetActive(false);
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
+            SetHintsVisible(true);
             // Un-pausing after winning keeps playing in the finished level, which is fine - but
             // the win label shouldn't stick around on the NEXT pause after that.
             winLabel?.gameObject.SetActive(false);
@@ -154,9 +187,15 @@ namespace KineticEnergy.UI
 
         void RefreshCameraVariantLabel()
         {
-            if (cameraVariantLabel == null) return;
             var variants = FindAnyObjectByType<KineticEnergy.Camera.AimCameraVariantController>(FindObjectsInactive.Include);
-            cameraVariantLabel.text = variants != null ? "Camera: " + variants.CurrentLabel : "Camera: -";
+            if (cameraVariantLabel != null)
+            {
+                cameraVariantLabel.text = variants != null ? "Camera: " + variants.CurrentLabel : "Camera: -";
+            }
+            if (cameraVariantEnergyNote != null)
+            {
+                cameraVariantEnergyNote.text = variants != null ? variants.EnergyControlsNote : "";
+            }
         }
 
         public void OnScenesClicked()
