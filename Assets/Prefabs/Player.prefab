@@ -3386,6 +3386,8 @@ GameObject:
   - component: {fileID: 208583073993745394}
   - component: {fileID: 1435845940050071036}
   - component: {fileID: 1834731943432722525}
+  - component: {fileID: 706653064994577510}
+  - component: {fileID: 8734136292897704757}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -3478,12 +3480,16 @@ MonoBehaviour:
   maxLaunchDamping: 1
   downLaunchDamping: 0.2
   plainFallDamping: 0.2
+  zeroDampingMatchedLaunches: 0
+  zeroDampingMinLaunchForce: 0
+  zeroDampingMaxLaunchForce: 0
   startingEnergyFraction: 0.2
   energyCostPerFullCharge: 1
   minEnergyReserve: 0.05
   chargeAccumulationRate: 0.3
   chargeAcceleration: 1
   infiniteEnergy: 0
+  gradualLaunchDrain: 0
   energyMeter: {fileID: 0}
   groundedRefundMultiplier: 1
   midairRefundBaseMultiplier: 1
@@ -3506,9 +3512,6 @@ MonoBehaviour:
   cameraTransform: {fileID: 0}
   cameraOrbit: {fileID: 0}
   aimArrow: {fileID: 8930987958220783014}
-  stickAimForwardAngle: 30
-  stickAimForwardNeutralAngle: 5
-  stickAimDeadzone: 0.9
   dialStickRate: 0.5
   dialWheelStep: 0.05
   maxPredictionSteps: 3000
@@ -3524,6 +3527,7 @@ MonoBehaviour:
   fallSpeedUpStart: 0.01
   fallSpeedUpEnd: 0.5
   maxLaunchesPerFlight: 2
+  wallCrashLaunchAllowance: 0
   launchGraceDuration: 0.15
   minLaunchClearDistance: 2
   flatGroundStickThreshold: 0.9
@@ -3538,11 +3542,10 @@ MonoBehaviour:
   upLaunchAction: {fileID: -6809837143192747341, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   groundPoundAction: {fileID: -9015255284879236783, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   cancelChargeAction: {fileID: -411457551217665012, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  trailToggleAction: {fileID: 8470061286862070062, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   airAimAction: {fileID: -2791407109934888543, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   airLaunchAction: {fileID: 3433367232933704153, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  controlsHintLabel: {fileID: 0}
   controlsPanelBody: {fileID: 0}
+  enemyHitControlLossSeconds: 0.35
 --- !u!114 &1834731943432722525
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3566,6 +3569,36 @@ MonoBehaviour:
   fallResetY: -30
   moveAction: {fileID: -1680190386980627800, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   cameraTransform: {fileID: 0}
+  movementInputEnabled: 0
+--- !u!114 &706653064994577510
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4034230215606629242}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cdcb94ace2ae9b547b3b6ef14f45f06b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Camera.AimCameraVariantController
+  currentVariant: 0
+  baselinePreset: {fileID: 11400000, guid: 49e04780ce39a5741bcb36e814d25136, type: 2}
+  otsDriftPreset: {fileID: 11400000, guid: 550486b2a6af51c4d890da48b008c9f0, type: 2}
+  otsDriftDollyPreset: {fileID: 11400000, guid: 8ba9695900822e8429c423cbfa2fb627, type: 2}
+  otsParallaxPreset: {fileID: 11400000, guid: 75e6053fb35defc4cbf101f8c3e47ab7, type: 2}
+--- !u!114 &8734136292897704757
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4034230215606629242}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5efca447e94a4be49894a76f40bc6b31, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Player.AimCameraLogger
 --- !u!1 &4044049278453940713
 GameObject:
   m_ObjectHideFlags: 0

@@ -32,6 +32,12 @@ namespace KineticEnergy.UI
         [Tooltip("Opened in the system browser by the pause menu's Feedback button.")]
         public string feedbackFormUrl = "https://forms.gle/c7TVCoLzkktTWJFc7";
 
+        [Header("Aim Camera Variant (wired by setup)")]
+        // The pause menu's variant-selector button label - the button cycles A -> B -> C
+        // (blocked while an aim is open, same as the V hotkey), the label names the active
+        // one so testers who never find the hotkey can still switch.
+        public Text cameraVariantLabel;
+
         [Header("Win")]
         // Hidden by default, inside PausePanel - The Gauntlet's finish line
         // (GauntletFinishLine) shows it via ShowWin(). Lives here rather than on its own
@@ -92,6 +98,7 @@ namespace KineticEnergy.UI
             Time.timeScale = 0f;
             controlsPanel?.SetActive(false);
             pausePanel?.SetActive(true);
+            RefreshCameraVariantLabel();
             Select(firstPauseButton);
         }
 
@@ -133,6 +140,23 @@ namespace KineticEnergy.UI
         public void OnFeedbackClicked()
         {
             Application.OpenURL(feedbackFormUrl);
+        }
+
+        // Cycles the aim-camera variant (A -> B -> C) from the pause menu. The variant
+        // controller itself refuses while an aim window is open.
+        public void OnCameraVariantClicked()
+        {
+            var variants = FindAnyObjectByType<KineticEnergy.Camera.AimCameraVariantController>(FindObjectsInactive.Include);
+            if (variants == null) return;
+            variants.CycleVariant();
+            RefreshCameraVariantLabel();
+        }
+
+        void RefreshCameraVariantLabel()
+        {
+            if (cameraVariantLabel == null) return;
+            var variants = FindAnyObjectByType<KineticEnergy.Camera.AimCameraVariantController>(FindObjectsInactive.Include);
+            cameraVariantLabel.text = variants != null ? "Camera: " + variants.CurrentLabel : "Camera: -";
         }
 
         public void OnScenesClicked()

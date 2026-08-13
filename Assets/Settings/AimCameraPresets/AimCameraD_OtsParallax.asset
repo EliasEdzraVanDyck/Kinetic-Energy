@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8d0d3558fa4b4b743a05a189e228221d, type: 3}
+  m_Name: AimCameraD_OtsParallax
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Camera.AimCameraPreset
+  variant: 3
+  displayName: OTS + parallax drift
+  otsBack: 2.4
+  otsRise: 0.6
+  otsSide: 0.7
+  camCollisionRadius: 0.25
+  blendInTime: 0.12
+  driftYawAmplitude: 1.5
+  driftPitchAmplitude: 0.5
+  driftPeriod: 3.5
+  driftPhaseOffset: 90
+  driftRampIn: 0.2
+  driftRampOut: 0.1
+  pauseDriftWhileAiming: 0
+  dollyInsteadOfZoom: 0
+  dollyMaxBack: 5
+  dollySmoothTime: 0.15

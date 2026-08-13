@@ -310,6 +310,120 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: web build complete OK -> {options.locationPathName} ({report.summary.totalSize / (1024 * 1024)} MB, scenes: {string.Join(", ", scenes)})");
         }
 
+        // ==================== Aim camera variants (depth-perception playtest) ====================
+
+        // ADDITIVE: creates the three AimCameraPreset assets (existing assets keep their
+        // tuned values), puts the variant controller + logger on the Player prefab, and adds
+        // the pause menu's selector button + hint line (bottom-left corner of PausePanel, so
+        // the existing button column is untouched).
+        [MenuItem("Tools/Kinetic Energy/Setup Aim Camera Variants")]
+        public static void SetupAimCameraVariants()
+        {
+            const string presetFolder = "Assets/Settings/AimCameraPresets";
+            if (!AssetDatabase.IsValidFolder(presetFolder)) AssetDatabase.CreateFolder("Assets/Settings", "AimCameraPresets");
+
+            AimCameraPreset a = LoadOrCreatePreset(presetFolder + "/AimCameraA_Baseline.asset", p =>
+            {
+                p.variant = AimCameraVariant.Baseline;
+                p.displayName = "Frozen first person";
+            });
+            AimCameraPreset b = LoadOrCreatePreset(presetFolder + "/AimCameraB_OtsDrift.asset", p =>
+            {
+                p.variant = AimCameraVariant.OtsDrift;
+                p.displayName = "OTS + drift";
+            });
+            AimCameraPreset c = LoadOrCreatePreset(presetFolder + "/AimCameraC_OtsDriftDolly.asset", p =>
+            {
+                p.variant = AimCameraVariant.OtsDriftDolly;
+                p.displayName = "OTS + drift + dolly";
+                p.dollyInsteadOfZoom = true;
+            });
+            // D isolates the motion-parallax question: identical placement to B, plus the
+            // SUBTLE drift orbit (the brief's original amplitudes read as illogical rocking
+            // during bullet-time - direct feedback).
+            AimCameraPreset d = LoadOrCreatePreset(presetFolder + "/AimCameraD_OtsParallax.asset", p =>
+            {
+                p.variant = AimCameraVariant.OtsParallax;
+                p.displayName = "OTS + parallax drift";
+                p.otsBack = 2.4f;
+                p.otsRise = 0.6f;
+                p.otsSide = 0.7f;
+                p.driftYawAmplitude = 1.5f;
+                p.driftPitchAmplitude = 0.5f;
+                p.driftPeriod = 3.5f;
+            });
+
+            string playerPath = PrefabFolder + "/Player.prefab";
+            GameObject playerRoot = PrefabUtility.LoadPrefabContents(playerPath);
+            try
+            {
+                AimCameraVariantController variants = playerRoot.GetComponent<AimCameraVariantController>();
+                if (variants == null) variants = playerRoot.AddComponent<AimCameraVariantController>();
+                variants.baselinePreset = a;
+                variants.otsDriftPreset = b;
+                variants.otsDriftDollyPreset = c;
+                variants.otsParallaxPreset = d;
+                if (playerRoot.GetComponent<AimCameraLogger>() == null) playerRoot.AddComponent<AimCameraLogger>();
+                PrefabUtility.SaveAsPrefabAsset(playerRoot, playerPath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(playerRoot); }
+
+            string pausePath = PrefabFolder + "/PauseSystem.prefab";
+            GameObject pauseRoot = PrefabUtility.LoadPrefabContents(pausePath);
+            try
+            {
+                Transform pausePanel = pauseRoot.transform.Find("PauseCanvas/PausePanel");
+                PauseController pauseController = pauseRoot.GetComponentInChildren<PauseController>(true);
+                if (pausePanel == null || pauseController == null)
+                {
+                    throw new Exception("KineticEnergySetup: PauseSystem.prefab is missing PauseCanvas/PausePanel or PauseController.");
+                }
+
+                DestroyDirectChildIfExists(pausePanel, "CameraVariantButton");
+                DestroyDirectChildIfExists(pausePanel, "CameraVariantHint");
+
+                Font font = FindBestFont();
+                Color accent = new Color(1f, 0.82f, 0.2f);
+                GameObject button = CreateButton("CameraVariantButton", pausePanel, "Camera: Variant A", font, accent,
+                    Vector2.zero, new Vector2(440f, 56f));
+                RectTransform buttonRect = button.GetComponent<RectTransform>();
+                buttonRect.anchorMin = Vector2.zero;
+                buttonRect.anchorMax = Vector2.zero;
+                buttonRect.pivot = Vector2.zero;
+                buttonRect.anchoredPosition = new Vector2(24f, 24f);
+                WireButton(button, pauseController.OnCameraVariantClicked);
+                pauseController.cameraVariantLabel = button.GetComponentInChildren<Text>(true);
+                EditorUtility.SetDirty(pauseController);
+
+                Text hint = CreateText("CameraVariantHint", pausePanel,
+                    "V / D-pad Right switches the aim camera variant. Q / Right Stick Click swaps the shoulder.\nThe feedback form asks which variant you preferred.",
+                    font, 20, Vector2.zero, new Vector2(760f, 64f));
+                RectTransform hintRect = hint.rectTransform;
+                hintRect.anchorMin = Vector2.zero;
+                hintRect.anchorMax = Vector2.zero;
+                hintRect.pivot = Vector2.zero;
+                hintRect.anchoredPosition = new Vector2(24f, 88f);
+                hint.alignment = TextAnchor.LowerLeft;
+                hint.color = new Color(1f, 1f, 1f, 0.75f);
+
+                PrefabUtility.SaveAsPrefabAsset(pauseRoot, pausePath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(pauseRoot); }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: aim camera variants setup complete OK");
+        }
+
+        static AimCameraPreset LoadOrCreatePreset(string path, Action<AimCameraPreset> initialize)
+        {
+            AimCameraPreset preset = AssetDatabase.LoadAssetAtPath<AimCameraPreset>(path);
+            if (preset != null) return preset; // existing asset keeps its tuned values
+            preset = ScriptableObject.CreateInstance<AimCameraPreset>();
+            initialize(preset);
+            AssetDatabase.CreateAsset(preset, path);
+            return preset;
+        }
+
         static void UpdateBuildSettings()
         {
             EditorBuildSettings.scenes = new[]

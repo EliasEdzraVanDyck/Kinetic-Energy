@@ -49,11 +49,16 @@ namespace KineticEnergy.Camera
         // Vertical flights (up-charge / pound) use their own slightly tighter value.
         bool launchInFlight;
         bool launchIsVertical;
+        float launchIntensity = 1f;
 
-        public void SetLaunchInFlight(bool inFlight, bool vertical)
+        [Tooltip("How much LONGER the launch-follow smoothing runs for a zero-charge launch (1 = no stretch). Weak launches are slow, so without this their camera lag is over before it reads; full-charge launches always use the base values.")]
+        public float shortLaunchLagMultiplier = 2f;
+
+        public void SetLaunchInFlight(bool inFlight, bool vertical, float intensity01)
         {
             launchInFlight = inFlight;
             launchIsVertical = vertical;
+            launchIntensity = Mathf.Clamp01(intensity01);
         }
 
         [Header("Auto Recenter")]
@@ -179,6 +184,35 @@ namespace KineticEnergy.Camera
         UnityEngine.Camera cam;
         bool firstPerson;
 
+        // ---------- Aim-camera variant support (the depth-perception playtest) ----------
+        // Baseline (A) keeps the frozen first-person aim EXACTLY as it always was; the OTS
+        // variants (B/C) position the camera over-the-shoulder behind the launch vector
+        // with a slow drift orbit for motion parallax, looking at the predicted landing
+        // point. Which one is active comes from AimCameraVariantController via the preset.
+        AimCameraPreset aimPreset;
+        float aimZoomFraction;   // last energy-dial fraction fed to SetAimZoom
+        float currentOtsBack;    // eased back-distance (the Variant C dolly moves this)
+        float otsBackVelocity;
+        float driftClock;        // unscaled seconds into the drift ellipse
+        float driftAmpFactor;    // 0..1 ramp of the drift amplitude
+
+        // Which shoulder the OTS offset sits over: +1 = right (player appears left of
+        // centre), -1 = left. Toggled by Q / Right Stick Click (AimCameraVariantController),
+        // works mid-aim, remembered between aims - the standard shooter shoulder swap.
+        int aimShoulderSign = 1;
+
+        public void ToggleAimShoulder()
+        {
+            aimShoulderSign = -aimShoulderSign;
+        }
+
+        public void SetAimCameraPreset(AimCameraPreset preset)
+        {
+            aimPreset = preset;
+        }
+
+        bool OtsAimActive => firstPerson && aimPreset != null && aimPreset.variant != AimCameraVariant.Baseline;
+
         // World-space direction this camera is currently looking - the midair aim fires
         // exactly along this, so the shot always goes exactly where the first-person view points.
         public Vector3 AimForward => Quaternion.Euler(pitch, yaw, 0f) * Vector3.forward;
@@ -210,7 +244,16 @@ namespace KineticEnergy.Camera
         {
             if (firstPerson != enabled) modeSwitching = true; // near-instant transition, see modeSwitchSmoothTime
             firstPerson = enabled;
-            if (!enabled)
+            if (enabled)
+            {
+                // Fresh aim window: drift starts from rest and ramps in; the dolly starts
+                // at the near OTS distance.
+                driftClock = 0f;
+                driftAmpFactor = 0f;
+                currentOtsBack = aimPreset != null ? aimPreset.otsBack : 1.4f;
+                otsBackVelocity = 0f;
+            }
+            else
             {
                 SetAimZoom(0f);
                 viewAnglesSeeded = false;
@@ -221,7 +264,11 @@ namespace KineticEnergy.Camera
         {
             if (cam == null) cam = GetComponent<UnityEngine.Camera>();
             if (cam == null) return;
-            cam.fieldOfView = Mathf.Lerp(normalFov, maxZoomFov, Mathf.Clamp01(chargeFraction01));
+            aimZoomFraction = Mathf.Clamp01(chargeFraction01);
+            // Variant C: FOV stays CONSTANT for the whole aim - the energy dial dollies the
+            // camera backward instead (see the OTS position math). A and B keep the zoom.
+            bool dolly = aimPreset != null && aimPreset.dollyInsteadOfZoom;
+            cam.fieldOfView = dolly ? normalFov : Mathf.Lerp(normalFov, maxZoomFov, aimZoomFraction);
         }
 
         [Header("Wall Occlusion")]
@@ -365,6 +412,15 @@ namespace KineticEnergy.Camera
             // ever happens while the player isn't already telling the camera what to do.
             if (look.sqrMagnitude > 0.0001f) recentering = false;
 
+            // FOV/sensitivity compensation: without this the aim zoom silently changed the
+            // aim feel - the same mouse motion sweeps the same WORLD angle at 20 degrees FOV
+            // as at 60, which covers ~3x the SCREEN, so zoomed-in aiming was ~3x twitchier.
+            // Scaling by tan(fov/2) keeps screen-space sensitivity constant across the zoom.
+            // Exactly 1 whenever the FOV is at its normal value, so nothing else changes.
+            float fovSensitivityScale = cam != null
+                ? Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) / Mathf.Tan(normalFov * 0.5f * Mathf.Deg2Rad)
+                : 1f;
+
             if (recentering)
             {
                 yaw = Mathf.MoveTowardsAngle(yaw, recenterTargetYaw, recenterSpeed * dt);
@@ -372,9 +428,9 @@ namespace KineticEnergy.Camera
             }
             else
             {
-                yaw += look.x * rotationSpeed * fineAimScale * dt;
+                yaw += look.x * rotationSpeed * fineAimScale * fovSensitivityScale * dt;
             }
-            float pitchDelta = (invertY ? look.y : -look.y) * rotationSpeed * fineAimScale * dt;
+            float pitchDelta = (invertY ? look.y : -look.y) * rotationSpeed * fineAimScale * fovSensitivityScale * dt;
             pitch = Mathf.Clamp(pitch + pitchDelta,
                 firstPerson ? firstPersonMinPitch : minPitch,
                 firstPerson ? firstPersonMaxPitch : maxPitch);
@@ -390,23 +446,36 @@ namespace KineticEnergy.Camera
             Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
             Vector3 focusPoint = target.position + Vector3.up * height;
 
-            // First person: the player's own centre pushed forward past its front face - NOT
-            // the focus point, which carries the third-person `height` lift and was what put
-            // the first-person view up at a raised Y. Third person keeps its ordinary orbit.
-            Vector3 desiredPosition = firstPerson
-                ? target.position + rotation * Vector3.forward * firstPersonForwardOffset
-                : focusPoint - rotation * Vector3.forward * distance;
+            // First person (Baseline): the player's own centre pushed forward past its front
+            // face - NOT the focus point, which carries the third-person `height` lift.
+            // OTS variants: over-the-shoulder behind the launch vector, with drift parallax.
+            // Third person keeps its ordinary orbit.
+            Vector3 desiredPosition;
+            if (OtsAimActive)
+            {
+                desiredPosition = OtsDesiredPosition(look);
+            }
+            else if (firstPerson)
+            {
+                desiredPosition = target.position + rotation * Vector3.forward * firstPersonForwardOffset;
+            }
+            else
+            {
+                desiredPosition = focusPoint - rotation * Vector3.forward * distance;
+            }
 
             // A mode switch uses the much shorter smooth time until the camera has essentially
             // arrived - so first <-> third person reads as a snap without the hard teleport
             // (and without the leftover SmoothDamp velocity that a teleport would keep).
+            // Entering an OTS aim instead BLENDS over the preset's blendInTime (never snaps).
             // Priority: an in-flight launch's lazy trailing beats everything (including the
             // mode-switch snap - firing out of the midair aim IS a mode switch, and the snap
             // was eating the launch lag there); the snap still covers aim open/cancel.
             // Engaging the lag is INSTANT (the launch moment should trail immediately), but
             // releasing it EASES over followLagRecoverySeconds - snapping straight back to
             // the tight follow made the camera lunge at the player the frame a flight ended.
-            float activeLaunchFollow = launchIsVertical ? verticalLaunchFollowSmoothTime : launchFollowSmoothTime;
+            float activeLaunchFollow = (launchIsVertical ? verticalLaunchFollowSmoothTime : launchFollowSmoothTime)
+                * Mathf.Lerp(shortLaunchLagMultiplier, 1f, launchIntensity);
             float targetFollow = launchInFlight && !firstPerson ? activeLaunchFollow : positionSmoothTime;
             if (targetFollow > followSmoothTime)
             {
@@ -420,7 +489,7 @@ namespace KineticEnergy.Camera
 
             float smoothTime;
             if (launchInFlight && !firstPerson) smoothTime = followSmoothTime;
-            else if (modeSwitching) smoothTime = modeSwitchSmoothTime;
+            else if (modeSwitching) smoothTime = OtsAimActive ? aimPreset.blendInTime : modeSwitchSmoothTime;
             else smoothTime = followSmoothTime;
             // Explicit UNSCALED delta time: SmoothDamp's default is Time.deltaTime, which the
             // in-flight game-speed-up inflates 2-3x - the camera was catching up that much
@@ -495,6 +564,59 @@ namespace KineticEnergy.Camera
             // switching into first person still needs to run every frame, or a wall occluded the
             // instant before RMB was pressed would stay disabled for the entire aim.
             UpdateWallOcclusion(focusPoint);
+        }
+
+        // Over-the-shoulder aim placement (Variants B/C). The camera sits behind the player
+        // along the launch vector, slightly raised and offset sideways, with a slow drift
+        // ellipse layered on the OFFSET only - the look-target stays nailed to the landing
+        // point (the rotation code), so near geometry slides against far geometry: motion
+        // parallax, the entire point. Variant C additionally dollies otsBack out with the
+        // energy dial (FOV constant - see SetAimZoom).
+        Vector3 OtsDesiredPosition(Vector2 look)
+        {
+            float udt = Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime);
+
+            // Drift clock and amplitude ramp - UNSCALED, or the 20% bullet-time would turn
+            // the 2.6 s ellipse into 13 s and it would read as a stuck camera.
+            bool holdDrift = aimPreset.pauseDriftWhileAiming && look.sqrMagnitude > 0.0001f;
+            if (!holdDrift) driftClock += udt;
+            driftAmpFactor = Mathf.MoveTowards(driftAmpFactor, 1f, udt / Mathf.Max(aimPreset.driftRampIn, 0.01f));
+
+            float phase = driftClock / Mathf.Max(aimPreset.driftPeriod, 0.01f) * Mathf.PI * 2f;
+            float driftYaw = Mathf.Sin(phase) * aimPreset.driftYawAmplitude * driftAmpFactor;
+            float driftPitch = Mathf.Sin(phase + aimPreset.driftPhaseOffset * Mathf.Deg2Rad)
+                * aimPreset.driftPitchAmplitude * driftAmpFactor;
+
+            // Variant C dolly: the dial eases the back-distance out; B keeps it fixed.
+            float targetBack = aimPreset.dollyInsteadOfZoom
+                ? Mathf.Lerp(aimPreset.otsBack, aimPreset.dollyMaxBack, Mathf.SmoothStep(0f, 1f, aimZoomFraction))
+                : aimPreset.otsBack;
+            currentOtsBack = Mathf.SmoothDamp(currentOtsBack, targetBack, ref otsBackVelocity,
+                aimPreset.dollySmoothTime, Mathf.Infinity, udt);
+
+            // Position derives from the LAUNCH VECTOR (yaw/pitch, which input steers) with
+            // the drift angles applied to the offset direction only.
+            Quaternion offsetRotation = Quaternion.Euler(pitch + driftPitch, yaw + driftYaw, 0f);
+            Vector3 desired = target.position
+                - offsetRotation * Vector3.forward * currentOtsBack
+                + Vector3.up * aimPreset.otsRise
+                + offsetRotation * Vector3.right * (aimPreset.otsSide * aimShoulderSign);
+
+            // Clearance: a camera clipping into a wall or perch during aim destroys the
+            // depth read outright. Spherecast player -> desired, pull in on any hit that
+            // isn't the player itself.
+            Vector3 toCamera = desired - target.position;
+            float span = toCamera.magnitude;
+            if (span > 0.001f && Physics.SphereCast(target.position, aimPreset.camCollisionRadius,
+                toCamera / span, out RaycastHit hit, span, occlusionMask, QueryTriggerInteraction.Ignore))
+            {
+                bool isPlayer = hit.collider.transform == target || hit.collider.transform.IsChildOf(target);
+                if (!isPlayer)
+                {
+                    desired = target.position + toCamera / span * Mathf.Max(hit.distance - 0.05f, 0.3f);
+                }
+            }
+            return desired;
         }
 
         // Hides any renderer whose collider sits directly between the camera and the player,

@@ -318,6 +318,7 @@ namespace KineticEnergy.Player
         bool hasLaunched;
         bool currentFlightIsDownward; // slams are EXPECTED to instantly re-strike their own surface - bypasses the crash guards
         bool currentFlightIsVertical; // up-charge or pound - the camera trails these with its tighter vertical smoothing
+        float currentFlightIntensity; // charge fraction of the launch - weak launches get extra camera lag time
         bool exactFlightNoNudge;      // a midair-aimed launch flies the predicted line exactly - the stick must not bend it
         float launchGraceTimer;
         Vector3 launchStartPosition;
@@ -421,6 +422,13 @@ namespace KineticEnergy.Player
         public event System.Action MidairAimOpened;
         public event System.Action SlowdownDepleted;
         public event System.Action LaunchFired;
+        // Aim-camera playtest instrumentation (AimCameraLogger): fired carries the energy
+        // fraction and the predicted landing point; released covers every no-fire close
+        // (manual release, grounded touch, enemy hit); crash reports the actual stop spot.
+        public event System.Action<float, UnityEngine.Vector3> MidairAimFired;
+        public event System.Action MidairAimReleased;
+        public event System.Action<UnityEngine.Vector3> CrashRegistered;
+        bool suppressAimReleasedEvent; // the fire path closes the aim without a "released"
 
         // Split in two because the two things the free-move component can do carry very
         // different risk. Directly SETTING velocity (walking) must be blocked for a launch's
@@ -754,7 +762,7 @@ namespace KineticEnergy.Player
             // Launch flights use the lazier follow smoothing - the camera visibly trails the
             // launch for a moment instead of being glued to it. Vertical flights report
             // themselves so the camera can use its slightly tighter vertical value.
-            cameraOrbit.SetLaunchInFlight(hasLaunched, currentFlightIsVertical);
+            cameraOrbit.SetLaunchInFlight(hasLaunched, currentFlightIsVertical, currentFlightIntensity);
 
             // First-person midair aim looks at the cursor at the end of the dotted line.
             bool framingAim = !isGrounded && hasValidPredictedLanding && airAiming;
@@ -1113,6 +1121,8 @@ namespace KineticEnergy.Player
                 chargeTime = fireFraction * maxChargeTime; // pay exactly for what fires
                 QueueLaunch(direction, force, damping);
                 exactFlightNoNudge = true; // the shot follows the predicted line exactly
+                MidairAimFired?.Invoke(fireFraction, lastPredictedLanding);
+                suppressAimReleasedEvent = true;
                 CancelAirAim();
                 // Start the launch trailing from the third-person orbit slot, exactly like a
                 // grounded launch - see the camera method's own comment.
@@ -1138,6 +1148,11 @@ namespace KineticEnergy.Player
             landingPreview?.SetVisible(false);
             cameraOrbit?.SetFirstPersonMode(false);
             cameraOrbit?.SetAimZoom(0f);
+
+            // Every no-fire close counts as "released" for the aim-camera logging; the
+            // fire path suppresses this (it reports MidairAimFired instead).
+            if (suppressAimReleasedEvent) suppressAimReleasedEvent = false;
+            else MidairAimReleased?.Invoke();
         }
 
         // The pound's boost EXTRA (the plain wash was already paid at the crash) lands the
@@ -1384,6 +1399,10 @@ namespace KineticEnergy.Player
             // Vertical either way (up-charge or pound) - the camera trails these with its
             // slightly tighter vertical smoothing. Same threshold as the slam check, mirrored.
             currentFlightIsVertical = Mathf.Abs(Vector3.Dot(direction.normalized, Vector3.up)) >= slamDownwardThreshold;
+            // Weak launches are SLOW, so a fixed smoothing time makes their camera lag
+            // near-invisible - the camera stretches its lag time for them (see
+            // ThirdPersonOrbitCamera.shortLaunchLagMultiplier).
+            currentFlightIntensity = ChargeFraction();
 
             // Deduct what was ACTUALLY spendable, not the theoretical charge cost - the
             // refund can then never fabricate energy a nearly-empty tank didn't really spend.
@@ -1768,6 +1787,8 @@ namespace KineticEnergy.Player
 
             // Variant A: the aim budget refills on every crash.
             if (slowdownMode == SlowdownMode.AimBudget) aimBudgetRemaining = aimBudgetSeconds;
+
+            CrashRegistered?.Invoke(transform.position);
         }
 
         // The refund rules: EnergyEconomy1's per-launch economy for ordinary crashes, and
