@@ -50,6 +50,9 @@ namespace KineticEnergy.UI
         // Its own text box ABOVE the variant button: the controller-energy warning for the
         // free-look variants (empty otherwise).
         public Text cameraVariantEnergyNote;
+        // The key-hint line - hidden together with the button in scenes where camera
+        // variant switching is locked off (the economy test scene).
+        public GameObject cameraVariantHint;
 
         [Header("Win")]
         // Hidden by default, inside PausePanel - The Gauntlet's finish line
@@ -188,13 +191,27 @@ namespace KineticEnergy.UI
         void RefreshCameraVariantLabel()
         {
             var variants = FindAnyObjectByType<KineticEnergy.Camera.AimCameraVariantController>(FindObjectsInactive.Include);
+            bool switchingAvailable = variants != null && variants.variantSwitchingEnabled;
+
+            // Camera-locked scenes (the economy test) hide the whole selector block.
+            if (cameraVariantLabel != null && cameraVariantLabel.transform.parent != null)
+            {
+                cameraVariantLabel.transform.parent.gameObject.SetActive(switchingAvailable);
+            }
+            cameraVariantHint?.SetActive(switchingAvailable);
+            if (!switchingAvailable)
+            {
+                if (cameraVariantEnergyNote != null) cameraVariantEnergyNote.text = "";
+                return;
+            }
+
             if (cameraVariantLabel != null)
             {
-                cameraVariantLabel.text = variants != null ? "Camera: " + variants.CurrentLabel : "Camera: -";
+                cameraVariantLabel.text = "Camera: " + variants.CurrentLabel;
             }
             if (cameraVariantEnergyNote != null)
             {
-                cameraVariantEnergyNote.text = variants != null ? variants.EnergyControlsNote : "";
+                cameraVariantEnergyNote.text = variants.EnergyControlsNote;
             }
         }
 

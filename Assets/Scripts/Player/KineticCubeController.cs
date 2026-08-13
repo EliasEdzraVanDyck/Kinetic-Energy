@@ -73,6 +73,16 @@ namespace KineticEnergy.Player
         [Tooltip("Damping applied while airborne with no launch in flight, so plain falls accelerate naturally.")]
         public float plainFallDamping = 0.2f;
 
+        [Header("Overcharge Scatter (economy test - 0 = off)")]
+        // Economy variant 3: committing MORE energy makes the launch less precise. The
+        // fired direction is offset by a random angle inside a cone whose radius grows
+        // with the charge. The aim preview deliberately shows the intended line - the
+        // scatter is the "faulty launch" risk, visualised separately while aiming.
+        [Tooltip("Cone radius (degrees) at FULL charge. 0 disables scatter entirely.")]
+        public float launchScatterMaxAngle = 0f;
+        [Tooltip("Charge fraction where the cone starts growing - below this, launches stay exact.")]
+        [Range(0f, 1f)] public float launchScatterStartFraction = 0.25f;
+
         [Header("Zero-Damping Test Mode")]
         // A/B test flag (the QuarryNoDamping scene): launches fire with ZERO damping, at a
         // force solved per launch so the landing distance exactly matches what the damped
@@ -415,6 +425,20 @@ namespace KineticEnergy.Player
         // converted to estimated REAL seconds (flights run sped-up, platforms run on real
         // time, so the lead must be in the platform's clock).
         public bool IsAirAiming => airAiming;
+
+        // Economy-variant harness hooks (EconomyVariantController) - read-only state plus
+        // one guarded energy mutator, so the harness never reaches into private fields.
+        public float LastLaunchEnergySpent => lastLaunchEnergySpent;
+        public Vector3 LastPredictedLanding => lastPredictedLanding;
+        public bool HasValidPredictedLanding => hasValidPredictedLanding;
+        public float CurrentChargeFraction => ChargeFraction();
+        // (EnergyFraction already exists further up.)
+
+        public void AddEnergy(float delta)
+        {
+            if (infiniteEnergy) return;
+            energyFraction = Mathf.Clamp01(energyFraction + delta);
+        }
 
         // Landing PiP support (LandingPipCamera): a vantage point along the CURRENT
         // predicted arc. Fraction 0 = at the player, 1 = at the landing. Only meaningful
@@ -1457,8 +1481,31 @@ namespace KineticEnergy.Player
             range = new Vector3(p.x, 0f, p.z).magnitude;
         }
 
+        // The scatter cone's current radius for a given charge (0 while scatter is off).
+        public float ScatterConeAngleFor(float chargeFraction)
+        {
+            if (launchScatterMaxAngle <= 0f) return 0f;
+            float excess = Mathf.InverseLerp(launchScatterStartFraction, 1f, chargeFraction);
+            return launchScatterMaxAngle * excess;
+        }
+
+        static Vector3 RandomDirectionInCone(Vector3 direction, float coneAngleDegrees)
+        {
+            // Uniform over the cone's disk: random spin, sqrt-distributed radius.
+            float offsetAngle = coneAngleDegrees * Mathf.Sqrt(Random.value);
+            float spin = Random.value * 360f;
+            Quaternion tilt = Quaternion.AngleAxis(offsetAngle, Vector3.Cross(direction, Random.onUnitSphere).normalized);
+            return (Quaternion.AngleAxis(spin, direction) * tilt) * direction;
+        }
+
         void QueueLaunch(Vector3 direction, float force, float damping)
         {
+            // Overcharge scatter (economy variant 3): the committed charge buys imprecision.
+            float scatterCone = ScatterConeAngleFor(ChargeFraction());
+            if (scatterCone > 0.01f)
+            {
+                direction = RandomDirectionInCone(direction.normalized, scatterCone);
+            }
             queuedDirection = direction;
             queuedForce = force;
             queuedDamping = damping;

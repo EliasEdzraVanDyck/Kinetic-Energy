@@ -484,6 +484,7 @@ namespace KineticEnergy.EditorSetup
                 hintRect.anchoredPosition = new Vector2(24f, 122f);
                 hint.alignment = TextAnchor.LowerLeft;
                 hint.color = new Color(1f, 1f, 1f, 0.75f);
+                pauseController.cameraVariantHint = hint.gameObject;
 
                 PrefabUtility.SaveAsPrefabAsset(pauseRoot, pausePath);
             }
@@ -601,6 +602,37 @@ namespace KineticEnergy.EditorSetup
             finally { PrefabUtility.UnloadPrefabContents(pauseRoot); }
             AssetDatabase.SaveAssets();
             Debug.Log("KineticEnergySetup: resume button added to pause menu OK");
+        }
+
+        // The economy-iteration scene (a QuarryNew duplicate): locks the aim camera to
+        // Variant A with all switching UI/hotkeys off, and adds the EconomyVariants harness
+        // object. The scene file must already exist (copied from QuarryNew).
+        [MenuItem("Tools/Kinetic Energy/Setup Quarry Economy Scene")]
+        public static void SetupQuarryEconomy()
+        {
+            const string scenePath = "Assets/Scenes/QuarryEconomy.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+            {
+                throw new Exception("KineticEnergySetup: QuarryEconomy.unity does not exist - duplicate QuarryNew first.");
+            }
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            var variants = UnityEngine.Object.FindAnyObjectByType<AimCameraVariantController>(FindObjectsInactive.Include);
+            if (variants != null)
+            {
+                variants.variantSwitchingEnabled = false;
+                variants.currentVariant = AimCameraVariant.Baseline;
+                EditorUtility.SetDirty(variants);
+            }
+
+            if (UnityEngine.Object.FindAnyObjectByType<EconomyVariantController>(FindObjectsInactive.Include) == null)
+            {
+                GameObject harness = new GameObject("EconomyVariants");
+                harness.AddComponent<EconomyVariantController>();
+            }
+
+            SaveOpenScene(scenePath);
+            Debug.Log("KineticEnergySetup: quarry economy scene setup complete OK");
         }
 
         static AimCameraPreset LoadOrCreatePreset(string path, Action<AimCameraPreset> initialize)

@@ -3480,6 +3480,8 @@ MonoBehaviour:
   maxLaunchDamping: 1
   downLaunchDamping: 0.2
   plainFallDamping: 0.2
+  launchScatterMaxAngle: 0
+  launchScatterStartFraction: 0.25
   zeroDampingMatchedLaunches: 0
   zeroDampingMinLaunchForce: 0
   zeroDampingMaxLaunchForce: 0
@@ -3582,6 +3584,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cdcb94ace2ae9b547b3b6ef14f45f06b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Camera.AimCameraVariantController
+  variantSwitchingEnabled: 1
   currentVariant: 0
   baselinePreset: {fileID: 11400000, guid: 49e04780ce39a5741bcb36e814d25136, type: 2}
   otsParallaxPreset: {fileID: 11400000, guid: 550486b2a6af51c4d890da48b008c9f0, type: 2}

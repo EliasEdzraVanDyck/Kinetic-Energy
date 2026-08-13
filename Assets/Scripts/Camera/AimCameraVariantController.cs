@@ -16,6 +16,8 @@ namespace KineticEnergy.Camera
     // runtime - prefabs can't hold cross-hierarchy references.
     public class AimCameraVariantController : MonoBehaviour
     {
+        [Tooltip("OFF: this scene is not a camera playtest - the variant is locked to whatever currentVariant says (A for the economy scene), the hotkeys do nothing, and no HUD tag or pause selector shows.")]
+        public bool variantSwitchingEnabled = true;
         public AimCameraVariant currentVariant = AimCameraVariant.Baseline;
         public AimCameraPreset baselinePreset;
         public AimCameraPreset otsParallaxPreset;
@@ -58,12 +60,13 @@ namespace KineticEnergy.Camera
             controller = GetComponent<KineticCubeController>();
             cameraOrbit = FindAnyObjectByType<ThirdPersonOrbitCamera>();
             pipCamera = LandingPipCamera.Create(controller);
-            BuildHudTag();
+            if (variantSwitchingEnabled) BuildHudTag();
             SetVariant(currentVariant);
         }
 
         void Update()
         {
+            if (!variantSwitchingEnabled) return; // locked scene (economy test) - no hotkeys
             if (Time.timeScale <= 0f) return; // paused - the pause menu button handles it there
 
             // Shoulder swap (Q / Right Stick Click) - the standard third-person-shooter
@@ -92,6 +95,7 @@ namespace KineticEnergy.Camera
         // The aim-window block lives HERE so the pause-menu path obeys it too.
         public void CycleVariant()
         {
+            if (!variantSwitchingEnabled) return;
             if (controller != null && controller.IsAimingOrCharging) return;
             SetVariant((AimCameraVariant)(((int)currentVariant + 1) % 6));
         }
@@ -99,6 +103,7 @@ namespace KineticEnergy.Camera
         // C / D-pad Left steps BACK through the cycle - same aim-window block.
         public void CycleVariantBack()
         {
+            if (!variantSwitchingEnabled) return;
             if (controller != null && controller.IsAimingOrCharging) return;
             SetVariant((AimCameraVariant)(((int)currentVariant + 5) % 6));
         }
