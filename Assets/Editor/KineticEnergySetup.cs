@@ -3730,6 +3730,9 @@ namespace KineticEnergy.EditorSetup
 
                 KineticCubeController controller = FindPlayerController(path);
                 controller.energyControlMode = mode;
+                // Space/South and E/West hold-to-charge straight-vertical launches (direct
+                // request) - only these four scenes get the flag.
+                controller.straightVerticalLaunches = true;
                 EditorUtility.SetDirty(controller);
 
                 if (mode == EnergyControlMode.CircleCrank && controller.GetComponent<EnergyCrankUI>() == null)
@@ -3738,10 +3741,55 @@ namespace KineticEnergy.EditorSetup
                     EditorUtility.SetDirty(crankUI);
                 }
 
+                // The black any-button intro card (direct request) - one standalone object per
+                // scene, the component builds its own canvas at runtime. Idempotent: reuse the
+                // existing instance so re-running Setup only refreshes the message text.
+                EnergyIntroOverlay overlay = UnityEngine.Object.FindObjectOfType<EnergyIntroOverlay>(true);
+                if (overlay == null)
+                {
+                    GameObject overlayGo = new GameObject("EnergyIntroOverlay");
+                    overlay = overlayGo.AddComponent<EnergyIntroOverlay>();
+                }
+                overlay.message = EnergyIntroMessage(mode);
+                EditorUtility.SetDirty(overlay);
+
                 SaveActiveScene();
             }
 
             Debug.Log("KineticEnergySetup: energy regulation scenes setup complete OK");
+        }
+
+        // The intro card's white explainer text, one per EnergyControlMode - how THIS scene
+        // regulates the energy that goes into a midair launch.
+        static string EnergyIntroMessage(EnergyControlMode mode)
+        {
+            const string common = "While aiming a midair launch (hold Right Mouse / Left Trigger),\n" +
+                "you decide how much energy goes into it before firing.\n" +
+                "More energy stored = a faster, further flight.\n\n";
+            return mode switch
+            {
+                EnergyControlMode.Automatic => common +
+                    "AUTOMATIC ENERGY\n" +
+                    "Aim at a blue positioning sphere - the launch's energy is\n" +
+                    "calculated automatically to land you exactly there.\n" +
+                    "Fire with Left Mouse / Right Trigger.",
+                EnergyControlMode.CircleCrank => common +
+                    "CIRCLE CRANKING\n" +
+                    "Crank the Right Stick (or WASD) in clockwise circles to add\n" +
+                    "energy - counter-clockwise circles take energy back out.\n" +
+                    "Release Left Mouse / Right Trigger to fire.",
+                EnergyControlMode.DedicatedButtons => common +
+                    "DEDICATED BUTTONS\n" +
+                    "Push the Right Stick up to add energy and down to remove it -\n" +
+                    "or step it with the Mouse Wheel.\n" +
+                    "Release Left Mouse / Right Trigger to fire.",
+                EnergyControlMode.ReverseDirection => common +
+                    "REVERSE DIRECTION\n" +
+                    "Charging fills the meter over time. Press Right Bumper /\n" +
+                    "Middle Mouse to flip it into draining instead - and again to\n" +
+                    "flip back. Release to fire with whatever is on the meter.",
+                _ => common,
+            };
         }
 
         // The Automatic Energy mode's aim-target sphere (direct request): blue, a bit
@@ -3750,32 +3798,41 @@ namespace KineticEnergy.EditorSetup
         // only - place instances wherever you like.
         public static void CreatePositioningObjectPrefab()
         {
-            Material sphereMat = new Material(FindBestShader());
-            Color blue = new Color(0.25f, 0.5f, 1f, 0.4f);
-            sphereMat.color = blue;
-            MakeTransparent(sphereMat, blue.a);
-            sphereMat = SaveMaterialAsset(sphereMat, "PositioningObjectMaterial");
-
             if (!AssetDatabase.IsValidFolder(PrefabFolder))
             {
                 AssetDatabase.CreateFolder("Assets", "Prefabs");
             }
 
+            // Standard variant: blue, force-opens the midair aim on touch. Manual variant
+            // (direct request): orange so it reads differently in the scene, identical in
+            // every way except the touch-freeze does NOT open the aim - the player opens it
+            // themselves (PositioningTarget.autoOpenAim).
+            BuildPositioningObjectPrefab("PositioningObject", "PositioningObjectMaterial", new Color(0.25f, 0.5f, 1f, 0.4f), true);
+            BuildPositioningObjectPrefab("PositioningObjectManual", "PositioningObjectManualMaterial", new Color(1f, 0.6f, 0.15f, 0.4f), false);
+            AssetDatabase.SaveAssets();
+        }
+
+        static void BuildPositioningObjectPrefab(string name, string materialName, Color color, bool autoOpenAim)
+        {
+            Material sphereMat = new Material(FindBestShader());
+            sphereMat.color = color;
+            MakeTransparent(sphereMat, color.a);
+            sphereMat = SaveMaterialAsset(sphereMat, materialName);
+
             GameObject root = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             try
             {
-                root.name = "PositioningObject";
+                root.name = name;
                 root.transform.localScale = Vector3.one * 1.5f;
                 root.GetComponent<Renderer>().sharedMaterial = sphereMat;
                 root.GetComponent<SphereCollider>().isTrigger = true;
-                root.AddComponent<PositioningTarget>();
-                PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/PositioningObject.prefab");
+                root.AddComponent<PositioningTarget>().autoOpenAim = autoOpenAim;
+                PrefabUtility.SaveAsPrefabAsset(root, PrefabFolder + "/" + name + ".prefab");
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(root);
             }
-            AssetDatabase.SaveAssets();
         }
 
         static KineticCubeController FindPlayerController(string sceneLabel)

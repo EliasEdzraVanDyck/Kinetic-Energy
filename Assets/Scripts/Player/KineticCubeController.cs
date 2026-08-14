@@ -175,15 +175,16 @@ namespace KineticEnergy.Player
         // notch step.
         public float buttonChargeRate = 0.5f;
         public float wheelChargeStep = 0.05f;
-        // Automatic: how far the aim ray looks for a target, and how many ternary-search
-        // iterations refine the solved charge each frame (each iteration costs two trajectory
-        // simulations - lower this if aiming ever feels heavy).
+        // Automatic: how far the aim ray looks for a target.
         public float autoAimMaxDistance = 400f;
-        public int autoSearchIterations = 6;
         // Added on top of the solved minimum charge (direct request: "the minimum energy
         // needed to reach it + a small failsafe like 5%") - a slight overshoot beats clipping
         // the near edge.
         [Range(0f, 0.5f)] public float autoChargeFailsafe = 0.05f;
+        // How far from an already-used PositioningObject the player has to LAND for that
+        // sphere to start reacting again - landing within this range still counts as "at"
+        // that landing point.
+        public float positioningRearmDistance = 8f;
 
         // Exit speed went up (minLaunchForce/maxLaunchForce raised from the previous 6/28) for a
         // punchier-feeling launch, but a faster exit speed alone would also fly further - linear
@@ -420,6 +421,12 @@ namespace KineticEnergy.Player
         // tilted this many degrees above horizontal toward wherever the stick is pointing
         // otherwise. Usable any time (not just grounded) - see UpdateStickAimChargeScheme.
         public float stickAimUpAngle = 80f;
+        // EnergyRegulation build (direct request): Space/South hold-to-charge an Up launch and
+        // E/West a Down launch - the same old hold/release stick-aim behaviour EXCEPT the
+        // stick no longer tilts them, they always fire dead vertical. Also lets the Space/E
+        // keyboard paths through even with mouseAirControls off, since the EnergyRegulation
+        // scenes never set that flag. Set per-scene by SetupEnergyRegulationScenes.
+        public bool straightVerticalLaunches = false;
         // Left Trigger ("slam"): shallower than the jump by request, kept as its own separate
         // field rather than reusing stickAimUpAngle so the two can be tuned independently.
         public float stickAimDownAngle = 60f;
@@ -520,6 +527,24 @@ namespace KineticEnergy.Player
         // takes over by pressing the aim button, or the aim cancels. Once per launch.
         bool autoAimForced;
         bool positioningAimUsedThisFlight;
+        // The PositioningObject whose checkpoint-freeze already CAUGHT the player (direct
+        // request): that one sphere stops reacting to touch - no re-freeze, no forced aim -
+        // until the player launches and lands somewhere ELSE again (see
+        // RearmIgnoredPositioningTarget). Only the catch marks it: aiming at a sphere, and
+        // arriving at it, behave like any other target - the arrival freeze IS the normal
+        // behaviour.
+        PositioningTarget ignoredPositioningTarget;
+        Collider ignoredPositioningCollider;
+        // Manual-variant checkpoint hold (PositioningTarget.autoOpenAim false): the cube is
+        // frozen at the sphere exactly like the forced-aim catch, but with NO aim open -
+        // cleared the moment the player opens the aim themselves, fires any launch, or
+        // crashes.
+        bool positioningHoldWithoutAim;
+        // Where the cube was on the previous physics step - anchor for FixedUpdate's
+        // anti-tunneling sweep (a fast flight can cross a whole sphere trigger between two
+        // steps, which is how flights sometimes sailed straight through a PositioningObject
+        // without OnTriggerEnter ever firing).
+        Vector3 lastPositioningSweepPosition;
         // After a launch (or any aim cancel), a still-HELD aim button counts for nothing -
         // no aim, and no raw-button slow-mo either (direct request: "aim shouldn't be
         // registered still if you held on to it... only reactivated if you let go and then
@@ -676,12 +701,11 @@ namespace KineticEnergy.Player
         int spawnCacheFrame = -1;
         Vector3 spawnCacheStart;
         Vector3 spawnCacheResult;
-        // Automatic solve cache: re-solving 19 simulations every frame was the main perf sink -
-        // the result only changes when the TARGET moves, so it's reused until it does (or a
-        // periodic refresh).
-        Vector3 lastAutoTarget;
-        float lastAutoSolvedCharge = -1f;
-        int lastAutoSolveFrame = -1000;
+        // Automatic's one-time flat-plane calibration (see CalibrateFlatPlaneLaunchDistances):
+        // how far a base 45-degree launch carries at minimum and at maximum energy. Computed
+        // ONCE in Awake, before gameplay - never re-run, so aiming costs no simulations at all.
+        float flatMinLaunchDistance;
+        float flatMaxLaunchDistance;
         // Normal of the face the last prediction landed on (world up when it didn't land) -
         // orients the cross-and-ring marker flush against that face.
         Vector3 lastPredictedLandingNormal = Vector3.up;
@@ -701,6 +725,9 @@ namespace KineticEnergy.Player
             // instantly face the launch direction the moment a launch fires (see FixedUpdate).
             freeMoveController = GetComponent<KineticCubeControllerFreeMove>();
             energyCrankUI = GetComponent<EnergyCrankUI>(); // present only in the CircleCrank scene
+            // Once, before gameplay (direct request) - Automatic mode's base launch distances.
+            CalibrateFlatPlaneLaunchDistances();
+            lastPositioningSweepPosition = transform.position; // never sweep from world origin
             ApplyGravity();
             energyFraction = startingEnergyFraction;
             // Defensive - OnCollisionEnter turns this off while stuck; a scene saved mid-stuck (or
@@ -1046,7 +1073,12 @@ namespace KineticEnergy.Player
                         // The original system: LT alone both aims and charges over time for as
                         // long as it's held. RT is a single instant-fire press using whatever
                         // charge has built up so far. Mixed's grounded phase behaves identically.
-                        AccumulateCharge();
+                        // Automatic Energy (direct request: identical controls, but the
+                        // automatic calculation stays): the charge is never built by holding -
+                        // it's the distance-percentage rule along this aim's own direction,
+                        // refreshed every frame, and RT still instant-fires it.
+                        if (mixedFastPacedAir && energyControlMode == EnergyControlMode.Automatic) UpdateAutomaticGroundedCharge();
+                        else AccumulateCharge();
                         launchNow = rtPressed;
                         break;
 
@@ -1183,7 +1215,7 @@ namespace KineticEnergy.Player
                 // physically held, so the one-shot latch stops it from reopening the old aim
                 // the moment this charge ends.
                 bool upConvertPressed = (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
-                    || (mouseAirControls && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame);
+                    || ((mouseAirControls || straightVerticalLaunches) && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame);
                 if (upConvertPressed)
                 {
                     float carriedCharge = chargeTime;
@@ -1206,22 +1238,14 @@ namespace KineticEnergy.Player
                 // (direct request: "should only happen if you aim when midair, not when you are
                 // grounded") - the moment the cube is grounded again, the aim cancels cleanly
                 // and the ordinary grounded Mixed controls take over, even if the aim button is
-                // still held. EXCEPTION: Automatic Energy, whose grounded aim is the same
-                // auto-solve (direct request), so its aim survives being grounded.
-                if (isGrounded && energyControlMode != EnergyControlMode.Automatic) CancelFastPacedAim();
+                // still held. No Automatic exception anymore (direct request: "the controls in
+                // Automatic Aiming should be exactly the same as for the other 3" scenes) -
+                // its auto-solve now applies only inside the shared midair aim.
+                if (isGrounded) CancelFastPacedAim();
                 else UpdateFastPacedScheme();
             }
             else if (isGrounded || airUsesGroundedAim)
             {
-                // Automatic Energy: grounded aiming uses the SAME auto-solve flow as midair
-                // (direct request: "aiming while grounded follows the same principle of
-                // calculating how much energy you need"), replacing the build-up-over-time
-                // grounded aim entirely in that scene.
-                if (mixedFastPacedAir && energyControlMode == EnergyControlMode.Automatic)
-                {
-                    UpdateFastPacedScheme();
-                    return;
-                }
                 // airUsesGroundedAim (Tutorial3/TestLevel3) sends AIRBORNE frames through this
                 // same branch - the air-relaunch path inside UpdateChargeBasedScheme already
                 // handles the freeze-and-aim mid-air, so "same controls as on the ground" is
@@ -1233,8 +1257,16 @@ namespace KineticEnergy.Player
                 // Space joins South here in the mouse-controls scenes (direct request) - the
                 // release path already listens for Space via the same mouseAirControls flag.
                 bool upPressed = energyFraction > 0f && ((upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
-                    || (mouseAirControls && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame));
-                if (upPressed) UpdateStickAimChargeScheme();
+                    || ((mouseAirControls || straightVerticalLaunches) && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame));
+                // straightVerticalLaunches only (the EnergyRegulation build): E/West starts the
+                // matching straight-Down hold-to-charge from the ground - routing the press into
+                // the stick-aim system is enough, its idle branch reads the same buttons and
+                // starts the right charge type itself.
+                InputActionReference groundedDownAction = DownChargeActionForCurrentScheme();
+                bool downPressed = straightVerticalLaunches && energyFraction > 0f
+                    && ((groundedDownAction != null && groundedDownAction.action != null && groundedDownAction.action.WasPressedThisFrame())
+                        || (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame));
+                if (upPressed || downPressed) UpdateStickAimChargeScheme();
                 else UpdateChargeBasedScheme();
             }
             else if (mixedFastPacedAir)
@@ -1313,12 +1345,36 @@ namespace KineticEnergy.Player
             // Defy Gravity charges frozen in place for their whole duration, not just their
             // opening frame - and, now, also what keeps a crashed/isStuck cube pinned exactly
             // where it crashed (direct request: "stop all movement and stick to that location").
+            // Anti-tunneling sweep for the PositioningObject checkpoint: a ray between the
+            // last two physics positions catches the sphere crossings OnTriggerEnter misses
+            // at high flight speeds, and snaps the cube back to the crossing point so the
+            // freeze still happens "right there" on the sphere.
+            if (mixedFastPacedAir && energyControlMode == EnergyControlMode.Automatic
+                && hasLaunched && !positioningAimUsedThisFlight)
+            {
+                Vector3 sweep = transform.position - lastPositioningSweepPosition;
+                float sweepLength = sweep.magnitude;
+                if (sweepLength > 0.001f)
+                {
+                    foreach (RaycastHit hit in Physics.RaycastAll(lastPositioningSweepPosition, sweep / sweepLength, sweepLength, ~0, QueryTriggerInteraction.Collide))
+                    {
+                        PositioningTarget sweptTarget = hit.collider.isTrigger ? hit.collider.GetComponentInParent<PositioningTarget>() : null;
+                        if (sweptTarget == null || sweptTarget == ignoredPositioningTarget) continue;
+                        rb.position = hit.point;
+                        TryPositioningCheckpointCatch(sweptTarget, hit.collider);
+                        break;
+                    }
+                }
+            }
+            lastPositioningSweepPosition = transform.position;
+
             if (isAiming || stickAimChargeType != StickAimChargeType.None || defyGravityChargeType != DefyGravityFlightType.None || isStuck || fastPacedCharging || mixedAirAiming
-                // Automatic Energy: the WHOLE aim freezes (direct bug report - falling during
-                // the aim kept changing the solved requirement every frame, reading as energy
-                // building over time, and drifted the shot). Frozen, the required energy is a
-                // stable function of the aim point alone, and the launch matches the preview.
-                || (fastPacedAiming && energyControlMode == EnergyControlMode.Automatic))
+                // Automatic Energy: only the CHECKPOINT's forced aim freezes (the sphere
+                // "freezes the flight right there") - an ordinary aim behaves exactly like
+                // the other three EnergyRegulation scenes' aim (direct request: "the controls
+                // in Automatic Aiming should be exactly the same"). The manual variant's
+                // aimless hold freezes the same way.
+                || autoAimForced || positioningHoldWithoutAim)
             {
                 rb.linearVelocity = Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
@@ -1397,6 +1453,7 @@ namespace KineticEnergy.Player
             {
                 launchesSinceGrounded = 0;
                 fastPacedFlightExact = false;
+                RearmIgnoredPositioningTarget();
             }
 
             // A slam fired from ZERO clearance (already resting on the exact surface it's aimed
@@ -1517,21 +1574,41 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // Automatic Energy: the FIRST PositioningObject touched after a launch freezes the
-            // flight right there and opens the aim automatically (direct request) - a mid-air
-            // re-aim checkpoint. Once per launch; the next launch re-arms it.
-            if (mixedFastPacedAir && energyControlMode == EnergyControlMode.Automatic
-                && hasLaunched && !positioningAimUsedThisFlight
-                && other.GetComponentInParent<PositioningTarget>() != null)
+            TryPositioningCheckpointCatch(other.GetComponentInParent<PositioningTarget>(), other);
+        }
+
+        // Automatic Energy: the FIRST PositioningObject touched after a launch freezes the
+        // flight right there and opens the aim automatically (direct request) - a mid-air
+        // re-aim checkpoint. Once per launch; the next launch re-arms it. EXCEPT the sphere
+        // that already caught the player (ignoredPositioningTarget): inert until they've
+        // landed somewhere else. Shared by OnTriggerEnter and FixedUpdate's tunneling sweep.
+        void TryPositioningCheckpointCatch(PositioningTarget touchedTarget, Collider touchedCollider)
+        {
+            if (!(mixedFastPacedAir && energyControlMode == EnergyControlMode.Automatic)) return;
+            if (!hasLaunched || positioningAimUsedThisFlight) return;
+            if (touchedTarget == null || touchedTarget == ignoredPositioningTarget) return;
+
+            positioningAimUsedThisFlight = true;
+            aimButtonSpent = false;
+            // The checkpoint that just caught the player counts as "landed onto" - it must
+            // not catch them again while they're still there.
+            ignoredPositioningTarget = touchedTarget;
+            ignoredPositioningCollider = touchedCollider;
+            if (touchedTarget.autoOpenAim)
             {
-                positioningAimUsedThisFlight = true;
                 autoAimForced = true;
-                aimButtonSpent = false;
                 if (!fastPacedAiming)
                 {
                     fastPacedAiming = true;
                     cameraOrbit?.SetFirstPersonMode(!isGrounded);
                 }
+            }
+            else
+            {
+                // Manual variant: same freeze, but no forced aim - the hold keeps the cube
+                // parked at the sphere until the player opens the aim (or launches) on their
+                // own. See positioningHoldWithoutAim's clears.
+                positioningHoldWithoutAim = true;
             }
         }
 
@@ -1629,8 +1706,10 @@ namespace KineticEnergy.Player
 
             isStuck = true;
             hasLaunched = false;
+            positioningHoldWithoutAim = false; // the crash-stick freeze supersedes the manual hold
             defyGravityFlightTimer = 0f; // interrupt an in-progress forced flight if the crash happens mid-flight
             launchesSinceGrounded = 0;   // a crash is a landing - the per-flight launch budget resets
+            RearmIgnoredPositioningTarget(); // a crash is a landing for the used-sphere rule too
             mixedAirAiming = false;      // defensive - the freeze should prevent crashing mid-aim at all
             fastPacedFlightExact = false; // the exact-line flight ended in this crash
 
@@ -2012,7 +2091,6 @@ namespace KineticEnergy.Player
             crankHasPreviousAngle = false;
             chargeDisplayInsufficient = false;
             autoAimForced = false;
-            lastAutoSolvedCharge = -1f; // next aim starts with a fresh solve
             aimButtonSpent = true; // closing the aim spends the hold - release before re-aiming
             energyCrankUI?.SetVisible(false);
             landingPreview?.SetVisible(false);
@@ -2132,21 +2210,14 @@ namespace KineticEnergy.Player
             landingPreview?.SetVisible(true);
             landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
 
-            // "While grounded you shouldn't zoom in" (direct request): Automatic's grounded
-            // aim stays third-person - first person only midair, switching live if the aim
-            // spans both.
-            if (energyControlMode == EnergyControlMode.Automatic)
-            {
-                cameraOrbit?.SetFirstPersonMode(!isGrounded);
-            }
-
             switch (energyControlMode)
             {
                 case EnergyControlMode.Automatic:
                     // Wherever the aim points - surface or PositioningObject sphere - the
-                    // EXACT required charge is solved over the FULL range (not capped by
-                    // stored energy): the meter shows the true requirement, red when it
-                    // exceeds what's stored (direct request).
+                    // required charge is read off the DISTANCE from the player to the target
+                    // (direct request: "the minimum amount of energy necessary ... based on
+                    // the distance of the launch") - see RequiredChargeForDistance. Uncapped
+                    // by stored energy, so the meter can show the true requirement.
                     if (!TryGetAutoAimTarget(dir, out Vector3 target))
                     {
                         target = (cameraTransform != null ? cameraTransform.position : transform.position) + dir * autoAimMaxDistance;
@@ -2159,24 +2230,14 @@ namespace KineticEnergy.Player
                     // minimum charge; in first person (midair) the two nearly coincide.
                     Vector3 toTarget = target - transform.position;
                     if (toTarget.sqrMagnitude > 0.01f) dir = toTarget.normalized;
-                    // Amortized solve (performance): at most one search per
-                    // autoSolveIntervalFrames, re-run only when the target has actually moved
-                    // (with a slower periodic refresh) - a moving aim no longer pays the full
-                    // search cost every single frame. The meter lags the aim by at most ~0.1s.
-                    bool solveDue = lastAutoSolvedCharge < 0f
-                        || (Time.frameCount - lastAutoSolveFrame >= 5
-                            && ((target - lastAutoTarget).sqrMagnitude > 0.25f || Time.frameCount - lastAutoSolveFrame >= 20));
-                    if (solveDue)
-                    {
-                        lastAutoSolvedCharge = SolveChargeForTarget(dir, target);
-                        lastAutoTarget = target;
-                        lastAutoSolveFrame = Time.frameCount;
-                    }
-                    // The solved minimum plus the failsafe margin - see autoChargeFailsafe.
-                    float required = Mathf.Clamp01(lastAutoSolvedCharge + autoChargeFailsafe);
-                    // Meter AND launch intake CAP at what's stored (direct request) - the red
+                    // The percentage rule's requirement plus the failsafe margin - see
+                    // autoChargeFailsafe.
+                    float required = Mathf.Clamp01(RequiredChargeForDistance(toTarget.magnitude) + autoChargeFailsafe);
+                    // Meter AND launch intake CAP at what's stored (direct request) - the
                     // bar sits at the current level and flags that the true need is higher.
                     float affordable = energyCostPerFullCharge > 0f ? Mathf.Clamp01(energyFraction / energyCostPerFullCharge) : 1f;
+                    // Direct request: needing MORE than the current energy level = red;
+                    // equal or less = the default blue charge bar.
                     chargeDisplayInsufficient = required > affordable + 0.0001f;
                     chargeTime = Mathf.Min(required, affordable) * maxChargeTime;
                     break;
@@ -2215,12 +2276,16 @@ namespace KineticEnergy.Player
             }
         }
 
+        // Camera-ray form (the midair aim): anything the ray crosses BEFORE reaching the
+        // player's depth is behind/beside the cube, not aimable - hence the minDistance.
         bool TryGetAutoAimTarget(Vector3 dir, out Vector3 target)
         {
             Vector3 origin = cameraTransform != null ? cameraTransform.position : transform.position;
-            // In third person the camera sits behind the player - anything the ray crosses
-            // BEFORE reaching the player's depth is behind/beside the cube, not aimable.
-            float minDistance = Vector3.Distance(origin, transform.position) - 1f;
+            return TryGetAutoAimTarget(origin, Vector3.Distance(origin, transform.position) - 1f, dir, out target);
+        }
+
+        bool TryGetAutoAimTarget(Vector3 origin, float minDistance, Vector3 dir, out Vector3 target)
+        {
             RaycastHit[] hits = Physics.RaycastAll(origin, dir, autoAimMaxDistance, ~0, QueryTriggerInteraction.Collide);
             float bestDistance = float.MaxValue;
             target = default;
@@ -2230,8 +2295,14 @@ namespace KineticEnergy.Player
                 if (hit.distance < minDistance) continue;
                 if (hit.collider == boxCollider || hit.collider.transform.IsChildOf(transform)) continue;
                 // Triggers only count when they're genuine aim targets (PositioningObject) -
-                // finish/restart volumes and the like stay invisible to the aim.
-                if (hit.collider.isTrigger && hit.collider.GetComponentInParent<PositioningTarget>() == null) continue;
+                // finish/restart volumes and the like stay invisible to the aim. A
+                // PositioningObject stops the ray exactly like a platform would (direct
+                // request) - EXCEPT the one the player already landed onto: that one is
+                // invisible to the aim until they land elsewhere, so launching down/out from
+                // it targets what's beyond it instead of the sphere itself (direct request).
+                PositioningTarget hitTarget = hit.collider.isTrigger ? hit.collider.GetComponentInParent<PositioningTarget>() : null;
+                if (hit.collider.isTrigger && hitTarget == null) continue;
+                if (hitTarget != null && hitTarget == ignoredPositioningTarget) continue;
                 if (hit.distance < bestDistance)
                 {
                     bestDistance = hit.distance;
@@ -2242,61 +2313,81 @@ namespace KineticEnergy.Player
             return found;
         }
 
-        // Finds the charge whose LANDING point is nearest the target ("the minimum energy
-        // needed to get there"). Deliberately a coarse GRID SCAN plus a fine local scan, not a
-        // ternary search: on this game's platform courses the objective has a NARROW valley -
-        // an undershoot and an overshoot both fall into the void and score nearly identically
-        // far - and a ternary search's probes usually both land on that plateau, converging
-        // essentially anywhere (the routinely-overspending bug, direct report). A grid cannot
-        // miss a valley wider than one cell; the fine pass then pins the minimum down to a few
-        // percent.
-        float SolveChargeForTarget(Vector3 dir, Vector3 target)
+        // One-time, before gameplay (direct request): a base launch at 45 degrees on an
+        // idealized infinite flat plane, at minimum and at maximum energy. Pure math - no
+        // scene geometry, no prediction scene, no per-frame or per-aim cost ever again.
+        void CalibrateFlatPlaneLaunchDistances()
         {
-            const int coarseSamples = 8;
-            float bestCharge = 0f;
-            float bestDistance = float.MaxValue;
-            for (int i = 0; i < coarseSamples; i++)
-            {
-                float candidate = i / (float)(coarseSamples - 1);
-                float distance = LandingDistanceToPoint(dir, candidate, target);
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    bestCharge = candidate;
-                }
-            }
-
-            float cell = 1f / (coarseSamples - 1);
-            float lo = Mathf.Clamp01(bestCharge - cell);
-            float hi = Mathf.Clamp01(bestCharge + cell);
-            int fineSamples = Mathf.Max(autoSearchIterations, 2);
-            for (int i = 0; i <= fineSamples; i++)
-            {
-                float candidate = Mathf.Lerp(lo, hi, i / (float)fineSamples);
-                float distance = LandingDistanceToPoint(dir, candidate, target);
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    bestCharge = candidate;
-                }
-            }
-            return bestCharge;
+            float mass = rb != null ? rb.mass : 1f;
+            flatMinLaunchDistance = FlatPlaneLaunchDistance(minLaunchForce, fastPacedMinDamping, mass);
+            flatMaxLaunchDistance = FlatPlaneLaunchDistance(maxLaunchForce, fastPacedMaxDamping, mass);
         }
 
-        // Solver probes run on a short step budget (150 steps = 3 simulated seconds) - a
-        // landing decides itself well within that at this game's speeds, and the full
-        // 3000-step budget made each of the search's probes vastly more expensive than it
-        // needed to be.
-        const int AutoSolveStepLimit = 150;
-
-        float LandingDistanceToPoint(Vector3 dir, float chargeFraction, Vector3 target)
+        // Integrates the launch the same per-fixed-step way PhysX does (gravity, then linear
+        // damping, then move) so the flat-plane distance matches a real launch on flat ground.
+        // Returns the horizontal distance carried when the arc comes back down to its start
+        // height.
+        static float FlatPlaneLaunchDistance(float force, float damping, float mass)
         {
-            float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
-            float damping = Mathf.Lerp(fastPacedMinDamping, fastPacedMaxDamping, chargeFraction);
-            // rb velocity is ~zero here (the Automatic aim freezes the cube), included anyway
-            // so a grounded aim with residual motion still solves correctly.
-            Vector3 landing = PredictLandingPoint(transform.position, rb.linearVelocity + dir * force / rb.mass, damping, out int _, out bool _, 0f, AutoSolveStepLimit);
-            return (landing - target).sqrMagnitude;
+            Vector3 velocity = new Vector3(Mathf.Sqrt(0.5f), Mathf.Sqrt(0.5f), 0f) * (force / mass);
+            Vector3 position = Vector3.zero;
+            float dt = Time.fixedDeltaTime;
+            for (int i = 0; i < 3000; i++)
+            {
+                velocity += Physics.gravity * dt;
+                velocity *= Mathf.Clamp01(1f - damping * dt);
+                position += velocity * dt;
+                if (velocity.y <= 0f && position.y <= 0f) break;
+            }
+            return position.x;
+        }
+
+        // Called from every landing (grounded settle and crash alike): the used sphere only
+        // starts reacting again once the player has LANDED far enough away from it - landing
+        // back at the same landing point keeps it inert, per the direct request ("until they
+        // launched and landed somewhere else again").
+        void RearmIgnoredPositioningTarget()
+        {
+            if (ignoredPositioningTarget == null) return;
+            if (ignoredPositioningCollider == null)
+            {
+                ignoredPositioningTarget = null; // sphere was destroyed/unloaded - nothing to ignore
+                return;
+            }
+            if (Vector3.Distance(transform.position, ignoredPositioningCollider.bounds.center) > positioningRearmDistance)
+            {
+                ignoredPositioningTarget = null;
+                ignoredPositioningCollider = null;
+            }
+        }
+
+        // Grounded Automatic Energy: the LT-aim/RT-confirm controls stay exactly the other
+        // scenes' controls - only the charge NUMBER comes from the automatic calculation.
+        // The ray runs from the player along the grounded aim's own direction (the arrow the
+        // player steers), so the energy answers to the same aim the launch will use; no hit
+        // within range charges as a max-distance shot, same as the midair fallback.
+        void UpdateAutomaticGroundedCharge()
+        {
+            Vector3 aimDir = AimDirection();
+            if (!TryGetAutoAimTarget(transform.position, 0f, aimDir, out Vector3 target))
+            {
+                target = transform.position + aimDir * autoAimMaxDistance;
+            }
+            float required = Mathf.Clamp01(RequiredChargeForDistance(Vector3.Distance(transform.position, target)) + autoChargeFailsafe);
+            float affordable = energyCostPerFullCharge > 0f ? Mathf.Clamp01(energyFraction / energyCostPerFullCharge) : 1f;
+            chargeDisplayInsufficient = required > affordable + 0.0001f;
+            chargeTime = Mathf.Min(required, affordable) * maxChargeTime;
+        }
+
+        // The percentage rule (direct request): the aim's distance as a fraction of the
+        // maximum flat-plane launch distance IS the fraction of maximum energy required.
+        // Targets closer than even the minimum-energy launch carries need essentially no
+        // charge - that's what the min calibration anchors.
+        float RequiredChargeForDistance(float targetDistance)
+        {
+            if (flatMaxLaunchDistance <= 0.01f) return 1f; // calibration missing - fail safe, never divide by zero
+            if (targetDistance <= flatMinLaunchDistance) return 0f;
+            return Mathf.Clamp01(targetDistance / flatMaxLaunchDistance);
         }
 
         // Hold South/LT/RT to charge a launch in that direction (same charge curve as the
@@ -2344,7 +2435,7 @@ namespace KineticEnergy.Player
                 }
 
                 InputActionReference downAction = DownChargeActionForCurrentScheme();
-                bool keyboardAvailable = mouseAirControls && Keyboard.current != null;
+                bool keyboardAvailable = (mouseAirControls || straightVerticalLaunches) && Keyboard.current != null;
 
                 // Mixed: pressing a DIFFERENT direction button mid-charge switches the charge
                 // to that direction (direct request) - the accumulated charge carries over, and
@@ -2447,7 +2538,7 @@ namespace KineticEnergy.Player
                 bool canLaunch = energyFraction > 0f && CanStartNewLaunch();
 
                 InputActionReference downAction = DownChargeActionForCurrentScheme();
-                bool keyboardAvailable = mouseAirControls && Keyboard.current != null;
+                bool keyboardAvailable = (mouseAirControls || straightVerticalLaunches) && Keyboard.current != null;
                 bool upPressed = canLaunch && ((upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
                     || (keyboardAvailable && Keyboard.current.spaceKey.wasPressedThisFrame));
                 bool downPressed = canLaunch && ((downAction != null && downAction.action != null && downAction.action.WasPressedThisFrame())
@@ -2487,13 +2578,15 @@ namespace KineticEnergy.Player
             switch (type)
             {
                 case StickAimChargeType.Up:
-                    return stickHeld ? TiltedDirection(stickDirection, stickAimUpAngle) : Vector3.up;
+                    // straightVerticalLaunches: the stick's tilt is ignored outright - direct
+                    // request ("only shoot straight upwards or downwards").
+                    return stickHeld && !straightVerticalLaunches ? TiltedDirection(stickDirection, stickAimUpAngle) : Vector3.up;
                 case StickAimChargeType.Down:
                     // Negative angle reuses TiltedDirection unchanged - cos is even (same
                     // magnitude either sign) and sin flips sign, so this mirrors the tilt
                     // downward through horizontal instead of duplicating the method for one sign
                     // flip.
-                    return stickHeld ? TiltedDirection(stickDirection, -stickAimDownAngle) : Vector3.down;
+                    return stickHeld && !straightVerticalLaunches ? TiltedDirection(stickDirection, -stickAimDownAngle) : Vector3.down;
                 default: // Forward
                     // A shallower, separate angle when the stick is centered (toward facing)
                     // than when it's actually held (toward the stick) - see
@@ -2664,6 +2757,7 @@ namespace KineticEnergy.Player
                     return;
                 }
                 fastPacedAiming = true;
+                positioningHoldWithoutAim = false; // the player took over - the manual hold's job is done
                 cameraOrbit?.SetFirstPersonMode(true);
                 // Energy modes: each fresh aim starts from a clean dial.
                 if (energyControlMode != EnergyControlMode.Standard)
@@ -2755,6 +2849,7 @@ namespace KineticEnergy.Player
             queuedDefyGravityDuration = defyGravityDuration;
             launchQueued = true;
             hasLaunched = true;
+            positioningHoldWithoutAim = false; // any launch releases the manual checkpoint hold
             launchesSinceGrounded++;
             fastPacedFlightExact = false; // re-armed by the hybrid fire path right after this call
             aimButtonSpent = true;        // a held aim button does nothing further until released

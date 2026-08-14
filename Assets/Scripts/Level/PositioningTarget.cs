@@ -8,5 +8,9 @@ namespace KineticEnergy.Level
     // makes the auto-charge solve for a trajectory reaching that point in space.
     public class PositioningTarget : MonoBehaviour
     {
+        // The manual variant (direct request): the checkpoint still freezes the flight right
+        // there and behaves identically in every other way, but does NOT force-open the
+        // midair aim - the player opens it themselves with a fresh aim press.
+        public bool autoOpenAim = true;
     }
 }
