@@ -635,6 +635,22 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: quarry economy scene setup complete OK");
         }
 
+        // ADDITIVE: the first-boot aim-variant explainer overlay for QuarryNew - shown once
+        // per game process, dismissed by any input, frozen game underneath.
+        [MenuItem("Tools/Kinetic Energy/Add Aim Intro To QuarryNew")]
+        public static void AddAimIntroToQuarryNew()
+        {
+            const string scenePath = "Assets/Scenes/QuarryNew.unity";
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+            if (UnityEngine.Object.FindAnyObjectByType<AimIntroScreen>(FindObjectsInactive.Include) == null)
+            {
+                GameObject intro = new GameObject("AimVariantIntro");
+                intro.AddComponent<AimIntroScreen>();
+            }
+            SaveOpenScene(scenePath);
+            Debug.Log("KineticEnergySetup: aim intro added to QuarryNew OK");
+        }
+
         // The aim-refinement lab scene (a QuarryNew duplicate): the AimRefinementSettings
         // object activates the refined input pipeline HERE ONLY - every other scene keeps
         // the exact current aim feel. The scene file must already exist (copied from

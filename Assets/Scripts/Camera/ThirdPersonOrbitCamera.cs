@@ -85,7 +85,7 @@ namespace KineticEnergy.Camera
         // too fast while aiming. These scale MOUSE/WASD-driven look only - gamepad sticks
         // are untouched.
         [Tooltip("Mouse look speed multiplier for the ordinary third-person orbit (not aiming).")]
-        [Range(0.1f, 1f)] public float mouseOrbitSpeedMultiplier = 0.6f;
+        [Range(0.1f, 1f)] public float mouseOrbitSpeedMultiplier = 0.51f; // 0.6 minus a further 15% (direct request)
         [Tooltip("Mouse look speed multiplier during the midair first-person aim.")]
         [Range(0.1f, 1f)] public float mouseAimSpeedMultiplier = 0.85f;
         [Tooltip("Speed multiplier for the WASD-driven camera during the grounded aim.")]

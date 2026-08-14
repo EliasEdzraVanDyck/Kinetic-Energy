@@ -113,6 +113,9 @@ namespace KineticEnergy.UI
             // ApplyGamepadBlock), but the MENUS must stay controller-usable - including
             // OPENING this one to turn the mode back off. Same frame as an unmasked action
             // press it's still a single toggle (one if).
+            // The first-boot intro overlay owns ALL input while it shows.
+            if (AimIntroScreen.InputBlocked) return;
+
             bool startPressed = Gamepad.current != null && Gamepad.current.startButton.wasPressedThisFrame;
             if (startPressed || (pauseAction != null && pauseAction.action != null && pauseAction.action.WasPressedThisFrame()))
             {
