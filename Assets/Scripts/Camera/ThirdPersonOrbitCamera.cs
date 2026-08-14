@@ -594,6 +594,7 @@ namespace KineticEnergy.Camera
             float smoothTime;
             if (launchInFlight && !firstPerson) smoothTime = followSmoothTime;
             else if (modeSwitching) smoothTime = OtsAimActive ? aimPreset.blendInTime : modeSwitchSmoothTime;
+            else if (OtsAimActive) smoothTime = 0.02f; // near-rigid: the screen anchor must not slosh
             else smoothTime = followSmoothTime;
             // Explicit UNSCALED delta time: SmoothDamp's default is Time.deltaTime, which the
             // in-flight game-speed-up inflates 2-3x - the camera was catching up that much
@@ -666,10 +667,17 @@ namespace KineticEnergy.Camera
                     }
                 }
 
-                // Built from yaw/pitch alone - the roll (Z) component is always exactly zero.
-                transform.rotation = freeLookActive
-                    ? Quaternion.Euler(viewPitch + freeLookPitch, viewYaw + freeLookYaw, 0f)
-                    : Quaternion.Euler(viewPitch, viewYaw, 0f);
+                // Built from yaw/pitch alone - the roll (Z) component is always exactly
+                // zero. The OTS drift lives HERE too, matching the anchored-position math
+                // exactly - that identity is what keeps the player pinned while the world
+                // sways (the parallax).
+                float appliedYaw = viewYaw
+                    + (freeLookActive ? freeLookYaw : 0f)
+                    + (OtsAimActive ? driftYawCurrent : 0f);
+                float appliedPitch = viewPitch
+                    + (freeLookActive ? freeLookPitch : 0f)
+                    + (OtsAimActive ? driftPitchCurrent : 0f);
+                transform.rotation = Quaternion.Euler(appliedPitch, appliedYaw, 0f);
             }
             else
             {
@@ -692,54 +700,58 @@ namespace KineticEnergy.Camera
             UpdateWallOcclusion(focusPoint);
         }
 
-        // Over-the-shoulder aim placement (Variants B/C). The camera sits behind the player
-        // along the launch vector, slightly raised and offset sideways, with a slow drift
-        // ellipse layered on the OFFSET only - the look-target stays nailed to the landing
-        // point (the rotation code), so near geometry slides against far geometry: motion
-        // parallax, the entire point. Variant C additionally dollies otsBack out with the
-        // energy dial (FOV constant - see SetAimZoom).
+        // Over-the-shoulder aim placement - SCREEN-ANCHORED (direct request: the player
+        // must sit stably in the corner no matter the aim angle). The camera's view
+        // rotation is decided first (the framing block's angles plus drift/free-look);
+        // the position is then solved so the player projects EXACTLY onto the preset's
+        // viewport anchor: position = player - rotation * (anchorRay * distance). Stable
+        // by construction at any pitch, any zoom (the FOV feeds the ray), any drift.
+        float driftYawCurrent;
+        float driftPitchCurrent;
+
         Vector3 OtsDesiredPosition(Vector2 look)
         {
             float udt = Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime);
 
             // Drift clock and amplitude ramp - UNSCALED, or the 20% bullet-time would turn
-            // the 2.6 s ellipse into 13 s and it would read as a stuck camera.
+            // the ellipse into a crawl. The drift is applied to the VIEW rotation (and the
+            // position follows through the anchor), so the world sways while the player
+            // stays pinned - parallax without player wobble.
             bool holdDrift = aimPreset.pauseDriftWhileAiming && look.sqrMagnitude > 0.0001f;
             if (!holdDrift) driftClock += udt;
             driftAmpFactor = Mathf.MoveTowards(driftAmpFactor, 1f, udt / Mathf.Max(aimPreset.driftRampIn, 0.01f));
 
             float phase = driftClock / Mathf.Max(aimPreset.driftPeriod, 0.01f) * Mathf.PI * 2f;
-            float driftYaw = Mathf.Sin(phase) * aimPreset.driftYawAmplitude * driftAmpFactor;
-            float driftPitch = Mathf.Sin(phase + aimPreset.driftPhaseOffset * Mathf.Deg2Rad)
+            driftYawCurrent = Mathf.Sin(phase) * aimPreset.driftYawAmplitude * driftAmpFactor;
+            driftPitchCurrent = Mathf.Sin(phase + aimPreset.driftPhaseOffset * Mathf.Deg2Rad)
                 * aimPreset.driftPitchAmplitude * driftAmpFactor;
 
-            // Position derives from the LAUNCH VECTOR (yaw/pitch, which input steers) with
-            // the drift angles applied to the offset direction only. Free-look (F) is NOT
-            // part of the position - it rotates the view in place (direct request), see the
-            // rotation block.
-            Quaternion offsetRotation = Quaternion.Euler(pitch + driftPitch, yaw + driftYaw, 0f);
-            Vector3 basePosition = target.position
-                - offsetRotation * Vector3.forward * aimPreset.otsBack
-                + Vector3.up * aimPreset.otsRise;
-            Vector3 sideVector = offsetRotation * Vector3.right * aimPreset.otsSide;
+            // The rotation the camera will actually render with this frame (the framing
+            // block's eased angles once seeded, else the raw aim), plus free-look + drift.
+            float viewY = viewAnglesSeeded ? viewYaw : yaw;
+            float viewP = viewAnglesSeeded ? viewPitch : pitch;
+            if (freeLookActive)
+            {
+                viewY += freeLookYaw;
+                viewP += freeLookPitch;
+            }
+            Quaternion viewRotation = Quaternion.Euler(viewP + driftPitchCurrent, viewY + driftYawCurrent, 0f);
 
-            // Auto shoulder: hold the CLEARER side. Only swaps when the mirrored side beats
-            // the current one by the hysteresis margin, so it can't flip-flop in doorways;
-            // a manual Q swap suspends auto for the rest of this aim.
+            // Auto shoulder on the anchored frame: the swap mirrors the anchor's X around
+            // screen centre. Clearance-compare both mirrored positions, with hysteresis.
             if (autoShoulder && !shoulderManualHold)
             {
-                float currentClear = ShoulderClearance(basePosition + sideVector * shoulderTarget);
-                float otherClear = ShoulderClearance(basePosition - sideVector * shoulderTarget);
+                float currentClear = ShoulderClearance(AnchoredPosition(viewRotation, shoulderTarget));
+                float otherClear = ShoulderClearance(AnchoredPosition(viewRotation, -shoulderTarget));
                 if (otherClear > currentClear + autoShoulderMargin) shoulderTarget = -shoulderTarget;
             }
             shoulderCurrent = Mathf.SmoothDamp(shoulderCurrent, shoulderTarget, ref shoulderVelocity,
                 shoulderSwapSmoothTime, Mathf.Infinity, udt);
 
-            Vector3 desired = basePosition + sideVector * shoulderCurrent;
+            Vector3 desired = AnchoredPosition(viewRotation, shoulderCurrent);
 
-            // Clearance: a camera clipping into a wall or perch during aim destroys the
-            // depth read outright. Spherecast player -> desired, pull in on any hit that
-            // isn't the player itself.
+            // Clearance: pulling in along the player-camera axis keeps the player ON the
+            // anchor ray - they just render slightly larger, never displaced or hidden.
             Vector3 toCamera = desired - target.position;
             float span = toCamera.magnitude;
             if (span > 0.001f && Physics.SphereCast(target.position, aimPreset.camCollisionRadius,
@@ -752,6 +764,27 @@ namespace KineticEnergy.Camera
                 }
             }
             return desired;
+        }
+
+        // The camera position that puts the player exactly on the preset's viewport anchor
+        // for the given view rotation. shoulderSign mirrors the anchor X around centre
+        // (+1 = the preset's own side, -1 = the mirrored shoulder); the smoothed swap
+        // glides the anchor across the screen.
+        Vector3 AnchoredPosition(Quaternion viewRotation, float shoulderSign)
+        {
+            float anchorX = 0.5f + (aimPreset.playerViewportAnchor.x - 0.5f) * shoulderSign;
+            float anchorY = aimPreset.playerViewportAnchor.y;
+
+            float fov = cam != null ? cam.fieldOfView : normalFov;
+            float aspect = cam != null ? cam.aspect : 16f / 9f;
+            float tanHalfY = Mathf.Tan(fov * 0.5f * Mathf.Deg2Rad);
+            float tanHalfX = tanHalfY * aspect;
+
+            Vector3 anchorRay = new Vector3(
+                (anchorX * 2f - 1f) * tanHalfX,
+                (anchorY * 2f - 1f) * tanHalfY,
+                1f).normalized;
+            return target.position - viewRotation * (anchorRay * Mathf.Max(aimPreset.otsBack, 0.5f));
         }
 
         // Fraction (0..1) of the player-to-position span that is unobstructed - the auto

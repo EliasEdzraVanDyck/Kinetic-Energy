@@ -35,11 +35,13 @@ namespace KineticEnergy.Camera
             || variant == AimCameraVariant.FreeLookOts;
 
         [Header("Over-the-shoulder placement (ignored by Baseline)")]
-        [Tooltip("Metres behind the player along the launch vector (player 'radius' is ~0.5).")]
+        [Tooltip("Camera distance from the player (metres).")]
         public float otsBack = 1.4f;
-        [Tooltip("Metres of world-up rise - a slight downward look shows more ground plane.")]
+        [Tooltip("EXACT viewport point the player is pinned to, every frame, at any aim angle or zoom (0,0 = bottom-left of the screen). The shoulder swap mirrors the X around centre.")]
+        public Vector2 playerViewportAnchor = new Vector2(0.22f, 0.24f);
+        [Tooltip("LEGACY (pre screen-anchor) - no longer used by the pinned OTS placement.")]
         public float otsRise = 0.35f;
-        [Tooltip("Metres of sideways offset - breaks symmetry so the sphere doesn't sit on the reticle.")]
+        [Tooltip("LEGACY (pre screen-anchor) - no longer used by the pinned OTS placement.")]
         public float otsSide = 0.30f;
         [Tooltip("Spherecast radius for the player-to-camera clearance check; the camera pulls in on a hit.")]
         public float camCollisionRadius = 0.25f;
