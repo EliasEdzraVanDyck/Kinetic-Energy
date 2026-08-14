@@ -85,7 +85,7 @@ namespace KineticEnergy.Camera
         // too fast while aiming. These scale MOUSE/WASD-driven look only - gamepad sticks
         // are untouched.
         [Tooltip("Mouse look speed multiplier for the ordinary third-person orbit (not aiming).")]
-        [Range(0.1f, 1f)] public float mouseOrbitSpeedMultiplier = 0.51f; // 0.6 minus a further 15% (direct request)
+        [Range(0.1f, 1f)] public float mouseOrbitSpeedMultiplier = 0.6f; // the pre-control-lab value; QuarryAim's variant A applies its own slower one
         [Tooltip("Mouse look speed multiplier during the midair first-person aim.")]
         [Range(0.1f, 1f)] public float mouseAimSpeedMultiplier = 0.85f;
         [Tooltip("Speed multiplier for the WASD-driven camera during the grounded aim.")]
@@ -401,6 +401,23 @@ namespace KineticEnergy.Camera
             }
         }
 
+        // The camera's current orbit yaw - the control lab's aim clamp is measured from it.
+        public float CurrentYaw => yaw;
+
+        // Control lab: the grounded aim's 60-65 degree FOLLOW BAND. Inside the threshold
+        // the camera stays put; through the band the pan speed ramps from zero to full -
+        // parking the aim at the (hard-clamped) 65-degree edge turns the camera at full
+        // speed, easing in from 60.
+        public void ApplyAimEdgeFollow(float aimYawDegrees, float thresholdDegrees, float bandDegrees, float degreesPerSecond)
+        {
+            float delta = Mathf.DeltaAngle(yaw, aimYawDegrees);
+            float excess = Mathf.Abs(delta) - thresholdDegrees;
+            if (excess <= 0f) return;
+            float intensity = Mathf.Clamp01(excess / Mathf.Max(bandDegrees, 0.1f));
+            float step = degreesPerSecond * intensity * Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime);
+            yaw += Mathf.Sign(delta) * Mathf.Min(step, excess);
+        }
+
         // Starts a smooth (not instant) swing of the orbit yaw back to directly behind
         // targetYawDegrees (the player's new facing) - "move behind the player again", not
         // "snap" (that's what SetInitialYaw is for, at level load). Actual interpolation happens
@@ -444,8 +461,10 @@ namespace KineticEnergy.Camera
 
             // Aim-refinement lab: stick input gets the re-scaled deadzone + response curve
             // (finer control across the lower stick range; gamepad only, mouse untouched).
+            // AIM MODE ONLY - the ordinary orbit camera keeps raw stick speed, or the
+            // exponent curve makes it crawl at partial deflections.
             AimRefinementSettings refinement = AimRefinementSettings.Active;
-            if (refinement != null && !lookIsMouseDriven && look.sqrMagnitude > 0.0001f)
+            if (refinement != null && firstPerson && !lookIsMouseDriven && look.sqrMagnitude > 0.0001f)
             {
                 look = refinement.ConditionStick(look);
             }
@@ -870,7 +889,18 @@ namespace KineticEnergy.Camera
             {
                 if (stillOccludedThisFrame.Contains(occludedRenderers[i])) continue;
 
-                if (occludedRenderers[i] != null) occludedRenderers[i].enabled = true;
+                if (occludedRenderers[i] != null)
+                {
+                    // Restore ONLY if the object still wants to be visible: a target sphere
+                    // collected while occluded must stay hidden - blindly re-enabling here
+                    // resurrected ghost spheres (visible, but with dead colliders).
+                    KineticEnergy.Level.TargetSphere sphere =
+                        occludedRenderers[i].GetComponentInParent<KineticEnergy.Level.TargetSphere>();
+                    if (sphere == null || sphere.IsActive)
+                    {
+                        occludedRenderers[i].enabled = true;
+                    }
+                }
                 occludedRenderers.RemoveAt(i);
             }
         }

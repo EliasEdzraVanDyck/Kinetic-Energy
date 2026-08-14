@@ -570,6 +570,43 @@ namespace KineticEnergy.EditorSetup
             return null;
         }
 
+        // ADDITIVE: an Info button in the pause menu's bottom-right corner - reopens the
+        // scene's intro/explainer overlay. PauseController hides it in scenes without one.
+        [MenuItem("Tools/Kinetic Energy/Add Info Button To Pause Menu")]
+        public static void AddInfoButtonToPauseMenu()
+        {
+            string pausePath = PrefabFolder + "/PauseSystem.prefab";
+            GameObject pauseRoot = PrefabUtility.LoadPrefabContents(pausePath);
+            try
+            {
+                Transform pausePanel = pauseRoot.transform.Find("PauseCanvas/PausePanel");
+                PauseController pauseController = pauseRoot.GetComponentInChildren<PauseController>(true);
+                if (pausePanel == null || pauseController == null)
+                {
+                    throw new Exception("KineticEnergySetup: PauseSystem.prefab is missing PauseCanvas/PausePanel or PauseController.");
+                }
+
+                DestroyDirectChildIfExists(pausePanel, "InfoButton");
+                Font font = FindBestFont();
+                Color accent = new Color(1f, 0.82f, 0.2f);
+                GameObject info = CreateButton("InfoButton", pausePanel, "Info", font, accent,
+                    Vector2.zero, new Vector2(200f, 56f));
+                RectTransform infoRect = info.GetComponent<RectTransform>();
+                infoRect.anchorMin = new Vector2(1f, 0f);
+                infoRect.anchorMax = new Vector2(1f, 0f);
+                infoRect.pivot = new Vector2(1f, 0f);
+                infoRect.anchoredPosition = new Vector2(-24f, 24f);
+                WireButton(info, pauseController.OnInfoClicked);
+                pauseController.infoButton = info;
+                EditorUtility.SetDirty(pauseController);
+
+                PrefabUtility.SaveAsPrefabAsset(pauseRoot, pausePath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(pauseRoot); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: info button added to pause menu OK");
+        }
+
         // ADDITIVE: puts a Resume button at the TOP of the pause menu's button column and
         // makes it the gamepad's first-selected button. Wired to TogglePause, which resumes
         // when paused. Nothing existing is moved.
@@ -649,6 +686,66 @@ namespace KineticEnergy.EditorSetup
             }
             SaveOpenScene(scenePath);
             Debug.Log("KineticEnergySetup: aim intro added to QuarryNew OK");
+        }
+
+        // The challenge scene (a QuarryNew duplicate): camera locked to Variant A with the
+        // switching UI off, plus the ChallengeVariants harness (overcharge scatter first).
+        [MenuItem("Tools/Kinetic Energy/Setup Quarry Challenge Scene")]
+        public static void SetupQuarryChallenge()
+        {
+            const string scenePath = "Assets/Scenes/QuarryChallenge.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+            {
+                throw new Exception("KineticEnergySetup: QuarryChallenge.unity does not exist - duplicate QuarryNew first.");
+            }
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            var variants = UnityEngine.Object.FindAnyObjectByType<AimCameraVariantController>(FindObjectsInactive.Include);
+            if (variants != null)
+            {
+                variants.variantSwitchingEnabled = false;
+                variants.currentVariant = AimCameraVariant.Baseline;
+                EditorUtility.SetDirty(variants);
+            }
+
+            // The QuarryNew copy carries the first-boot aim intro - meaningless here.
+            var intro = UnityEngine.Object.FindAnyObjectByType<AimIntroScreen>(FindObjectsInactive.Include);
+            if (intro != null) UnityEngine.Object.DestroyImmediate(intro.gameObject);
+
+            if (UnityEngine.Object.FindAnyObjectByType<ChallengeVariantController>(FindObjectsInactive.Include) == null)
+            {
+                GameObject harness = new GameObject("ChallengeVariants");
+                harness.AddComponent<ChallengeVariantController>();
+            }
+
+            SaveOpenScene(scenePath);
+            Debug.Log("KineticEnergySetup: quarry challenge scene setup complete OK");
+        }
+
+        // Adds the control-scheme A/B harness to QuarryAim and locks its camera variants
+        // (the V/C keys belong to the control toggle there now).
+        [MenuItem("Tools/Kinetic Energy/Setup Quarry Aim Controls")]
+        public static void SetupQuarryAimControls()
+        {
+            const string scenePath = "Assets/Scenes/QuarryAim.unity";
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            var cameraVariants = UnityEngine.Object.FindAnyObjectByType<AimCameraVariantController>(FindObjectsInactive.Include);
+            if (cameraVariants != null)
+            {
+                cameraVariants.variantSwitchingEnabled = false;
+                cameraVariants.currentVariant = AimCameraVariant.Baseline;
+                EditorUtility.SetDirty(cameraVariants);
+            }
+
+            if (UnityEngine.Object.FindAnyObjectByType<ControlSchemeVariantController>(FindObjectsInactive.Include) == null)
+            {
+                GameObject harness = new GameObject("ControlSchemeVariants");
+                harness.AddComponent<ControlSchemeVariantController>();
+            }
+
+            SaveOpenScene(scenePath);
+            Debug.Log("KineticEnergySetup: quarry aim controls setup complete OK");
         }
 
         // The aim-refinement lab scene (a QuarryNew duplicate): the AimRefinementSettings

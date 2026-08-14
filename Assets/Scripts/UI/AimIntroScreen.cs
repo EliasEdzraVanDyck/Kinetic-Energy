@@ -12,7 +12,12 @@ namespace KineticEnergy.UI
     // swallows the pause frame AND the first unpaused frame.
     public class AimIntroScreen : MonoBehaviour
     {
-        static bool shownThisSession;
+        // One first-boot showing per KEY per game process - the aim explainer and the
+        // economy explainer track separately.
+        static readonly System.Collections.Generic.HashSet<string> shownKeys = new System.Collections.Generic.HashSet<string>();
+
+        [Tooltip("Session key - each distinct key shows its first-boot overlay once per game process.")]
+        public string introKey = "aim";
 
         // PauseController checks this so Esc/Start can't toggle the pause menu underneath.
         public static bool InputBlocked { get; private set; }
@@ -34,12 +39,25 @@ namespace KineticEnergy.UI
             "Press any button to start.";
 
         GameObject overlayRoot;
+        bool wasPausedWhenOpened;
+        float dismissArmDelay; // ignore inputs for a beat so the opening click can't instantly close it
 
         void Start()
         {
-            if (shownThisSession) { Destroy(this); return; }
-            shownThisSession = true;
+            if (shownKeys.Contains(introKey)) return; // stays alive - the pause menu's Info button reopens it
+            shownKeys.Add(introKey);
+            Open();
+        }
+
+        // Shows the overlay (again) - first boot does this automatically; the pause menu's
+        // Info button calls it on demand. Opening from the pause menu returns TO the pause
+        // menu on dismiss instead of unpausing into gameplay.
+        public void Open()
+        {
+            if (overlayRoot != null) return;
+            wasPausedWhenOpened = Time.timeScale <= 0f;
             InputBlocked = true;
+            dismissArmDelay = 0.15f;
             Time.timeScale = 0f; // the player controller treats this as paused - input swallowed
             BuildOverlay();
         }
@@ -47,12 +65,19 @@ namespace KineticEnergy.UI
         void Update()
         {
             if (overlayRoot == null) return;
+            if (dismissArmDelay > 0f)
+            {
+                dismissArmDelay -= Time.unscaledDeltaTime;
+                return;
+            }
             if (!AnyInputPressed()) return;
 
             InputBlocked = false;
-            Time.timeScale = 1f; // the controller swallows this first unpaused frame too
+            // Opened from the pause menu: stay paused underneath. First-boot: resume play
+            // (the controller swallows this first unpaused frame too).
+            Time.timeScale = wasPausedWhenOpened ? 0f : 1f;
             Destroy(overlayRoot);
-            Destroy(this);
+            overlayRoot = null;
         }
 
         static bool AnyInputPressed()

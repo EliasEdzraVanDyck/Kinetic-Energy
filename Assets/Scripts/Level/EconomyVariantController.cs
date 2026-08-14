@@ -7,10 +7,11 @@ namespace KineticEnergy.Level
 {
     public enum EconomyVariant
     {
-        AimDrain,          // 1 - aiming midair drains the tank (the earlier drain design)
-        ComboRefund,       // 2 - flat 70% refunds, +10% per chained landing, revocable orange extra
-        OverchargeScatter, // 3 - big launches scatter: charge buys distance but costs precision
-        Tuned,             // 4 - the balanced blend (see the header comment for the reasoning)
+        AimDrain,     // A - aiming MIDAIR drains the tank (the earlier drain design)
+        ComboRefund,  // B - flat 70% refunds, +10% per chained landing, revocable orange extra
+        ChargeDrain,  // C - EVERY charge type drains: grounded aim, hold charges, midair aim
+        Tuned,        // D - two readable rules: flat refunds + grounded recharge
+        TargetHunter, // E - ONLY targets pay energy; launches refund nothing
     }
 
     // The economy playtest harness (QuarryEconomy scene only - this component lives on a
@@ -20,21 +21,40 @@ namespace KineticEnergy.Level
     // controller's PUBLIC tuning fields plus the event hooks, and restores the scene's own
     // values when switching away.
     //
-    // Variant 4 ("Tuned") - the reasoning:
-    //   - Grounded launches refund 50%: launching from safety stays cheap but never free,
-    //     so the tank genuinely depletes when you play timidly.
-    //   - Midair launches refund 60% + 30% x spend: the EE1 idea kept - committing MORE
-    //     energy midair pays back proportionally more, so bravery is the efficient play.
-    //   - A gentle 4%/s aim drain: hesitating in bullet-time costs something, but slowly
-    //     enough that deliberate planning is still viable (the harsh drain is variant 1's
-    //     experiment).
-    //   - A SOLID chain bonus (+5% refund per quick relaunch, capped at +20%): rewards
-    //     flow like variant 2's combo, but earned energy is never revoked - revocation is
-    //     variant 2's experiment; the "best" blend should stay readable and non-punishing.
+    // Variant D ("Tuned") - REDESIGNED after playtest feedback (the old four-rule blend
+    // was unreadable and starved the tank). Now exactly two rules a player can hold:
+    //   1. Every landed launch refunds a flat 75% of what it spent - launching always
+    //     costs a little, so energy can never be farmed to infinity by launching.
+    //   2. Standing on the GROUND slowly recharges the tank (8%/s) up to a 60% ceiling -
+    //     a soft-lock is impossible (wait and you can always fly again), but the top 40%
+    //     of the tank can only be held through efficient play, never by waiting.
+    //
+    // Variant E ("TargetHunter") - launches refund NOTHING; collecting a TARGET pays the
+    // whole launch's spend back times a bonus multiplier (default 1.4x, with a floor so
+    // cheap pokes still pay). Hit targets = net positive; miss = the full spend is gone.
     public class EconomyVariantController : MonoBehaviour
     {
         [Tooltip("The design active at scene start.")]
         public EconomyVariant currentVariant = EconomyVariant.AimDrain;
+
+        [Tooltip("First-boot explainer text (also shown by the pause menu's Info button). Edit freely.")]
+        [TextArea(10, 30)]
+        public string introText =
+            "ENERGY ECONOMY VARIANTS\n\n" +
+            "This scene tests five energy economies. Switch with V / D-pad Right (back: C / D-pad Left).\n\n" +
+            "A - Midair aim drain: holding the midair aim open bleeds your tank.\n" +
+            "B - Combo refunds: every landing refunds 70% of its cost; relaunch within 2 seconds\n" +
+            "     and each chained landing pays 10% more (the orange circle shows the multiplier).\n" +
+            "     Bonus energy above 70% is provisional (orange) - lost if the chain breaks.\n" +
+            "C - Every charge drains: ALL charging costs energy per second - grounded aiming,\n" +
+            "     hold charges, and the midair aim alike.\n" +
+            "D - Launch tax + ground recharge: every launch keeps 25% of its cost, and standing\n" +
+            "     on the ground slowly recharges you up to 60%. You can never be stranded,\n" +
+            "     but the top of the tank has to be earned.\n" +
+            "E - Only targets pay: launches refund NOTHING - collecting a target pays back\n" +
+            "     1.4x what the flight cost. Hit and profit, miss and pay in full.\n\n" +
+            "The feedback form in the pause menu asks which economy felt best.\n\n" +
+            "Press any button to start.";
 
         [Header("1 - Aim drain")]
         [Tooltip("Tank fraction lost per real second while the midair aim is open.")]
@@ -51,24 +71,23 @@ namespace KineticEnergy.Level
         public float comboMeterDropPixels = 44f;
         public Color comboMeterColor = new Color(1f, 0.62f, 0.1f); // matches the pound-boost orange
 
-        [Header("3 - Overcharge scatter")]
-        [Tooltip("Scatter cone radius (degrees) at full charge.")]
-        public float scatterMaxAngle = 14f;
-        [Tooltip("Charge fraction where the cone starts opening.")]
-        [Range(0f, 1f)] public float scatterStartFraction = 0.25f;
-        [Tooltip("Dots drawn around the predicted landing to visualise the scatter radius.")]
-        public int scatterRingDots = 24;
-        public Color scatterRingColor = new Color(1f, 0.45f, 0.15f, 0.9f);
+        [Header("C - Charge drain (every charge type)")]
+        [Tooltip("Tank fraction lost per REAL second while ANY charge is open: grounded aim, up/pound hold charges, and the midair aim alike.")]
+        public float chargeDrainPerSecond = 0.06f;
 
-        [Header("4 - Tuned blend")]
-        public float tunedGroundedRefund = 0.5f;
-        public float tunedMidairBaseRefund = 0.6f;
-        public float tunedMidairSpendFactor = 0.3f;
-        public float tunedAimDrainPerSecond = 0.04f;
-        [Tooltip("SOLID chain bonus per quick relaunch (never revoked).")]
-        public float tunedChainStep = 0.05f;
-        public float tunedChainCap = 0.2f;
-        public float tunedChainWindowSeconds = 3f;
+        [Header("D - Tuned (flat refunds + grounded recharge)")]
+        [Tooltip("Every landed launch refunds this fraction of its spend - below 1, so launching can never be energy-positive.")]
+        [Range(0f, 1f)] public float tunedFlatRefund = 0.75f;
+        [Tooltip("Tank fraction regained per REAL second while standing on the ground.")]
+        public float tunedRegenPerSecond = 0.08f;
+        [Tooltip("The grounded recharge stops at this fraction - the top of the tank must be EARNED, waiting can't fill it.")]
+        [Range(0f, 1f)] public float tunedRegenCeiling = 0.6f;
+
+        [Header("E - Target hunter (only targets pay)")]
+        [Tooltip("A collected target pays back the flight's spend times this - above 1, so hitting targets is a net GAIN.")]
+        public float targetRewardMultiplier = 1.4f;
+        [Tooltip("Minimum energy a collected target always pays, so cheap launches still profit from a hit.")]
+        [Range(0f, 1f)] public float targetMinReward = 0.15f;
 
         KineticCubeController controller;
 
@@ -92,12 +111,9 @@ namespace KineticEnergy.Level
         // Runtime UI.
         GameObject comboCircle;
         Text comboText;
-        Transform scatterRingRoot;
-        Transform[] scatterDots;
 
-        bool ComboLike => currentVariant == EconomyVariant.ComboRefund || currentVariant == EconomyVariant.Tuned;
-        float ActiveChainStep => currentVariant == EconomyVariant.Tuned ? tunedChainStep : comboStepPerLevel;
-        float ActiveWindow => currentVariant == EconomyVariant.Tuned ? tunedChainWindowSeconds : comboWindowSeconds;
+        bool ComboLike => currentVariant == EconomyVariant.ComboRefund;
+        float ActiveWindow => comboWindowSeconds;
 
         void Start()
         {
@@ -123,16 +139,34 @@ namespace KineticEnergy.Level
 
             controller.LaunchFired += OnLaunchFired;
             controller.CrashRegistered += OnCrash;
+            TargetSphere.Collected += OnTargetCollected;
 
             BuildHudTag();
             ApplyVariant();
+
+            // The first-boot explainer (and the pause menu's Info target) - its text lives
+            // HERE on the harness so it's editable alongside the variant tuning.
+            GameObject introGo = new GameObject("EconomyIntro");
+            var intro = introGo.AddComponent<KineticEnergy.UI.AimIntroScreen>();
+            intro.introKey = "economy";
+            intro.bodyText = introText;
         }
 
         void OnDestroy()
         {
+            TargetSphere.Collected -= OnTargetCollected;
             if (controller == null) return;
             controller.LaunchFired -= OnLaunchFired;
             controller.CrashRegistered -= OnCrash;
+        }
+
+        // Variant E: a collected target pays the flight's spend times the bonus multiplier
+        // (with a floor for cheap launches) - the ONLY energy income in that variant.
+        void OnTargetCollected()
+        {
+            if (currentVariant != EconomyVariant.TargetHunter || controller == null) return;
+            float reward = Mathf.Max(controller.LastLaunchEnergySpent * targetRewardMultiplier, targetMinReward);
+            controller.AddEnergy(reward);
         }
 
         void Update()
@@ -167,15 +201,22 @@ namespace KineticEnergy.Level
                 controller.midairRefundBaseMultiplier = refund;
                 controller.midairRefundSpendFactor = 0f;
             }
-            else if (currentVariant == EconomyVariant.Tuned)
+
+            // Variant D rule 2: the ground slowly recharges the tank, up to its ceiling -
+            // a soft-lock is impossible, but the top of the tank stays earned-only.
+            if (currentVariant == EconomyVariant.Tuned && controller.IsGrounded
+                && controller.EnergyFraction < tunedRegenCeiling)
             {
-                float bonus = Mathf.Min(tunedChainStep * comboCount, tunedChainCap);
-                controller.groundedRefundMultiplier = tunedGroundedRefund + bonus;
-                controller.midairRefundBaseMultiplier = tunedMidairBaseRefund + bonus;
-                controller.midairRefundSpendFactor = tunedMidairSpendFactor;
+                float headroom = tunedRegenCeiling - controller.EnergyFraction;
+                controller.AddEnergy(Mathf.Min(tunedRegenPerSecond * Time.unscaledDeltaTime, headroom));
             }
 
-            UpdateScatterRing();
+            // Variant C: rent on EVERY charge - grounded aim, hold charges, midair aim.
+            // Real seconds, so the bullet-time doesn't discount the cost.
+            if (currentVariant == EconomyVariant.ChargeDrain && controller.IsAimingOrCharging)
+            {
+                controller.AddEnergy(-chargeDrainPerSecond * Time.unscaledDeltaTime);
+            }
         }
 
         void LateUpdate()
@@ -208,15 +249,27 @@ namespace KineticEnergy.Level
                     controller.slowdownMode = SlowdownMode.Unlimited;
                     break;
 
-                case EconomyVariant.OverchargeScatter:
+                case EconomyVariant.ChargeDrain:
+                    // The drain is applied manually in Update (EnergyTank mode would only
+                    // meter the midair aim - C charges rent on EVERY charge type).
                     controller.slowdownMode = SlowdownMode.Unlimited;
-                    controller.launchScatterMaxAngle = scatterMaxAngle;
-                    controller.launchScatterStartFraction = scatterStartFraction;
                     break;
 
                 case EconomyVariant.Tuned:
-                    controller.slowdownMode = SlowdownMode.EnergyTank;
-                    controller.tankDrainPerSecond = tunedAimDrainPerSecond;
+                    // Rule 1: flat refunds below 100% - launching is never energy-positive.
+                    // Rule 2 (the grounded recharge) runs per frame in Update.
+                    controller.slowdownMode = SlowdownMode.Unlimited;
+                    controller.groundedRefundMultiplier = tunedFlatRefund;
+                    controller.midairRefundBaseMultiplier = tunedFlatRefund;
+                    controller.midairRefundSpendFactor = 0f;
+                    break;
+
+                case EconomyVariant.TargetHunter:
+                    // Launches refund NOTHING - only collected targets pay (see OnTargetCollected).
+                    controller.slowdownMode = SlowdownMode.Unlimited;
+                    controller.groundedRefundMultiplier = 0f;
+                    controller.midairRefundBaseMultiplier = 0f;
+                    controller.midairRefundSpendFactor = 0f;
                     break;
             }
 
@@ -226,11 +279,12 @@ namespace KineticEnergy.Level
 
         string CurrentLabel => currentVariant switch
         {
-            EconomyVariant.AimDrain => "Economy 1 - Aim drain",
-            EconomyVariant.ComboRefund => "Economy 2 - Combo refunds",
-            EconomyVariant.OverchargeScatter => "Economy 3 - Overcharge scatter",
-            EconomyVariant.Tuned => "Economy 4 - Tuned blend",
-            _ => "Economy ?",
+            EconomyVariant.AimDrain => "Variant A - Midair aim drain",
+            EconomyVariant.ComboRefund => "Variant B - Combo refunds",
+            EconomyVariant.ChargeDrain => "Variant C - Every charge drains",
+            EconomyVariant.Tuned => "Variant D - Launch tax + ground recharge",
+            EconomyVariant.TargetHunter => "Variant E - Only targets pay energy",
+            _ => "Variant ?",
         };
 
         // ---------- Combo machinery (variants 2 and 4) ----------
@@ -393,9 +447,7 @@ namespace KineticEnergy.Level
                     {
                         // The MULTIPLIER the next landing pays, not the chain length:
                         // x0.7, x0.8, x0.9, x1, x1.1 ...
-                        float multiplier = currentVariant == EconomyVariant.Tuned
-                            ? tunedMidairBaseRefund + Mathf.Min(tunedChainStep * comboCount, tunedChainCap)
-                            : comboBaseRefund + comboStepPerLevel * comboCount;
+                        float multiplier = comboBaseRefund + comboStepPerLevel * comboCount;
                         comboText.text = "x" + multiplier.ToString("0.0##");
                     }
                 }
@@ -411,57 +463,5 @@ namespace KineticEnergy.Level
             }
         }
 
-        // ---------- Scatter ring (variant 3) ----------
-
-        void UpdateScatterRing()
-        {
-            bool show = currentVariant == EconomyVariant.OverchargeScatter
-                && controller.IsAimingOrCharging
-                && controller.HasValidPredictedLanding;
-
-            float cone = show ? controller.ScatterConeAngleFor(controller.CurrentChargeFraction) : 0f;
-            show = show && cone > 0.05f;
-
-            if (!show)
-            {
-                if (scatterRingRoot != null) scatterRingRoot.gameObject.SetActive(false);
-                return;
-            }
-
-            if (scatterRingRoot == null) BuildScatterRing();
-            scatterRingRoot.gameObject.SetActive(true);
-
-            // Lateral scatter at the landing grows with distance and cone angle.
-            Vector3 landing = controller.LastPredictedLanding;
-            float distance = Vector3.Distance(controller.transform.position, landing);
-            float radius = Mathf.Tan(cone * Mathf.Deg2Rad) * distance;
-
-            for (int i = 0; i < scatterDots.Length; i++)
-            {
-                float angle = i / (float)scatterDots.Length * Mathf.PI * 2f;
-                scatterDots[i].position = landing + new Vector3(Mathf.Cos(angle) * radius, 0.08f, Mathf.Sin(angle) * radius);
-                scatterDots[i].localScale = Vector3.one * Mathf.Clamp(radius * 0.06f, 0.12f, 0.5f);
-            }
-        }
-
-        void BuildScatterRing()
-        {
-            scatterRingRoot = new GameObject("ScatterRing").transform;
-            scatterDots = new Transform[Mathf.Max(scatterRingDots, 8)];
-
-            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-            Material dotMaterial = new Material(shader != null ? shader : Shader.Find("Unlit/Color"));
-            dotMaterial.color = scatterRingColor;
-
-            for (int i = 0; i < scatterDots.Length; i++)
-            {
-                GameObject dot = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-                dot.name = "ScatterDot" + i;
-                Destroy(dot.GetComponent<Collider>());
-                dot.GetComponent<Renderer>().sharedMaterial = dotMaterial;
-                dot.transform.SetParent(scatterRingRoot, false);
-                scatterDots[i] = dot.transform;
-            }
-        }
     }
 }

@@ -2147,23 +2147,31 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.EconomyVariantController
   currentVariant: 0
-  aimDrainPerSecond: 0.08
-  comboBaseRefund: 0.7
-  comboStepPerLevel: 0.1
+  introText: "ENERGY ECONOMY VARIANTS\n\nThis build tests five energy economies.
+    Switch with V / D-pad Right (back: C / D-pad Left).\n\nA - Midair aim drain:
+    holding the midair aim open bleeds your tank.\n\nB - Combo refunds: every landing
+    refunds 70% of its cost; relaunch within 2 seconds\n     and each chained landing
+    pays 10% more (the orange circle shows the multiplier).\n     Bonus energy above
+    70% is provisional (orange) - lost if the chain breaks.\n\nC - Every charge drains:
+    ALL charging costs energy per second - grounded aiming,\n     hold charges, and
+    the midair aim alike.\n\nD - Launch tax + ground recharge: every launch keeps
+    20% of its cost, and standing\n     on the ground slowly recharges you up to
+    50%. You can never be stranded,\n     but the top of the tank has to be earned.\n\nE
+    - Only targets pay: launches refund NOTHING - collecting a target pays back\n    
+    1.4x what the flight cost. Hit and profit, miss and pay in full.\n\nThe feedback
+    form in the pause menu asks which economy felt best.\n\nPress any button to start."
+  aimDrainPerSecond: 0.04
+  comboBaseRefund: 0.85
+  comboStepPerLevel: 0.05
   comboWindowSeconds: 2
   comboMeterDropPixels: 44
   comboMeterColor: {r: 1, g: 0.62, b: 0.1, a: 1}
-  scatterMaxAngle: 14
-  scatterStartFraction: 0.25
-  scatterRingDots: 24
-  scatterRingColor: {r: 1, g: 0.45, b: 0.15, a: 0.9}
-  tunedGroundedRefund: 0.5
-  tunedMidairBaseRefund: 0.6
-  tunedMidairSpendFactor: 0.3
-  tunedAimDrainPerSecond: 0.04
-  tunedChainStep: 0.05
-  tunedChainCap: 0.2
-  tunedChainWindowSeconds: 3
+  chargeDrainPerSecond: 0.05
+  tunedFlatRefund: 0.8
+  tunedRegenPerSecond: 0.07
+  tunedRegenCeiling: 0.5
+  targetRewardMultiplier: 1.35
+  targetMinReward: 0.15
 --- !u!4 &922133753
 Transform:
   m_ObjectHideFlags: 0
@@ -2865,6 +2873,22 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 1720058110096830318, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
+      propertyPath: m_Pivot.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1720058110096830318, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
+      propertyPath: m_AnchorMax.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1720058110096830318, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
+      propertyPath: m_AnchorMin.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1720058110096830318, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
+      propertyPath: m_AnchoredPosition.x
+      value: 24
+      objectReference: {fileID: 0}
     - target: {fileID: 4825106313107946991, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0

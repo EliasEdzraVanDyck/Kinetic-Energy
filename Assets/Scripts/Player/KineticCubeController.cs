@@ -73,6 +73,21 @@ namespace KineticEnergy.Player
         [Tooltip("Damping applied while airborne with no launch in flight, so plain falls accelerate naturally.")]
         public float plainFallDamping = 0.2f;
 
+        [Header("Control Scheme Variants (QuarryAim lab - all default OFF)")]
+        // Toggled by ControlSchemeVariantController; every other scene keeps the classics.
+        [Tooltip("Grounded aim: the camera slowly pans horizontally after the aim swings past the follow threshold to either side.")]
+        public bool groundedAimCameraFollow = false;
+        [Tooltip("Degrees of horizontal aim-vs-camera deviation before the follow starts.")]
+        public float groundedAimFollowThreshold = 60f;
+        [Tooltip("The follow band past the threshold: the aim is HARD-CLAMPED at threshold+band, and the pan speed ramps from zero (at the threshold) to full (at the clamp).")]
+        public float groundedAimFollowBand = 5f;
+        [Tooltip("Full pan speed, reached when the aim sits at the clamp edge.")]
+        public float groundedAimFollowSpeed = 45f;
+        [Tooltip("Grounded aim: the launch strength is DIALLED (wheel / bumpers) exactly like the midair aim, instead of charging over held time.")]
+        public bool groundedDialControls = false;
+        [Tooltip("Controller energy dial on the bumpers - RB adds, LB removes - replacing the right-stick dial (grounded and midair alike). LB stops acting as charge-cancel while this is on.")]
+        public bool bumperEnergyDial = false;
+
         [Header("Overcharge Scatter (economy test - 0 = off)")]
         // Economy variant 3: committing MORE energy makes the launch less precise. The
         // fired direction is offset by a random angle inside a cone whose radius grows
@@ -820,11 +835,14 @@ namespace KineticEnergy.Player
             bool moveIsKeyboardDriven = moveAction != null && moveAction.action != null
                 && moveAction.action.activeControl != null && moveAction.action.activeControl.device is Keyboard;
 
-            // E/F free-look: WASD (keyboard) and the right stick rotate the VIEW only, so
-            // keyboard WASD is routed to the free-look channel instead of the aim override.
-            // Gamepad LEFT stick keeps steering the aim in every variant.
+            // The midair aim is steered by the MOUSE (keyboard players) or the LEFT STICK
+            // (gamepad players). Keyboard WASD must NEVER steer it: A/D are digital +/-1,
+            // which rotated the aim at full speed continuously - the "camera loops when
+            // aiming to the sides" bug, triggered everywhere once the free-look variants
+            // taught players to press WASD during aims. WASD's only midair-aim role is the
+            // E/F free-look channel below.
             bool freeLookAim = FreeLookAimActive && airAiming;
-            bool aimWithMoveStick = (airAiming && !(freeLookAim && moveIsKeyboardDriven))
+            bool aimWithMoveStick = (airAiming && !moveIsKeyboardDriven)
                 || (groundedAimWithMouse && isAiming && moveIsKeyboardDriven);
 
             Vector2 aimStick = aimWithMoveStick && moveAction != null && moveAction.action != null
@@ -899,7 +917,9 @@ namespace KineticEnergy.Player
         void UpdateGroundedAim()
         {
             bool aimPressed = groundedAimAction != null && groundedAimAction.action != null && groundedAimAction.action.IsPressed();
-            bool cancelPressed = cancelChargeAction != null && cancelChargeAction.action != null && cancelChargeAction.action.WasPressedThisFrame();
+            // Under the bumper energy scheme LB dials energy DOWN - it must not also cancel.
+            bool cancelPressed = !bumperEnergyDial
+                && cancelChargeAction != null && cancelChargeAction.action != null && cancelChargeAction.action.WasPressedThisFrame();
 
             if (isAiming && cancelPressed)
             {
@@ -940,10 +960,31 @@ namespace KineticEnergy.Player
                     if (!isGrounded) MidairAimOpened?.Invoke();
                 }
 
-                // The charge rate ramps up the longer the aim is held - same acceleration
-                // principle as the up/down hold-charges.
-                aimChargeHeldSeconds += Time.unscaledDeltaTime;
-                AccumulateCharge(Time.deltaTime * chargeAccumulationRate * ChargeRateRamp(aimChargeHeldSeconds));
+                if (groundedDialControls)
+                {
+                    // Control lab variant A: the grounded launch strength is DIALLED like
+                    // the midair aim - wheel steps, bumpers hold (RB adds, LB removes).
+                    float groundedDial = 0f;
+                    if (Gamepad.current != null)
+                    {
+                        float bumpers = (Gamepad.current.rightShoulder.isPressed ? 1f : 0f)
+                            - (Gamepad.current.leftShoulder.isPressed ? 1f : 0f);
+                        if (bumpers != 0f) groundedDial += bumpers * dialStickRate * maxChargeTime * Time.unscaledDeltaTime;
+                    }
+                    if (Mouse.current != null)
+                    {
+                        float scroll = Mouse.current.scroll.ReadValue().y;
+                        if (Mathf.Abs(scroll) > 0.01f) groundedDial += Mathf.Sign(scroll) * dialWheelStep * maxChargeTime;
+                    }
+                    chargeTime = Mathf.Clamp(chargeTime + groundedDial, 0f, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
+                }
+                else
+                {
+                    // Classic: the charge rate ramps up the longer the aim is held - same
+                    // acceleration principle as the up/down hold-charges.
+                    aimChargeHeldSeconds += Time.unscaledDeltaTime;
+                    AccumulateCharge(Time.deltaTime * chargeAccumulationRate * ChargeRateRamp(aimChargeHeldSeconds));
+                }
 
                 // Aim adjustment runs on unscaled time - responsiveness must not slow down
                 // with the bullet-time.
@@ -976,6 +1017,22 @@ namespace KineticEnergy.Player
                     if (refinement != null) stick = refinement.ConditionStick(stick);
                     aimYaw = Mathf.Repeat(aimYaw + stick.x * aimRotationSpeed * aimDt, 360f);
                     aimPitch = Mathf.Clamp(aimPitch - stick.y * aimRotationSpeed * aimDt, minAimPitch, maxAimPitch);
+                }
+
+                // Control lab variant A: the aim is HARD-CLAMPED at threshold+band degrees
+                // (65) off the camera, and inside the 60-65 band the camera pans after it,
+                // ramping to full speed at the clamp edge - hold the aim at the edge and
+                // the whole view turns with it.
+                if (groundedAimCameraFollow && cameraOrbit != null)
+                {
+                    float cameraYaw = cameraOrbit.CurrentYaw;
+                    float aimDelta = Mathf.DeltaAngle(cameraYaw, aimYaw);
+                    float maxDelta = groundedAimFollowThreshold + groundedAimFollowBand;
+                    if (Mathf.Abs(aimDelta) > maxDelta)
+                    {
+                        aimYaw = Mathf.Repeat(cameraYaw + Mathf.Sign(aimDelta) * maxDelta, 360f);
+                    }
+                    cameraOrbit.ApplyAimEdgeFollow(aimYaw, groundedAimFollowThreshold, groundedAimFollowBand, groundedAimFollowSpeed);
                 }
 
                 Vector3 direction = AimDirection();
@@ -1185,9 +1242,9 @@ namespace KineticEnergy.Player
             // the longer it keeps moving in one direction, and FLIPPING between adding and
             // removing resets the ramp - so lowering energy also lowers faster over time.
             float dialDelta = 0f;
-            if (FreeLookAimActive)
+            if (FreeLookAimActive || bumperEnergyDial)
             {
-                // E/F: RB adds energy, LB removes it - the right stick is the free-look.
+                // E/F (or the control lab's bumper scheme): RB adds energy, LB removes it.
                 if (Gamepad.current != null)
                 {
                     float bumpers = (Gamepad.current.rightShoulder.isPressed ? 1f : 0f)

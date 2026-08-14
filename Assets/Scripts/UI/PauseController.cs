@@ -137,6 +137,7 @@ namespace KineticEnergy.UI
             pausePanel?.SetActive(true);
             SetHintsVisible(false);
             RefreshCameraVariantLabel();
+            infoButton?.SetActive(FindAnyObjectByType<AimIntroScreen>(FindObjectsInactive.Include) != null);
             Select(firstPauseButton);
         }
 
@@ -179,6 +180,16 @@ namespace KineticEnergy.UI
         public void OnFeedbackClicked()
         {
             Application.OpenURL(feedbackFormUrl);
+        }
+
+        [Header("Info Button (wired by setup)")]
+        // Shown only in scenes that carry an intro/explainer screen - reopens it on demand.
+        public GameObject infoButton;
+
+        public void OnInfoClicked()
+        {
+            var intro = FindAnyObjectByType<AimIntroScreen>(FindObjectsInactive.Include);
+            intro?.Open();
         }
 
         // Cycles the aim-camera variant (A -> B -> C) from the pause menu. The variant

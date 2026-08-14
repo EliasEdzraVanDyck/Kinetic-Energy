@@ -82,11 +82,16 @@ namespace KineticEnergy.Level
         }
 
         // Called by KineticCubeController the moment the player crash-lands on this sphere.
+        // Raised on every successful collect - the economy harness's target-fed variant
+        // pays energy from this.
+        public static event System.Action Collected;
+
         public void OnHitByCrash()
         {
             if (respawnRemaining > 0f) return;
             respawnRemaining = respawnSeconds;
             SetCollected(true);
+            Collected?.Invoke();
             // Reported AFTER hiding, so the counter's minimum-active check sees the true
             // count and can respawn a hidden sphere immediately if needed.
             counter?.ReportCollected();
