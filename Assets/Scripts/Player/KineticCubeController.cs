@@ -1195,6 +1195,11 @@ namespace KineticEnergy.Player
                     0f, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
             }
 
+            // The tank can SHRINK while the aim is open (the EnergyTank drain) - the dial
+            // must follow it down continuously, not only on dial input, or the blue charge
+            // preview keeps showing a maximum the tank can no longer pay.
+            chargeTime = Mathf.Min(chargeTime, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
+
             // What would actually fire: the dialed charge, capped by what the tank can pay.
             Vector3 direction = cameraOrbit != null ? cameraOrbit.AimForward : transform.forward;
             float fireFraction = Mathf.Min(ChargeFraction(), energyCostPerFullCharge > 0f ? SpendableEnergy() / energyCostPerFullCharge : 1f);
@@ -1768,7 +1773,9 @@ namespace KineticEnergy.Player
             // Relaunching happens midair, within whatever launches the crash granted.
             // Walking into one is harmless; it just shoves you.
             Enemy enemy = collision.collider.GetComponentInParent<Enemy>();
-            if (enemy != null)
+            FlyingEnemy flyer = collision.collider.GetComponentInParent<FlyingEnemy>();
+            TurretEnemy turret = collision.collider.GetComponentInParent<TurretEnemy>();
+            if (enemy != null || flyer != null || turret != null)
             {
                 if (hasLaunched && !isStuck)
                 {
@@ -1777,7 +1784,9 @@ namespace KineticEnergy.Player
                     nonStickyReleaseTimer = 0f;
                     rb.useGravity = true;
                     rb.linearDamping = plainFallDamping;
-                    enemy.OnHitByLaunch();
+                    if (enemy != null) enemy.OnHitByLaunch();
+                    else if (flyer != null) flyer.OnHitByLaunch();
+                    else turret.OnHitByLaunch();
                 }
                 return;
             }
@@ -2005,7 +2014,10 @@ namespace KineticEnergy.Player
                 foreach (PredictionGeometryProxy entry in geometryProxies)
                 {
                     if (entry.proxy == null || !entry.proxy.activeSelf) continue;
-                    Collider proxyCollider = entry.proxyBox != null ? (Collider)entry.proxyBox : entry.proxyMesh;
+                    Collider proxyCollider = entry.proxyBox != null ? (Collider)entry.proxyBox
+                        : entry.proxySphere != null ? (Collider)entry.proxySphere
+                        : entry.proxyCapsule != null ? (Collider)entry.proxyCapsule
+                        : entry.proxyMesh;
                     if (proxyCollider == null) continue;
                     if (proxyCollider.bounds.SqrDistance(spawnPos) > 2.25f) continue;
                     if (Physics.ComputePenetration(predictionCloneCollider, spawnPos, transform.rotation,
@@ -2137,6 +2149,11 @@ namespace KineticEnergy.Player
                 {
                     entry.proxySphere = proxy.AddComponent<SphereCollider>();
                 }
+                else if (col is CapsuleCollider)
+                {
+                    // Cylinder primitives (turrets, laser beams' cousins) carry capsules.
+                    entry.proxyCapsule = proxy.AddComponent<CapsuleCollider>();
+                }
                 else if (col is MeshCollider meshCol)
                 {
                     entry.proxyMesh = proxy.AddComponent<MeshCollider>();
@@ -2160,6 +2177,7 @@ namespace KineticEnergy.Player
             public GameObject proxy;
             public BoxCollider proxyBox;
             public SphereCollider proxySphere;
+            public CapsuleCollider proxyCapsule;
             public MeshCollider proxyMesh;
         }
         readonly List<PredictionGeometryProxy> geometryProxies = new List<PredictionGeometryProxy>();
@@ -2194,6 +2212,13 @@ namespace KineticEnergy.Player
             {
                 if (entry.proxySphere.center != sourceSphere.center) entry.proxySphere.center = sourceSphere.center;
                 if (entry.proxySphere.radius != sourceSphere.radius) entry.proxySphere.radius = sourceSphere.radius;
+            }
+            else if (entry.proxyCapsule != null && entry.source is CapsuleCollider sourceCapsule)
+            {
+                if (entry.proxyCapsule.center != sourceCapsule.center) entry.proxyCapsule.center = sourceCapsule.center;
+                if (entry.proxyCapsule.radius != sourceCapsule.radius) entry.proxyCapsule.radius = sourceCapsule.radius;
+                if (entry.proxyCapsule.height != sourceCapsule.height) entry.proxyCapsule.height = sourceCapsule.height;
+                if (entry.proxyCapsule.direction != sourceCapsule.direction) entry.proxyCapsule.direction = sourceCapsule.direction;
             }
             else if (entry.proxyMesh != null && entry.source is MeshCollider sourceMesh)
             {

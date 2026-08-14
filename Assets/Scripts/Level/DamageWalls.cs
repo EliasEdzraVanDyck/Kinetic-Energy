@@ -29,10 +29,23 @@ namespace KineticEnergy.Level
             controller.RespawnAtPoint(respawnPoint != null ? respawnPoint.position : Vector3.zero);
 
             // The player's respawn also resets every (surviving) enemy to its original
-            // position, so a retry faces the level as it started.
+            // position - ground and flying alike - and clears live projectiles, so a
+            // retry faces the level as it started.
             foreach (Enemy enemy in Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include))
             {
                 enemy.ResetToSpawn();
+            }
+            foreach (FlyingEnemy flyer in Object.FindObjectsByType<FlyingEnemy>(FindObjectsInactive.Include))
+            {
+                flyer.ResetToSpawn();
+            }
+            foreach (TurretEnemy turret in Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include))
+            {
+                turret.ResetToSpawn();
+            }
+            foreach (EnemyProjectile projectile in Object.FindObjectsByType<EnemyProjectile>(FindObjectsSortMode.None))
+            {
+                Destroy(projectile.gameObject);
             }
         }
     }

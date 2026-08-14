@@ -864,10 +864,12 @@ namespace KineticEnergy.EditorSetup
             Text controlsBody = rig.pauseCanvas.Find("ControlsPanel/ControlsBody")?.GetComponent<Text>();
             rig.controller.controlsPanelBody = controlsBody;
 
+            // Older PauseSystem builds embedded a meter controller; the current prefab
+            // uses the standalone EnergyMeter prefab instead, wired by each setup method
+            // AFTER this rig spawns - so a missing embedded meter is expected now.
             Transform meterControllerChild = pauseSystem.transform.Find("EnergyMeter");
             EnergyMeterController meter = meterControllerChild != null ? meterControllerChild.GetComponent<EnergyMeterController>() : null;
-            if (meter == null) throw new Exception("KineticEnergySetup: PauseSystem prefab has no EnergyMeter controller child.");
-            rig.controller.energyMeter = meter;
+            if (meter != null) rig.controller.energyMeter = meter;
             AddMeterDividers(rig.pauseCanvas);
 
             // Pause menu: a Main Menu button on the pause panel, and the current level list
@@ -2049,6 +2051,392 @@ namespace KineticEnergy.EditorSetup
 
             SaveOpenScene(Level3ScenePath);
             Debug.Log($"KineticEnergySetup: Level 3 setup complete OK (L={L:F1}m, 4 enemies)");
+        }
+
+        // ==================== Level 4 - flying enemies ====================
+
+        // The flying enemy prefab: a magenta sphere with the FlyingEnemy component - every
+        // tunable public on it. Idempotent; an existing prefab keeps its tuned values.
+        [MenuItem("Tools/Kinetic Energy/Create Flying Enemy Prefab")]
+        public static void CreateFlyingEnemyPrefab()
+        {
+            string path = PrefabFolder + "/FlyingEnemy.prefab";
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null) return;
+
+            GameObject temp = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            temp.name = "FlyingEnemy";
+            temp.transform.localScale = Vector3.one * 1.6f;
+            Material material = MakeMaterial("FlyingEnemyMaterial", new Color(0.72f, 0.2f, 0.55f));
+            temp.GetComponent<Renderer>().sharedMaterial = material;
+            temp.AddComponent<FlyingEnemy>();
+            PrefabUtility.SaveAsPrefabAsset(temp, path);
+            UnityEngine.Object.DestroyImmediate(temp);
+            Debug.Log("KineticEnergySetup: FlyingEnemy prefab created OK");
+        }
+
+        // A SMALL flying-gauntlet: islands over a hazard floor, guarded by projectile-
+        // shooting flyers. Player tuning copied from Level 3 (the previous reference).
+        [MenuItem("Tools/Kinetic Energy/Setup Level 4")]
+        public static void SetupLevel4()
+        {
+            const string level4Path = "Assets/Scenes/Level4.unity";
+
+            EditorSceneManager.OpenScene(Level3ScenePath, OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find Level 3's Player/camera to copy tuning from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            CreateFlyingEnemyPrefab();
+            MeasureLaunchDistances(out float L, out float H);
+            NewEmptyScene(level4Path);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("Level4Course");
+            Transform tf = course.transform;
+            Vector3 platformSize = new Vector3(12f, 2f, 12f);
+
+            // Small island run over the void: every crossing is covered by a flyer's
+            // firing lane, so the route is dodge-or-be-swatted.
+            CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
+            Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
+
+            CreateBlock(tf, "IslandA", new Vector3(0.45f * L, -1f, 0.05f * L), new Vector3(16f, 2f, 16f), platformMat);
+            SpawnFlyingEnemy("GapFlyer", new Vector3(0.22f * L, 10f, 0f), 8f, 20f);
+
+            CreateBlock(tf, "IslandB", new Vector3(0.9f * L, -1f, -0.08f * L), new Vector3(16f, 2f, 16f), platformMat);
+            SpawnFlyingEnemy("MidFlyer", new Vector3(0.68f * L, 12f, -0.02f * L), 10f, 24f);
+            SpawnFlyingEnemy("HighFlyer", new Vector3(0.9f * L, 16f, -0.08f * L), 8f, 22f);
+
+            CreateBlock(tf, "EndPlatform", new Vector3(1.3f * L, -1f, 0f), platformSize, platformMat);
+
+            GameObject respawnPoint = new GameObject("RespawnPoint");
+            respawnPoint.transform.position = playerSpawn;
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(0.65f * L, -12f, 0f), new Vector3(1.3f * L + 60f, 2f, L + 60f), damageMat);
+            DamageWalls damage = damageFloor.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(damage);
+
+            GameObject finish = InstantiatePrefab("FinishTrigger");
+            finish.transform.position = new Vector3(1.3f * L, 2f, 0f);
+            FinishLineNextScene finishComp = finish.GetComponent<FinishLineNextScene>();
+            if (finishComp != null) finishComp.nextSceneName = "MainMenu";
+            EditorUtility.SetDirty(finish);
+
+            CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
+            PointCameraAt(rig, new Vector3(0.45f * L, 0f, 0f));
+
+            OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
+
+            // Standalone HUD meter prefabs, wired like every other level.
+            GameObject pauseSystemGo = GameObject.Find("PauseSystem");
+            Transform pauseCanvas = pauseSystemGo != null ? pauseSystemGo.transform.Find("PauseCanvas") : null;
+            if (pauseCanvas != null)
+            {
+                Transform embeddedUi = pauseCanvas.Find("EnergyMeter");
+                if (embeddedUi != null && !PrefabUtility.IsAnyPrefabInstanceRoot(embeddedUi.gameObject)) embeddedUi.gameObject.SetActive(false);
+                Transform embeddedController = pauseSystemGo.transform.Find("EnergyMeter");
+                if (embeddedController != null) embeddedController.gameObject.SetActive(false);
+
+                GameObject energyMeter = InstantiatePrefab("EnergyMeter");
+                energyMeter.transform.SetParent(pauseCanvas, false);
+                rig.controller.energyMeter = energyMeter.GetComponent<EnergyMeterController>();
+                GameObject slowdownMeter = InstantiatePrefab("SlowdownMeter");
+                slowdownMeter.transform.SetParent(pauseCanvas, false);
+                rig.controller.slowdownMeter = slowdownMeter.GetComponent<EnergyMeterController>();
+                EditorUtility.SetDirty(rig.controller);
+            }
+
+            SaveOpenScene(level4Path);
+            Debug.Log($"KineticEnergySetup: Level 4 setup complete OK (L={L:F1}m, 3 flying enemies)");
+        }
+
+        // ==================== Level 5 - turrets / Level 6 - laser walls ====================
+
+        [MenuItem("Tools/Kinetic Energy/Create Turret Prefab")]
+        public static void CreateTurretPrefab()
+        {
+            string path = PrefabFolder + "/TurretEnemy.prefab";
+            // Turrets are ENEMIES, so they wear the shared enemy colour (direct request) -
+            // the same EnemyMaterial the ground enemy uses, and the same windup flash.
+            Material material = MakeMaterial("EnemyMaterial", new Color(0.72f, 0.15f, 0.6f));
+
+            GameObject existing = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (existing != null)
+            {
+                GameObject root = PrefabUtility.LoadPrefabContents(path);
+                try
+                {
+                    root.GetComponent<Renderer>().sharedMaterial = material;
+                    TurretEnemy existingTurret = root.GetComponent<TurretEnemy>();
+                    if (existingTurret != null) existingTurret.windUpColor = new Color(1f, 0.35f, 0.1f);
+                    PrefabUtility.SaveAsPrefabAsset(root, path);
+                }
+                finally { PrefabUtility.UnloadPrefabContents(root); }
+                Debug.Log("KineticEnergySetup: TurretEnemy prefab restyled to enemy colours OK");
+                return;
+            }
+
+            GameObject temp = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            temp.name = "TurretEnemy";
+            temp.transform.localScale = new Vector3(1.4f, 0.9f, 1.4f); // squat cylinder
+            temp.GetComponent<Renderer>().sharedMaterial = material;
+            TurretEnemy turret = temp.AddComponent<TurretEnemy>();
+            turret.windUpColor = new Color(1f, 0.35f, 0.1f);
+            PrefabUtility.SaveAsPrefabAsset(temp, path);
+            UnityEngine.Object.DestroyImmediate(temp);
+            Debug.Log("KineticEnergySetup: TurretEnemy prefab created OK");
+        }
+
+        // A walled corridor watched by fixed turrets - two on the flanking walls, one on a
+        // pedestal mid-course. Player tuning copied from Level 4.
+        [MenuItem("Tools/Kinetic Energy/Setup Level 5")]
+        public static void SetupLevel5()
+        {
+            const string level5Path = "Assets/Scenes/Level5.unity";
+
+            EditorSceneManager.OpenScene("Assets/Scenes/Level4.unity", OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find Level 4's Player/camera to copy tuning from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            CreateTurretPrefab();
+            MeasureLaunchDistances(out float L, out float H);
+            NewEmptyScene(level5Path);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material wallMat = MakeMaterial("GauntletWallMaterial", new Color(0.5f, 0.55f, 0.65f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("Level5Course");
+            Transform tf = course.transform;
+            Vector3 platformSize = new Vector3(12f, 2f, 12f);
+            float corridorHalfWidth = 16f;
+
+            CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
+            Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
+
+            // The corridor: hop platforms between two tall flanking walls.
+            CreateBlock(tf, "Hop1", new Vector3(0.4f * L, -1f, 0f), new Vector3(14f, 2f, 14f), platformMat);
+            CreateBlock(tf, "Hop2", new Vector3(0.8f * L, -1f, 0.06f * L), new Vector3(14f, 2f, 14f), platformMat);
+            CreateBlock(tf, "EndPlatform", new Vector3(1.2f * L, -1f, 0f), platformSize, platformMat);
+
+            float wallLength = 1.3f * L;
+            CreateBlock(tf, "WallLeft", new Vector3(0.6f * L, 8f, -corridorHalfWidth), new Vector3(wallLength, 20f, 2f), wallMat);
+            CreateBlock(tf, "WallRight", new Vector3(0.6f * L, 8f, corridorHalfWidth), new Vector3(wallLength, 20f, 2f), wallMat);
+
+            // Wall turrets: cylinder axis pointing INTO the corridor (half-embedded).
+            SpawnTurret("WallTurretLeft", new Vector3(0.35f * L, 8f, -corridorHalfWidth + 1.2f), new Vector3(-90f, 0f, 0f));
+            SpawnTurret("WallTurretRight", new Vector3(0.85f * L, 9f, corridorHalfWidth - 1.2f), new Vector3(90f, 0f, 0f));
+            // Pedestal turret guarding the middle hop, upright on its column.
+            CreateBlock(tf, "TurretPedestal", new Vector3(0.6f * L, 1f, -0.05f * L), new Vector3(3f, 6f, 3f), wallMat);
+            SpawnTurret("PedestalTurret", new Vector3(0.6f * L, 4.9f, -0.05f * L), Vector3.zero);
+
+            GameObject respawnPoint = new GameObject("RespawnPoint");
+            respawnPoint.transform.position = playerSpawn;
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(0.6f * L, -12f, 0f), new Vector3(1.2f * L + 60f, 2f, L + 60f), damageMat);
+            DamageWalls damage = damageFloor.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(damage);
+
+            GameObject finish = InstantiatePrefab("FinishTrigger");
+            finish.transform.position = new Vector3(1.2f * L, 2f, 0f);
+            FinishLineNextScene finishComp = finish.GetComponent<FinishLineNextScene>();
+            if (finishComp != null) finishComp.nextSceneName = "MainMenu";
+            EditorUtility.SetDirty(finish);
+
+            CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
+            PointCameraAt(rig, new Vector3(0.4f * L, 0f, 0f));
+            OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
+            WireStandaloneMeters(rig);
+
+            SaveOpenScene(level5Path);
+            Debug.Log($"KineticEnergySetup: Level 5 setup complete OK (L={L:F1}m, 3 turrets)");
+        }
+
+        // A runway crossed by blinking laser gates - staggered phases, so the route is a
+        // rhythm read. Player tuning copied from Level 5.
+        [MenuItem("Tools/Kinetic Energy/Setup Level 6")]
+        public static void SetupLevel6()
+        {
+            const string level6Path = "Assets/Scenes/Level6.unity";
+
+            EditorSceneManager.OpenScene("Assets/Scenes/Level5.unity", OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find Level 5's Player/camera to copy tuning from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            MeasureLaunchDistances(out float L, out float H);
+            NewEmptyScene(level6Path);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("Level6Course");
+            Transform tf = course.transform;
+
+            // One long runway; gates cross it at intervals with alternating phases.
+            float runwayLength = 1.1f * L;
+            CreateBlock(tf, "Runway", new Vector3(runwayLength * 0.5f, -1f, 0f), new Vector3(runwayLength + 12f, 2f, 24f), platformMat);
+            Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
+
+            GameObject respawnPoint = new GameObject("RespawnPoint");
+            respawnPoint.transform.position = playerSpawn;
+
+            CreateLaserGate(tf, "Gate1", new Vector3(0.3f * runwayLength, 0f, 0f), 24f, 12f, 1.5f, 1.5f, 0f, respawnPoint.transform);
+            CreateLaserGate(tf, "Gate2", new Vector3(0.6f * runwayLength, 0f, 0f), 24f, 12f, 1.5f, 1.5f, 1.5f, respawnPoint.transform);
+            CreateLaserGate(tf, "Gate3", new Vector3(0.85f * runwayLength, 0f, 0f), 24f, 12f, 1f, 1f, 0.75f, respawnPoint.transform);
+
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(runwayLength * 0.5f, -12f, 0f), new Vector3(runwayLength + 60f, 2f, 100f), damageMat);
+            DamageWalls damage = damageFloor.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(damage);
+
+            GameObject finish = InstantiatePrefab("FinishTrigger");
+            finish.transform.position = new Vector3(runwayLength, 2f, 0f);
+            FinishLineNextScene finishComp = finish.GetComponent<FinishLineNextScene>();
+            if (finishComp != null) finishComp.nextSceneName = "MainMenu";
+            EditorUtility.SetDirty(finish);
+
+            CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
+            PointCameraAt(rig, new Vector3(0.3f * runwayLength, 0f, 0f));
+            OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
+            WireStandaloneMeters(rig);
+
+            SaveOpenScene(level6Path);
+            Debug.Log($"KineticEnergySetup: Level 6 setup complete OK (L={L:F1}m, 3 laser gates)");
+        }
+
+        static void SpawnTurret(string name, Vector3 position, Vector3 eulerRotation)
+        {
+            GameObject instance = InstantiatePrefab("TurretEnemy");
+            instance.name = name;
+            instance.transform.position = position;
+            instance.transform.rotation = Quaternion.Euler(eulerRotation);
+        }
+
+        // The laser gate PREFAB: two grey columns (24 apart, 12 high) + a Beams root
+        // (kinematic rigidbody + DamageWalls) that LaserWall fills with red beam cylinders
+        // at runtime from its public fields. The DamageWalls respawn point CANNOT live in
+        // the prefab (cross-hierarchy scene reference) - wired per instance.
+        [MenuItem("Tools/Kinetic Energy/Create Laser Gate Prefab")]
+        public static void CreateLaserGatePrefab()
+        {
+            string path = PrefabFolder + "/LaserGate.prefab";
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null) return;
+
+            Material columnMat = MakeMaterial("LaserColumnMaterial", new Color(0.45f, 0.45f, 0.5f));
+            Material beamMat = MakeMaterial("LaserBeamMaterial", new Color(0.95f, 0.08f, 0.05f));
+            const float half = 12f;
+            const float columnHeight = 12f;
+
+            GameObject gate = new GameObject("LaserGate");
+            CreateBlock(gate.transform, "ColumnA", new Vector3(0f, columnHeight * 0.5f, -half), new Vector3(2f, columnHeight, 2f), columnMat);
+            CreateBlock(gate.transform, "ColumnB", new Vector3(0f, columnHeight * 0.5f, half), new Vector3(2f, columnHeight, 2f), columnMat);
+
+            GameObject barsRoot = new GameObject("Beams");
+            barsRoot.transform.SetParent(gate.transform, false);
+            Rigidbody barsBody = barsRoot.AddComponent<Rigidbody>();
+            barsBody.isKinematic = true;
+            barsBody.useGravity = false;
+            barsRoot.AddComponent<DamageWalls>();
+
+            LaserWall laser = gate.AddComponent<LaserWall>();
+            laser.barsRoot = barsRoot;
+            laser.beamHalfLength = half - 1f;
+            laser.beamMaterial = beamMat;
+
+            PrefabUtility.SaveAsPrefabAsset(gate, path);
+            UnityEngine.Object.DestroyImmediate(gate);
+            Debug.Log("KineticEnergySetup: LaserGate prefab created OK");
+        }
+
+        // Instantiates the LaserGate prefab and wires the per-instance bits: position,
+        // timing overrides, and the scene's respawn point onto the beams' DamageWalls.
+        static void CreateLaserGate(Transform parent, string name, Vector3 centre, float width, float columnHeight,
+            float onSeconds, float offSeconds, float phaseOffset, Transform respawnPoint)
+        {
+            CreateLaserGatePrefab();
+            GameObject gate = InstantiatePrefab("LaserGate");
+            gate.name = name;
+            gate.transform.SetParent(parent, false);
+            gate.transform.position = centre;
+
+            LaserWall laser = gate.GetComponent<LaserWall>();
+            laser.onSeconds = onSeconds;
+            laser.offSeconds = offSeconds;
+            laser.phaseOffset = phaseOffset;
+            EditorUtility.SetDirty(laser);
+
+            DamageWalls barsDamage = gate.GetComponentInChildren<DamageWalls>(true);
+            if (barsDamage != null)
+            {
+                barsDamage.respawnPoint = respawnPoint;
+                EditorUtility.SetDirty(barsDamage);
+            }
+        }
+
+        // Standalone HUD meter prefabs, wired the way every level does it now.
+        static void WireStandaloneMeters(CoreRig rig)
+        {
+            GameObject pauseSystemGo = GameObject.Find("PauseSystem");
+            Transform pauseCanvas = pauseSystemGo != null ? pauseSystemGo.transform.Find("PauseCanvas") : null;
+            if (pauseCanvas == null) return;
+
+            Transform embeddedUi = pauseCanvas.Find("EnergyMeter");
+            if (embeddedUi != null && !PrefabUtility.IsAnyPrefabInstanceRoot(embeddedUi.gameObject)) embeddedUi.gameObject.SetActive(false);
+            Transform embeddedController = pauseSystemGo.transform.Find("EnergyMeter");
+            if (embeddedController != null) embeddedController.gameObject.SetActive(false);
+
+            GameObject energyMeter = InstantiatePrefab("EnergyMeter");
+            energyMeter.transform.SetParent(pauseCanvas, false);
+            rig.controller.energyMeter = energyMeter.GetComponent<EnergyMeterController>();
+            GameObject slowdownMeter = InstantiatePrefab("SlowdownMeter");
+            slowdownMeter.transform.SetParent(pauseCanvas, false);
+            rig.controller.slowdownMeter = slowdownMeter.GetComponent<EnergyMeterController>();
+            EditorUtility.SetDirty(rig.controller);
+        }
+
+        static void SpawnFlyingEnemy(string name, Vector3 position, float radius, float detection)
+        {
+            GameObject instance = InstantiatePrefab("FlyingEnemy");
+            instance.name = name;
+            instance.transform.position = position;
+            FlyingEnemy flyer = instance.GetComponent<FlyingEnemy>();
+            flyer.flyRadius = radius;
+            flyer.detectionRadius = detection;
+            EditorUtility.SetDirty(flyer);
         }
 
         static void SpawnEnemy(string name, Vector3 position, EnemyWanderMode mode, float radius, float margin)
