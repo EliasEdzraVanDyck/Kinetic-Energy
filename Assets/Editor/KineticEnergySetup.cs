@@ -635,6 +635,30 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: quarry economy scene setup complete OK");
         }
 
+        // The aim-refinement lab scene (a QuarryNew duplicate): the AimRefinementSettings
+        // object activates the refined input pipeline HERE ONLY - every other scene keeps
+        // the exact current aim feel. The scene file must already exist (copied from
+        // QuarryNew).
+        [MenuItem("Tools/Kinetic Energy/Setup Quarry Aim Lab Scene")]
+        public static void SetupQuarryAimLab()
+        {
+            const string scenePath = "Assets/Scenes/QuarryAim.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+            {
+                throw new Exception("KineticEnergySetup: QuarryAim.unity does not exist - duplicate QuarryNew first.");
+            }
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            if (UnityEngine.Object.FindAnyObjectByType<AimRefinementSettings>(FindObjectsInactive.Include) == null)
+            {
+                GameObject settings = new GameObject("AimRefinement");
+                settings.AddComponent<AimRefinementSettings>();
+            }
+
+            SaveOpenScene(scenePath);
+            Debug.Log("KineticEnergySetup: quarry aim lab scene setup complete OK");
+        }
+
         static AimCameraPreset LoadOrCreatePreset(string path, Action<AimCameraPreset> initialize)
         {
             AimCameraPreset preset = AssetDatabase.LoadAssetAtPath<AimCameraPreset>(path);

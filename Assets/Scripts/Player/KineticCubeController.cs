@@ -933,9 +933,17 @@ namespace KineticEnergy.Player
                 // Aim adjustment runs on unscaled time - responsiveness must not slow down
                 // with the bullet-time.
                 float aimDt = Time.unscaledDeltaTime;
+                var refinement = KineticEnergy.Camera.AimRefinementSettings.Active;
                 if (groundedAimWithMouse && Mouse.current != null)
                 {
                     Vector2 mouseDelta = Mouse.current.delta.ReadValue();
+                    // Aim lab: the same fine-aim response curve the camera aim has - slow,
+                    // deliberate mouse motion steers the arrow proportionally finer.
+                    if (refinement != null && refinement.groundedFineAimEnabled && mouseDelta.sqrMagnitude > 0.0001f)
+                    {
+                        float t = Mathf.Clamp01(mouseDelta.magnitude / Mathf.Max(refinement.groundedFineAimMouseReference, 0.01f));
+                        mouseDelta *= Mathf.Lerp(refinement.groundedFineAimMinFactor, 1f, t);
+                    }
                     aimYaw = Mathf.Repeat(aimYaw + mouseDelta.x * groundedMouseAimSensitivity, 360f);
                     aimPitch = Mathf.Clamp(aimPitch - mouseDelta.y * groundedMouseAimSensitivity, minAimPitch, maxAimPitch);
                 }
@@ -948,6 +956,9 @@ namespace KineticEnergy.Player
                     && moveAction.action.activeControl != null && moveAction.action.activeControl.device is Gamepad;
                 if ((!groundedAimWithMouse || moveIsGamepad) && stick.sqrMagnitude > aimDeadzone * aimDeadzone)
                 {
+                    // Aim lab: the conditioned stick (re-scaled deadzone + response curve)
+                    // steers the arrow - fine control in the lower stick range.
+                    if (refinement != null) stick = refinement.ConditionStick(stick);
                     aimYaw = Mathf.Repeat(aimYaw + stick.x * aimRotationSpeed * aimDt, 360f);
                     aimPitch = Mathf.Clamp(aimPitch - stick.y * aimRotationSpeed * aimDt, minAimPitch, maxAimPitch);
                 }

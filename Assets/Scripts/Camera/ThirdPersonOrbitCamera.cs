@@ -233,6 +233,11 @@ namespace KineticEnergy.Camera
         float freeLookYaw;
         float freeLookPitch;
 
+        // Aim-refinement lab (AimRefinementSettings.Active - only present in its scene):
+        // One-Euro smoothing of the midair aim's yaw/pitch, reset on every aim open.
+        readonly OneEuroFilter aimYawFilter = new OneEuroFilter();
+        readonly OneEuroFilter aimPitchFilter = new OneEuroFilter();
+
         public void SetFreeLook(bool active, Vector2 input)
         {
             freeLookActive = active;
@@ -309,6 +314,8 @@ namespace KineticEnergy.Camera
                 shoulderManualHold = false;
                 freeLookYaw = 0f;
                 freeLookPitch = 0f;
+                aimYawFilter.Reset();
+                aimPitchFilter.Reset();
             }
             else
             {
@@ -429,6 +436,14 @@ namespace KineticEnergy.Camera
             // see SetMouseLookSuppressed.
             if (mouseLookSuppressed && lookIsMouseDriven) look = Vector2.zero;
 
+            // Aim-refinement lab: stick input gets the re-scaled deadzone + response curve
+            // (finer control across the lower stick range; gamepad only, mouse untouched).
+            AimRefinementSettings refinement = AimRefinementSettings.Active;
+            if (refinement != null && !lookIsMouseDriven && look.sqrMagnitude > 0.0001f)
+            {
+                look = refinement.ConditionStick(look);
+            }
+
             // Unscaled, not Time.deltaTime - Time.deltaTime already shrinks 1:1 with
             // Time.timeScale, which would otherwise make the camera merely ride along with
             // whatever fraction chargeTimeScale happens to be. Instead the camera runs at a
@@ -481,6 +496,12 @@ namespace KineticEnergy.Camera
             float fovSensitivityScale = cam != null
                 ? Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) / Mathf.Tan(normalFov * 0.5f * Mathf.Deg2Rad)
                 : 1f;
+            // Aim lab: deliberately UNDER-compensate at high zoom - a touch slower than
+            // geometrically correct, because precision matters most exactly then.
+            if (refinement != null && firstPerson)
+            {
+                fovSensitivityScale *= Mathf.Lerp(1f, 1f - refinement.zoomExtraPrecision, aimZoomFraction);
+            }
 
             if (recentering)
             {
@@ -500,6 +521,19 @@ namespace KineticEnergy.Camera
             pitch = Mathf.Clamp(pitch + pitchDelta,
                 firstPerson ? firstPersonMinPitch : minPitch,
                 firstPerson ? firstPersonMaxPitch : maxPitch);
+
+            // Aim lab: One-Euro smoothing of the midair aim's angles - adaptive, so a
+            // nearly-still aim is rock-steady on distant landings (angular tremble becomes
+            // metres out there) while fast sweeps pass through unlagged. Per-device tuning;
+            // filters are seeded fresh at every aim open.
+            if (refinement != null && refinement.smoothingEnabled && firstPerson)
+            {
+                float filterDt = Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime);
+                float cutoff = lookIsMouseDriven ? refinement.mouseMinCutoff : refinement.stickMinCutoff;
+                float beta = lookIsMouseDriven ? refinement.mouseBeta : refinement.stickBeta;
+                yaw = aimYawFilter.Filter(yaw, filterDt, cutoff, beta);
+                pitch = aimPitchFilter.Filter(pitch, filterDt, cutoff, beta);
+            }
 
             // Traditional 3rd-person platformer orbit: position swings around the target on
             // both yaw and pitch, always framing it, rather than tilting/panning in place.
