@@ -376,6 +376,11 @@ namespace KineticEnergy.Player
         // South: the up ("jump") charge/launch. LT: down ("slam"). RT: forward. All three hold-
         // to-charge, release-to-fire - see UpdateStickAimChargeScheme.
         public InputActionReference upLaunchAction;
+        // Direct request ("disable upwards launches for controllers"): when true, a GAMEPAD
+        // press of the LaunchUp action (South) can no longer start - or switch a charge to -
+        // an Up launch. The action's keyboard binding ("5") and the hard-coded Space path
+        // still work, as does everything else on the gamepad.
+        public bool gamepadUpLaunchDisabled = true;
         // Aborts whichever charge (old-style isAiming, or the new hold-to-charge system) is
         // currently in progress, without firing - needed here specifically because "release
         // fires" for the new system, unlike the charge-based schemes where release-without-RT
@@ -1065,7 +1070,7 @@ namespace KineticEnergy.Player
                 // over, and the launch then fires on the up button's release. LT is still
                 // physically held, so the one-shot latch stops it from reopening the old aim
                 // the moment this charge ends.
-                bool upConvertPressed = (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
+                bool upConvertPressed = UpLaunchActionPressedThisFrame()
                     || (mouseAirControls && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame);
                 if (upConvertPressed)
                 {
@@ -1105,7 +1110,7 @@ namespace KineticEnergy.Player
                 // branch above. Everything else grounded stays the LT-aim/RT-confirm flow.
                 // Space joins South here in the mouse-controls scenes (direct request) - the
                 // release path already listens for Space via the same mouseAirControls flag.
-                bool upPressed = energyFraction > 0f && ((upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
+                bool upPressed = energyFraction > 0f && (UpLaunchActionPressedThisFrame()
                     || (mouseAirControls && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame));
                 if (upPressed) UpdateStickAimChargeScheme();
                 else UpdateChargeBasedScheme();
@@ -1671,13 +1676,12 @@ namespace KineticEnergy.Player
                 {
                     ControlScheme.Mixed when mixedFastPacedAir =>
                         "Left Stick / WASD - Move (on the ground, while not aiming)\n" +
-                        "Grounded - Left Trigger (hold) to aim and charge, Left Stick to adjust\n" +
-                        "  aim, Right Trigger to launch. South (hold) charges an Up launch,\n" +
-                        "  release to fire - tilted toward the Left Stick, straight up centered.\n" +
-                        "Airborne - hold Right Mouse / Left Trigger to aim: first-person view\n" +
-                        "  with the trail-and-reticle preview. Hold Left Mouse / Right Trigger\n" +
-                        "  to charge, release to fire straight along where you're looking.\n" +
-                        "  Release Right Mouse at any time to cancel and return to 3rd person.\n" +
+                        "Left Trigger (hold, grounded) - Aim and charge a launch\n" +
+                        "Left Stick - Adjust the aim while charging\n" +
+                        "Right Trigger - Fire the charged launch\n" +
+                        "Right Mouse / Left Trigger (hold, airborne) - Aim in first person\n" +
+                        "Left Mouse / Right Trigger (hold) - Charge, release to fire\n" +
+                        "Release Right Mouse - Cancel and return to 3rd person\n" +
                         stuckLinePanel +
                         "Mouse / Right Stick - Camera\n" +
                         trailToggleLinePanel +
@@ -1854,6 +1858,17 @@ namespace KineticEnergy.Player
         // same sort of visual... that shows you your exact launch path" (direct request). All
         // three directions share the single energyFraction gate - same limit, for both
         // standalone StickAim and Mixed's airborne phase.
+        // All Up-charge trigger sites read the LaunchUp action through this instead of
+        // WasPressedThisFrame directly, so gamepadUpLaunchDisabled can filter out presses that
+        // came from a Gamepad device (activeControl identifies the physical control behind
+        // this frame's press) while the keyboard "5" binding keeps working.
+        bool UpLaunchActionPressedThisFrame()
+        {
+            if (upLaunchAction == null || upLaunchAction.action == null || !upLaunchAction.action.WasPressedThisFrame()) return false;
+            if (gamepadUpLaunchDisabled && upLaunchAction.action.activeControl?.device is Gamepad) return false;
+            return true;
+        }
+
         void UpdateStickAimChargeScheme()
         {
             Vector2 stick = moveAction != null && moveAction.action != null
@@ -1900,7 +1915,7 @@ namespace KineticEnergy.Player
                 // below so the release test always tracks whichever direction is now active.
                 if (controlScheme == ControlScheme.Mixed)
                 {
-                    bool upSwitch = (upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
+                    bool upSwitch = UpLaunchActionPressedThisFrame()
                         || (keyboardAvailable && Keyboard.current.spaceKey.wasPressedThisFrame);
                     bool downSwitch = (downAction != null && downAction.action != null && downAction.action.WasPressedThisFrame())
                         || (keyboardAvailable && Keyboard.current.eKey.wasPressedThisFrame);
@@ -1996,7 +2011,7 @@ namespace KineticEnergy.Player
 
                 InputActionReference downAction = DownChargeActionForCurrentScheme();
                 bool keyboardAvailable = mouseAirControls && Keyboard.current != null;
-                bool upPressed = canLaunch && ((upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.WasPressedThisFrame())
+                bool upPressed = canLaunch && (UpLaunchActionPressedThisFrame()
                     || (keyboardAvailable && Keyboard.current.spaceKey.wasPressedThisFrame));
                 bool downPressed = canLaunch && ((downAction != null && downAction.action != null && downAction.action.WasPressedThisFrame())
                     || (keyboardAvailable && Keyboard.current.eKey.wasPressedThisFrame));
