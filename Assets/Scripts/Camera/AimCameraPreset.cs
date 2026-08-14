@@ -35,10 +35,20 @@ namespace KineticEnergy.Camera
             || variant == AimCameraVariant.FreeLookOts;
 
         [Header("Over-the-shoulder placement (ignored by Baseline)")]
-        [Tooltip("Camera distance from the player (metres).")]
+        [Tooltip("Camera distance from the player (metres) at rest.")]
         public float otsBack = 1.4f;
-        [Tooltip("EXACT viewport point the player is pinned to, every frame, at any aim angle or zoom (0,0 = bottom-left of the screen). The shoulder swap mirrors the X around centre.")]
+        [Tooltip("CAP on the zoom pull-back distance. The actual distance is derived from the live FOV so the player's on-screen size stays CONSTANT across the dial - this only stops extreme zooms from pushing the camera into far geometry.")]
+        public float otsBackZoomed = 5f;
+        [Tooltip("How much of the full optical (FOV) zoom the OTS variants use at max dial (1 = the first-person view's full zoom). Safe to keep high - the constant-size player pin and pull-back carry the readability.")]
+        [Range(0.2f, 1f)] public float zoomFovFraction = 0.92f;
+        [Tooltip("Zoom response curve: 1 = linear, higher = the zoom stays gentle early and ramps hard toward full energy - a big felt difference between min and max charge.")]
+        [Range(1f, 3f)] public float zoomCurveExponent = 1.5f;
+        [Tooltip("EXACT viewport point the player is pinned to, every frame, at any aim angle (0,0 = bottom-left of the screen). The shoulder swap mirrors the X around centre.")]
         public Vector2 playerViewportAnchor = new Vector2(0.22f, 0.24f);
+        [Tooltip("LEGACY (dolly experiment) - no longer used.")]
+        [Range(0.1f, 0.9f)] public float zoomDollyPortion = 0.35f;
+        [Tooltip("The anchor at FULL energy zoom: the player glides toward (and partly past) the corner as the optical zoom magnifies them, so only a partial slice stays visible and the target lane is clear. Lower values = less player visible.")]
+        public Vector2 playerViewportAnchorZoomed = new Vector2(0.05f, 0.07f);
         [Tooltip("LEGACY (pre screen-anchor) - no longer used by the pinned OTS placement.")]
         public float otsRise = 0.35f;
         [Tooltip("LEGACY (pre screen-anchor) - no longer used by the pinned OTS placement.")]

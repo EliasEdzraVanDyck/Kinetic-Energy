@@ -329,7 +329,13 @@ namespace KineticEnergy.Camera
             if (cam == null) cam = GetComponent<UnityEngine.Camera>();
             if (cam == null) return;
             aimZoomFraction = Mathf.Clamp01(chargeFraction01);
-            cam.fieldOfView = Mathf.Lerp(normalFov, maxZoomFov, aimZoomFraction);
+            // OTS variants lean LESS on the FOV (zoomFovFraction of the full optical range)
+            // - the zoom feel comes from the pull-back distance and corner glide instead.
+            // The first-person baseline keeps its full optical zoom.
+            float opticalFraction = aimPreset != null && aimPreset.UsesOverShoulder && firstPerson
+                ? Mathf.Pow(aimZoomFraction, aimPreset.zoomCurveExponent) * aimPreset.zoomFovFraction
+                : aimZoomFraction;
+            cam.fieldOfView = Mathf.Lerp(normalFov, maxZoomFov, opticalFraction);
         }
 
         [Header("Wall Occlusion")]
@@ -546,6 +552,12 @@ namespace KineticEnergy.Camera
             Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
             Vector3 focusPoint = target.position + Vector3.up * height;
 
+            // The frame's FINAL view angles are decided BEFORE the position solve - the
+            // anchored OTS position derives from them, and rotation later applies the very
+            // same values. Computing them after the position (the old order) meant the
+            // position used one-frame-old angles: visible player jitter during aim sweeps.
+            if (firstPerson) UpdateFirstPersonViewAngles();
+
             // First person (Baseline): the player's own centre pushed forward past its front
             // face - NOT the focus point, which carries the third-person `height` lift.
             // OTS variants: over-the-shoulder behind the launch vector, with drift parallax.
@@ -601,52 +613,23 @@ namespace KineticEnergy.Camera
             // faster than the smooth time promised, which read as a near-instant snap on
             // midair launches. Real-seconds smoothing keeps the trailing consistent at any
             // game speed (slow-mo included, matching how the rotation input already works).
-            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, smoothTime,
-                Mathf.Infinity, Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
+            if (OtsAimActive && !modeSwitching)
+            {
+                // The screen anchor is a hard guarantee: once the entry blend has landed,
+                // the position is applied EXACTLY - any smoothing here trails the
+                // instantly-applied rotation and reads as player jitter during sweeps.
+                transform.position = desiredPosition;
+                velocity = Vector3.zero;
+            }
+            else
+            {
+                transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, smoothTime,
+                    Mathf.Infinity, Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
+            }
             if (modeSwitching && (transform.position - desiredPosition).sqrMagnitude < 0.0025f) modeSwitching = false;
 
             if (firstPerson)
             {
-                // The view target in yaw/pitch: the aim itself, or the cursor when it's
-                // CLOSE to the aim. Centering only engages while the cursor sits within
-                // framingMaxDeviation of the aim on both axes - a cursor further off (an
-                // up-aimed shot always lands far BELOW the aim) no longer drags the view at
-                // all, so a steep upward aim shows exactly where you're aiming instead of
-                // reading as a pitch cap. Never pulled partway: it's the cursor or the aim.
-                float targetYaw = yaw;
-                float targetPitch = pitch;
-                Vector3 framingDir = framingPoint - transform.position;
-                if (framingActive && framingDir.sqrMagnitude > 0.0001f)
-                {
-                    float framingYaw = Mathf.Atan2(framingDir.x, framingDir.z) * Mathf.Rad2Deg;
-                    float framingPitch = -Mathf.Asin(Mathf.Clamp(framingDir.normalized.y, -1f, 1f)) * Mathf.Rad2Deg;
-                    float framingYawDelta = Mathf.DeltaAngle(yaw, framingYaw);
-                    float framingPitchDelta = framingPitch - pitch;
-                    if (Mathf.Abs(framingYawDelta) <= framingMaxDeviation && Mathf.Abs(framingPitchDelta) <= framingMaxDeviation)
-                    {
-                        targetYaw = yaw + framingYawDelta;
-                        targetPitch = pitch + framingPitchDelta;
-                    }
-                }
-
-                if (framingJustStarted || !viewAnglesSeeded)
-                {
-                    // Aiming just began - land on the cursor immediately.
-                    viewYaw = targetYaw;
-                    viewPitch = targetPitch;
-                    viewAnglesSeeded = true;
-                    framingJustStarted = false;
-                }
-                else
-                {
-                    // The landing point moved (retarget, energy change) - ease across at a
-                    // capped rate, per axis. Unscaled so it feels the same during the aim's
-                    // bullet-time.
-                    float turnStep = framingTurnSpeed * Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime);
-                    viewYaw = Mathf.MoveTowardsAngle(viewYaw, targetYaw, turnStep);
-                    viewPitch = Mathf.MoveTowards(viewPitch, targetPitch, turnStep);
-                }
-
                 // Free-look (E and F): the accumulated offset rotates the VIEW in place, on
                 // top of the aim framing - the aim vector, cursor, and camera POSITION never
                 // move with it. Clamped to a cone around the default view (direct request:
@@ -766,14 +749,55 @@ namespace KineticEnergy.Camera
             return desired;
         }
 
+        // The view target in yaw/pitch: the aim itself, or the cursor when it's CLOSE to
+        // the aim (within framingMaxDeviation per axis - never pulled partway). Seeded
+        // instantly at aim open, eased at framingTurnSpeed on retargets. Runs ONCE per
+        // frame, BEFORE the position solve, so position and rotation always agree.
+        void UpdateFirstPersonViewAngles()
+        {
+            float targetYaw = yaw;
+            float targetPitch = pitch;
+            Vector3 framingDir = framingPoint - transform.position;
+            if (framingActive && framingDir.sqrMagnitude > 0.0001f)
+            {
+                float framingYaw = Mathf.Atan2(framingDir.x, framingDir.z) * Mathf.Rad2Deg;
+                float framingPitch = -Mathf.Asin(Mathf.Clamp(framingDir.normalized.y, -1f, 1f)) * Mathf.Rad2Deg;
+                float framingYawDelta = Mathf.DeltaAngle(yaw, framingYaw);
+                float framingPitchDelta = framingPitch - pitch;
+                if (Mathf.Abs(framingYawDelta) <= framingMaxDeviation && Mathf.Abs(framingPitchDelta) <= framingMaxDeviation)
+                {
+                    targetYaw = yaw + framingYawDelta;
+                    targetPitch = pitch + framingPitchDelta;
+                }
+            }
+
+            if (framingJustStarted || !viewAnglesSeeded)
+            {
+                viewYaw = targetYaw;
+                viewPitch = targetPitch;
+                viewAnglesSeeded = true;
+                framingJustStarted = false;
+            }
+            else
+            {
+                float turnStep = framingTurnSpeed * Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime);
+                viewYaw = Mathf.MoveTowardsAngle(viewYaw, targetYaw, turnStep);
+                viewPitch = Mathf.MoveTowards(viewPitch, targetPitch, turnStep);
+            }
+        }
+
         // The camera position that puts the player exactly on the preset's viewport anchor
         // for the given view rotation. shoulderSign mirrors the anchor X around centre
         // (+1 = the preset's own side, -1 = the mirrored shoulder); the smoothed swap
         // glides the anchor across the screen.
         Vector3 AnchoredPosition(Quaternion viewRotation, float shoulderSign)
         {
-            float anchorX = 0.5f + (aimPreset.playerViewportAnchor.x - 0.5f) * shoulderSign;
-            float anchorY = aimPreset.playerViewportAnchor.y;
+            // The FOV zoom magnifies the player, so the anchor simultaneously glides
+            // toward (partly past) the corner - a sliver of the player stays visible at
+            // full zoom, the target lane stays clear. Exact pin at every dial position.
+            Vector2 anchor = Vector2.Lerp(aimPreset.playerViewportAnchor, aimPreset.playerViewportAnchorZoomed, aimZoomFraction);
+            float anchorX = 0.5f + (anchor.x - 0.5f) * shoulderSign;
+            float anchorY = anchor.y;
 
             float fov = cam != null ? cam.fieldOfView : normalFov;
             float aspect = cam != null ? cam.aspect : 16f / 9f;
@@ -784,7 +808,15 @@ namespace KineticEnergy.Camera
                 (anchorX * 2f - 1f) * tanHalfX,
                 (anchorY * 2f - 1f) * tanHalfY,
                 1f).normalized;
-            return target.position - viewRotation * (anchorRay * Mathf.Max(aimPreset.otsBack, 0.5f));
+            // Distance derived from the LIVE FOV so the player's on-screen size stays
+            // CONSTANT across the dial: the pull-back exactly cancels the optical
+            // magnification for the near player (apparent size ~ 1/(distance*tan(fov/2))),
+            // while the distant target still gains the full zoom. otsBackZoomed caps the
+            // pull-back so extreme zooms can't push the camera into far geometry.
+            float baseTanHalfY = Mathf.Tan(normalFov * 0.5f * Mathf.Deg2Rad);
+            float distance = Mathf.Min(aimPreset.otsBack * (baseTanHalfY / Mathf.Max(tanHalfY, 0.01f)),
+                Mathf.Max(aimPreset.otsBackZoomed, aimPreset.otsBack));
+            return target.position - viewRotation * (anchorRay * Mathf.Max(distance, 0.5f));
         }
 
         // Fraction (0..1) of the player-to-position span that is unobstructed - the auto
