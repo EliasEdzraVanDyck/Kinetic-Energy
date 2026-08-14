@@ -43,7 +43,7 @@ namespace KineticEnergy.Level
             {
                 turret.ResetToSpawn();
             }
-            foreach (EnemyProjectile projectile in Object.FindObjectsByType<EnemyProjectile>(FindObjectsSortMode.None))
+            foreach (EnemyProjectile projectile in Object.FindObjectsByType<EnemyProjectile>(FindObjectsInactive.Exclude))
             {
                 Destroy(projectile.gameObject);
             }

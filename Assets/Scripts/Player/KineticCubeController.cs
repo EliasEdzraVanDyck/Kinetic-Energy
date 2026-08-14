@@ -440,6 +440,21 @@ namespace KineticEnergy.Player
             energyFraction = Mathf.Clamp01(energyFraction + delta);
         }
 
+        // Where the CURRENT flight will be gameSecondsAhead from now, sampled from the
+        // trajectory captured at fire (midair fires follow it exactly; grounded fires and
+        // nudged flights track it closely). Hunters use this to intercept airborne players.
+        public bool TryGetFlightPositionAhead(float gameSecondsAhead, out Vector3 position)
+        {
+            position = transform.position;
+            if (!hasLaunched || !hasValidPredictedLanding || lastTrajectoryStepCount < 2) return false;
+            float flightTime = flightElapsedSeconds + Mathf.Max(gameSecondsAhead, 0f);
+            int index = Mathf.Clamp(Mathf.RoundToInt(flightTime / Time.fixedDeltaTime), 0, lastTrajectoryStepCount - 1);
+            position = trajectoryBuffer[index];
+            return true;
+        }
+
+        float flightElapsedSeconds; // game-seconds since the current launch fired
+
         // Landing PiP support (LandingPipCamera): a vantage point along the CURRENT
         // predicted arc. Fraction 0 = at the player, 1 = at the landing. Only meaningful
         // while the midair aim is open with a valid landing prediction.
@@ -1582,6 +1597,10 @@ namespace KineticEnergy.Player
             // The flight speed-up grows with commitment: +1% game speed per 1% of the tank
             // this launch spent (see flightTimeScaleEnergyBonus).
             activeFlightTimeScale = launchFlightTimeScale + lastLaunchEnergySpent * flightTimeScaleEnergyBonus;
+            // Real-seconds estimate of THIS flight, for every launch type (the air aim also
+            // maintains it live) - hunters schedule their just-in-time dodges from this.
+            lastPredictedFlightRealSeconds = lastPredictedFlightSeconds / Mathf.Max(activeFlightTimeScale, 0.01f);
+            flightElapsedSeconds = 0f;
 
             // Arm the descent ramp: apex starts here, and the landing height is whatever the
             // aim just predicted (a shot into the void ramps toward the fall-reset instead).
@@ -1652,6 +1671,7 @@ namespace KineticEnergy.Player
             if (launchGraceTimer > 0f) launchGraceTimer -= Time.fixedDeltaTime;
             if (knockbackTimer > 0f) knockbackTimer -= Time.fixedDeltaTime;
             if (launchLockTimer > 0f) launchLockTimer -= Time.fixedDeltaTime;
+            if (hasLaunched) flightElapsedSeconds += Time.fixedDeltaTime;
             if (hasPendingEnemyKnockback)
             {
                 rb.linearVelocity = pendingEnemyKnockback;
@@ -1795,7 +1815,9 @@ namespace KineticEnergy.Player
                     nonStickyReleaseTimer = 0f;
                     rb.useGravity = true;
                     rb.linearDamping = plainFallDamping;
-                    if (enemy != null) enemy.OnHitByLaunch();
+                    // Ground enemies may carry a KILL WINDOW (hunter variants): outside it
+                    // the crash registers exactly the same, but the enemy survives.
+                    if (enemy != null) { if (enemy.CanBeKilledByLaunch) enemy.OnHitByLaunch(); }
                     else if (flyer != null) flyer.OnHitByLaunch();
                     else turret.OnHitByLaunch();
                 }

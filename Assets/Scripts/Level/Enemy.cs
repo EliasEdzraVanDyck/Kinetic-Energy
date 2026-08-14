@@ -3,6 +3,15 @@ using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
+    // When a player launch can actually KILL this enemy. Outside its window the crash
+    // still registers normally (refund, flight ends) - the enemy just survives it.
+    public enum EnemyKillWindow
+    {
+        Always,           // regular enemies - any launch kills
+        WhileCoolingDown, // hunter A - killable only during the post-attack cooldown
+        WhileWindingUp,   // hunter B ("stalker") - killable only during the telegraph
+    }
+
     public enum EnemyWanderMode
     {
         // Random points within wanderRadius of the spawn position.
@@ -62,6 +71,30 @@ namespace KineticEnergy.Level
         [Tooltip("Colour flashed during the windup.")]
         public Color windUpColor = new Color(1f, 0.35f, 0.1f);
 
+        [Header("Hunter variant")]
+        [Tooltip("ON: the attack also triggers on AIRBORNE players (no grounded/height requirement) - the ballistic solve leads to wherever they were at windup.")]
+        public bool attackAirbornePlayers = false;
+        [Tooltip("ON: walking or overshooting off a platform LAUNCHES the enemy back to the nearest platform instead of falling/resetting.")]
+        public bool returnLaunchToPlatform = false;
+        [Tooltip("How far around itself the enemy searches for a platform to return to.")]
+        public float platformSearchRadius = 60f;
+        [Tooltip("HUNTER: hop-dodge sideways when a launching player bears down on it.")]
+        public bool dodgePlayerLaunches = false;
+        [Tooltip("Outer awareness range - beyond this an incoming player is not considered at all.")]
+        public float dodgeTriggerRadius = 18f;
+        [Tooltip("The dodge fires when the player's estimated ARRIVAL is this many real seconds away - the just-in-time hop. Bigger = earlier, safer dodges.")]
+        public float dodgeLeadSeconds = 0.35f;
+        [Tooltip("Length of the sideways dodge hop.")]
+        public float dodgeDistance = 6f;
+        [Tooltip("Minimum seconds between dodges - it cannot evade forever.")]
+        public float dodgeCooldownSeconds = 1.2f;
+        [Tooltip("After its OWN attack lands, dodging stays OFF this long - the player's guaranteed punish window.")]
+        public float vulnerableAfterAttackSeconds = 2f;
+        [Tooltip("When a launch can KILL this enemy - outside the window the crash registers but the enemy survives.")]
+        public EnemyKillWindow killWindow = EnemyKillWindow.Always;
+        [Tooltip("A fired launch whose predicted landing is within this distance of the enemy books the just-in-time dodge - NO range limit on where the player fires from.")]
+        public float dodgePredictedHitRadius = 2.5f;
+
         enum EnemyState { Wandering, WindingUp, Launching, Recovering }
 
         Rigidbody body;
@@ -91,6 +124,18 @@ namespace KineticEnergy.Level
             spawnPoint = transform.position;
             originalSpawn = spawnPoint;
             player = FindAnyObjectByType<KineticCubeController>();
+            if (player != null)
+            {
+                playerBody = player.GetComponent<Rigidbody>();
+                if (dodgePlayerLaunches)
+                {
+                    // The hunter KNOWS the moment a launch is fired at it: the fired
+                    // trajectory's landing point is public knowledge, and a landing on
+                    // this enemy books a dodge timed to escape just before impact.
+                    player.LaunchFired += OnPlayerLaunchFired;
+                    player.CrashRegistered += OnPlayerCrashedSomewhere;
+                }
+            }
             bodyCollider = GetComponent<Collider>();
             if (player != null) playerCollider = player.GetComponent<Collider>();
             bodyRenderer = GetComponentInChildren<Renderer>();
@@ -110,19 +155,91 @@ namespace KineticEnergy.Level
             PickNewTarget();
         }
 
+        void OnDestroy()
+        {
+            if (player == null) return;
+            player.LaunchFired -= OnPlayerLaunchFired;
+            player.CrashRegistered -= OnPlayerCrashedSomewhere;
+        }
+
+        // Fired the instant ANY player launch leaves: if its predicted landing sits on
+        // this enemy, book the dodge for (flight time - lead) real seconds from now -
+        // not immediately, just in time.
+        void OnPlayerLaunchFired()
+        {
+            if (!dodgePlayerLaunches || vulnerableTimer > 0f || dodgeCooldownRemaining > 0f) return;
+            if (player == null || !player.HasValidPredictedLanding) return;
+
+            float hitRadius = transform.localScale.x * 0.5f + dodgePredictedHitRadius;
+            if ((player.LastPredictedLanding - body.position).sqrMagnitude > hitRadius * hitRadius) return;
+
+            scheduledDodgeTimer = Mathf.Max(player.PredictedFlightRealSecondsLive - dodgeLeadSeconds, 0.02f);
+            dodgeScheduled = true;
+        }
+
+        // The flight ended somewhere (a wall, another enemy...) - the booked dodge is moot.
+        void OnPlayerCrashedSomewhere(Vector3 position)
+        {
+            dodgeScheduled = false;
+        }
+
         void FixedUpdate()
         {
             float dt = WorldMotionTime.FixedDeltaTime;
             if (cooldownRemaining > 0f) cooldownRemaining -= dt;
+            if (dodgeCooldownRemaining > 0f) dodgeCooldownRemaining -= dt;
+            if (vulnerableTimer > 0f) vulnerableTimer -= dt;
+
+            // The cooldown kill-window has a TELL: a soft white pulse for as long as the
+            // enemy is punishable (the windup window's tell is the existing orange flash).
+            if (bodyRenderer != null && state != EnemyState.WindingUp)
+            {
+                if (killWindow == EnemyKillWindow.WhileCoolingDown && vulnerableTimer > 0f)
+                {
+                    float pulse = Mathf.PingPong(Time.unscaledTime * 2.5f, 0.4f);
+                    bodyRenderer.material.color = Color.Lerp(restColor, Color.white, pulse);
+                    vulnerablePulseActive = true;
+                }
+                else if (vulnerablePulseActive)
+                {
+                    bodyRenderer.material.color = restColor;
+                    vulnerablePulseActive = false;
+                }
+            }
+
+            // A booked dodge counts down in real seconds and fires from any ground state.
+            if (dodgeScheduled)
+            {
+                if (player == null || !player.HasLaunched) dodgeScheduled = false;
+                else
+                {
+                    scheduledDodgeTimer -= dt;
+                    // vulnerableTimer re-checked HERE too: if its own attack landed after
+                    // the booking, the punish window wins and the dodge is forfeited. A
+                    // windup-killable enemy mid-telegraph is likewise committed.
+                    bool committedToWindup = killWindow == EnemyKillWindow.WhileWindingUp && state == EnemyState.WindingUp;
+                    if (scheduledDodgeTimer <= 0f && vulnerableTimer <= 0f && !committedToWindup
+                        && (state == EnemyState.Wandering || state == EnemyState.WindingUp || state == EnemyState.Recovering))
+                    {
+                        dodgeScheduled = false;
+                        BeginDodge();
+                        return;
+                    }
+                }
+            }
 
             switch (state)
             {
                 case EnemyState.Wandering:
+                    if (dodgePlayerLaunches && ShouldDodge()) { BeginDodge(); break; }
                     if (MoveGrounded(WanderStep(dt), dt)) break;
                     if (cooldownRemaining <= 0f && PlayerIsAttackable()) BeginWindUp();
                     break;
 
                 case EnemyState.WindingUp:
+                    // Dodging out of the telegraph cancels the attack - slippery BEFORE it
+                    // strikes, but never during the post-attack punish window (ShouldDodge).
+                    if (dodgePlayerLaunches && ShouldDodge()) { BeginDodge(); break; }
                     stateTimer -= dt;
                     FlashWarning();
                     if (MoveGrounded(body.position, dt)) break;
@@ -141,11 +258,18 @@ namespace KineticEnergy.Level
             }
         }
 
-        // Grounded movement with the void catch: returns true if the enemy fell far enough
-        // to self-reset (the caller must then stop touching state for this tick).
+        // Grounded movement with the void catch: returns true if the enemy left this state
+        // (return-launched or self-reset - the caller must stop touching state this tick).
         bool MoveGrounded(Vector3 horizontalTarget, float dt)
         {
             Vector3 next = WithGroundedY(horizontalTarget, dt);
+
+            // Hunter: genuinely falling (not a step-down) - launch back to a platform
+            // instead of dropping into the void.
+            if (returnLaunchToPlatform && lastMoveUnsupported && fallVelocity < -4f)
+            {
+                return TryReturnLaunch();
+            }
             if (next.y < originalSpawn.y - 40f)
             {
                 ResetToSpawn();
@@ -155,10 +279,21 @@ namespace KineticEnergy.Level
             return false;
         }
 
+        bool lastMoveUnsupported; // set by WithGroundedY - drives the hunter's return launch
+        bool returnLaunching;     // a return hop is in flight - no re-trigger until it lands
+        bool lastFlightWasAttack; // Land() opens the punish window only after real attacks
+        float dodgeCooldownRemaining;
+        float vulnerableTimer;    // > 0: freshly attacked - dodging disabled, punish freely
+        Rigidbody playerBody;
+        bool dodgeScheduled;      // the player fired AT this enemy - hop is booked
+        float scheduledDodgeTimer; // real seconds until that hop (impact time minus lead)
+        bool vulnerablePulseActive;
+
         // Kinematic bodies ignore gravity, so ground contact is enforced by hand: the enemy
         // rests exactly on the surface below and falls under real gravity when unsupported.
         Vector3 WithGroundedY(Vector3 next, float dt)
         {
+            lastMoveUnsupported = false;
             float bodyRadius = transform.localScale.x * 0.5f;
             if (Physics.Raycast(next + Vector3.up * 0.05f, Vector3.down, out RaycastHit hit, bodyRadius + 8f)
                 && hit.collider.GetComponent<KineticCubeController>() == null)
@@ -177,6 +312,7 @@ namespace KineticEnergy.Level
             }
             else
             {
+                lastMoveUnsupported = true;
                 fallVelocity += Physics.gravity.y * dt;
                 next.y += fallVelocity * dt;
             }
@@ -252,11 +388,17 @@ namespace KineticEnergy.Level
         // ---------- Attacking ----------
 
         // Grounded prey within range, at roughly this height - airborne players are safe,
-        // which is the whole rhythm of the game.
+        // which is the whole rhythm of the game. The HUNTER variant drops both caveats:
+        // anyone inside the radius is fair game, airborne included.
         bool PlayerIsAttackable()
         {
-            if (player == null || !player.IsGrounded) return false;
+            if (player == null) return false;
             Vector3 toPlayer = player.transform.position - body.position;
+            if (attackAirbornePlayers)
+            {
+                return toPlayer.sqrMagnitude <= detectionRadius * detectionRadius;
+            }
+            if (!player.IsGrounded) return false;
             if (Mathf.Abs(toPlayer.y) > 4f) return false;
             toPlayer.y = 0f;
             return toPlayer.sqrMagnitude <= detectionRadius * detectionRadius;
@@ -269,6 +411,82 @@ namespace KineticEnergy.Level
             attackTarget = player.transform.position; // the OLD position - no homing
         }
 
+        // A launching player bearing down on this enemy - and the estimated ARRIVAL is
+        // dodgeLeadSeconds away: the hop happens just in time, not the moment the player
+        // enters some radius. Blocked entirely while the enemy is cooling down from its
+        // own attack (vulnerableTimer, sized to the attack cooldown) - that is the
+        // player's guaranteed opening.
+        bool ShouldDodge()
+        {
+            if (player == null || playerBody == null) return false;
+            if (!player.HasLaunched) return false;
+            if (dodgeCooldownRemaining > 0f || vulnerableTimer > 0f) return false;
+            // A windup-killable enemy is COMMITTED during its telegraph - dodging out of
+            // its only kill window would make it effectively immortal.
+            if (killWindow == EnemyKillWindow.WhileWindingUp && state == EnemyState.WindingUp) return false;
+
+            Vector3 toEnemy = body.position - player.transform.position;
+            float distance = toEnemy.magnitude;
+            if (distance > dodgeTriggerRadius) return false;
+
+            Vector3 velocity = playerBody.linearVelocity;
+            if (velocity.magnitude < 8f) return false;
+            if (Vector3.Dot(velocity.normalized, toEnemy.normalized) < 0.65f) return false;
+
+            // Closing speed along the approach line -> time to impact, converted to REAL
+            // seconds (the player's flight runs on sped-up game time; the enemy's reactions
+            // run on world-motion time).
+            float closingSpeed = Vector3.Dot(velocity, toEnemy / distance);
+            if (closingSpeed < 6f) return false;
+            float timeToImpact = distance / closingSpeed / Mathf.Max(Time.timeScale, 1f);
+            return timeToImpact <= dodgeLeadSeconds;
+        }
+
+        // A short sideways ballistic hop, perpendicular to the player's approach, kept on
+        // the walkable area when one is known. Reuses the flight machinery - Land() puts
+        // the enemy back to wandering (and its attack cooldown restarts, so a dodge is
+        // never immediately followed by a counter-attack).
+        void BeginDodge()
+        {
+            Vector3 approach = playerBody != null ? playerBody.linearVelocity : Vector3.forward;
+            approach.y = 0f;
+            if (approach.sqrMagnitude < 0.01f) approach = player.transform.position - body.position;
+            approach.y = 0f;
+            approach.Normalize();
+
+            Vector3 side = Vector3.Cross(Vector3.up, approach).normalized;
+            // Hop toward whichever side the enemy already sits on relative to the approach
+            // line - away from the incoming path, never across it.
+            Vector3 lateralOffset = body.position - player.transform.position;
+            float sign = Vector3.Dot(side, lateralOffset) >= 0f ? 1f : -1f;
+
+            Vector3 target = body.position + side * (sign * dodgeDistance);
+            if (TryGetWalkableArea(out float minX, out float maxX, out float minZ, out float maxZ))
+            {
+                target.x = Mathf.Clamp(target.x, minX, maxX);
+                target.z = Mathf.Clamp(target.z, minZ, maxZ);
+            }
+
+            state = EnemyState.Launching;
+            lastFlightWasAttack = false;
+            dodgeCooldownRemaining = dodgeCooldownSeconds;
+            if (bodyRenderer != null) bodyRenderer.material.color = restColor;
+            attackTarget = target;
+            fallVelocity = 0f;
+
+            Vector3 toTarget = target - body.position;
+            Vector3 flat = new Vector3(toTarget.x, 0f, toTarget.z);
+            float range = Mathf.Max(flat.magnitude, 0.5f);
+            float gravityStrength = Mathf.Abs(Physics.gravity.y);
+            float apexSpeed = Mathf.Sqrt(2f * gravityStrength * 1.5f);
+            float flightTime = (apexSpeed + Mathf.Sqrt(Mathf.Max(apexSpeed * apexSpeed - 2f * gravityStrength * toTarget.y, 0f))) / gravityStrength;
+
+            float verticalSpeed = toTarget.y / flightTime - 0.5f * Physics.gravity.y * flightTime;
+            flightVelocity = flat / flightTime + Vector3.up * verticalSpeed;
+            flightDuration = flightTime;
+            flightElapsed = 0f;
+        }
+
         void FlashWarning()
         {
             if (bodyRenderer == null) return;
@@ -278,7 +496,42 @@ namespace KineticEnergy.Level
 
         void BeginLaunch()
         {
+            // HUNTER targeting at the moment of firing: a grounded player is struck at
+            // their EXACT current position; an airborne player is INTERCEPTED - the enemy
+            // reads the player's own fired trajectory (the same data the aim showed) and
+            // solves where they'll be when this launch arrives, iteratively.
+            if (attackAirbornePlayers && player != null)
+            {
+                if (player.IsGrounded)
+                {
+                    attackTarget = player.transform.position;
+                }
+                else
+                {
+                    Vector3 target = player.transform.position;
+                    float timeScaleFactor = Mathf.Max(Time.timeScale, 1f);
+                    for (int i = 0; i < 6; i++)
+                    {
+                        float flightGuess = EstimateAttackFlightTime(target);
+                        float gameAhead = flightGuess * timeScaleFactor;
+                        if (player.TryGetFlightPositionAhead(gameAhead, out Vector3 onPath))
+                        {
+                            target = onPath; // the authoritative path the player will fly
+                        }
+                        else if (playerBody != null)
+                        {
+                            // Plain fall (no fired trajectory): simple ballistic lead.
+                            target = player.transform.position
+                                + playerBody.linearVelocity * gameAhead
+                                + 0.5f * gameAhead * gameAhead * Physics.gravity;
+                        }
+                    }
+                    attackTarget = target;
+                }
+            }
+
             state = EnemyState.Launching;
+            lastFlightWasAttack = true; // landing this flight opens the punish window
             if (bodyRenderer != null) bodyRenderer.material.color = windUpColor;
 
             // A player-style ballistic launch, solved for TIME instead of angle. The landing
@@ -305,6 +558,20 @@ namespace KineticEnergy.Level
             flightElapsed = 0f;
         }
 
+        // The attack arc's flight time for a given target - the same maths BeginLaunch
+        // uses, extracted so the intercept iteration can converge on it.
+        float EstimateAttackFlightTime(Vector3 target)
+        {
+            Vector3 toTarget = target - body.position;
+            Vector3 flat = new Vector3(toTarget.x, 0f, toTarget.z);
+            float range = Mathf.Max(flat.magnitude, 0.5f) + Mathf.Max(attackOvershoot, 0f);
+            float gravityStrength = Mathf.Abs(Physics.gravity.y);
+            float speedTime = Mathf.Clamp(range / Mathf.Max(attackLaunchSpeed, 0.1f), attackFlightTimeRange.x, attackFlightTimeRange.y);
+            float apexSpeed = Mathf.Sqrt(2f * gravityStrength * Mathf.Max(attackArcHeight, 0.1f));
+            float apexTime = (apexSpeed + Mathf.Sqrt(Mathf.Max(apexSpeed * apexSpeed - 2f * gravityStrength * toTarget.y, 0f))) / gravityStrength;
+            return Mathf.Max(speedTime, apexTime);
+        }
+
         void UpdateFlight(float dt)
         {
             flightElapsed += dt;
@@ -328,8 +595,95 @@ namespace KineticEnergy.Level
 
             body.MovePosition(next);
 
-            // Overshot into the void (the player baited it off the edge) - self-reset.
+            // Overshot into the void (the player baited it off the edge, or the attack
+            // missed everything). Hunters launch back to the nearest platform; ordinary
+            // enemies self-reset. Depth threshold well above the reset one, so the return
+            // fires while there is still room to arc back up.
+            if (returnLaunchToPlatform && !returnLaunching && next.y < originalSpawn.y - 12f)
+            {
+                TryReturnLaunch();
+                return;
+            }
             if (next.y < originalSpawn.y - 40f) ResetToSpawn();
+        }
+
+        // Hunter: pick the nearest standable platform top and ballistically hop onto it,
+        // reusing the attack-flight machinery (UpdateFlight lands it, Land() re-centres
+        // the wander there). Returns true - the caller's state handling is done.
+        bool TryReturnLaunch()
+        {
+            // Two-tier choice: platforms whose top is BELOW the hunter's current height are
+            // strongly preferred (launching down/level while still above the target is a
+            // reliable arc); higher platforms are the fallback only.
+            Vector3 best = Vector3.zero;
+            float bestDistance = float.MaxValue;
+            bool found = false;
+            Vector3 bestBelow = Vector3.zero;
+            float bestBelowDistance = float.MaxValue;
+            bool foundBelow = false;
+            float bodyRadius = transform.localScale.x * 0.5f;
+
+            foreach (Collider col in Physics.OverlapSphere(body.position, platformSearchRadius, ~0, QueryTriggerInteraction.Ignore))
+            {
+                // Standable geometry only: no dynamic bodies, no actors, no hazards.
+                if (col.attachedRigidbody != null && !col.attachedRigidbody.isKinematic) continue;
+                if (col.GetComponentInParent<KineticCubeController>() != null) continue;
+                if (col.GetComponentInParent<Enemy>() != null) continue;
+                if (col.GetComponentInParent<FlyingEnemy>() != null) continue;
+                if (col.GetComponentInParent<TurretEnemy>() != null) continue;
+                if (col.GetComponentInParent<DamageWalls>() != null) continue;
+
+                Bounds bounds = col.bounds;
+                if (bounds.size.x < 4f || bounds.size.z < 4f) continue;        // too thin to stand on
+                if (bounds.max.y > body.position.y + 20f) continue;            // unreachably high
+
+                const float inset = 1.5f;
+                Vector3 point = new Vector3(
+                    Mathf.Clamp(body.position.x, bounds.min.x + inset, bounds.max.x - inset),
+                    bounds.max.y + bodyRadius,
+                    Mathf.Clamp(body.position.z, bounds.min.z + inset, bounds.max.z - inset));
+                float distance = (point - body.position).sqrMagnitude;
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = point;
+                    found = true;
+                }
+                if (point.y <= body.position.y && distance < bestBelowDistance)
+                {
+                    bestBelowDistance = distance;
+                    bestBelow = point;
+                    foundBelow = true;
+                }
+            }
+
+            if (foundBelow) best = bestBelow; // launch while still ABOVE the target if possible
+            if (!found)
+            {
+                ResetToSpawn();
+                return true;
+            }
+
+            // Same exact time-solved arc as the attack, with enough apex to clear the ledge.
+            state = EnemyState.Launching;
+            returnLaunching = true; // one attempt per fall - the -40 reset is the backstop
+            if (bodyRenderer != null) bodyRenderer.material.color = restColor;
+            attackTarget = best;
+            fallVelocity = 0f;
+
+            Vector3 toTarget = best - body.position;
+            Vector3 flat = new Vector3(toTarget.x, 0f, toTarget.z);
+            float range = Mathf.Max(flat.magnitude, 0.5f);
+            float gravityStrength = Mathf.Abs(Physics.gravity.y);
+            float apexHeight = Mathf.Max(attackArcHeight, 1.5f) + Mathf.Max(toTarget.y, 0f);
+            float apexSpeed = Mathf.Sqrt(2f * gravityStrength * apexHeight);
+            float flightTime = (apexSpeed + Mathf.Sqrt(Mathf.Max(apexSpeed * apexSpeed - 2f * gravityStrength * toTarget.y, 0f))) / gravityStrength;
+
+            float verticalSpeed = toTarget.y / flightTime - 0.5f * Physics.gravity.y * flightTime;
+            flightVelocity = flat / flightTime + Vector3.up * verticalSpeed;
+            flightDuration = flightTime;
+            flightElapsed = 0f;
+            return true;
         }
 
         void Land(Collider landedOn)
@@ -338,6 +692,12 @@ namespace KineticEnergy.Level
             stateTimer = recoverSeconds;
             cooldownRemaining = attackCooldown;
             fallVelocity = 0f;
+            returnLaunching = false;
+            // Landed after a real ATTACK: dodging switches off while it cools down from
+            // attacking (the FULL attack cooldown, or the configured minimum if that is
+            // longer) - the player's guaranteed opening starts the moment it touches down.
+            if (lastFlightWasAttack) vulnerableTimer = Mathf.Max(vulnerableAfterAttackSeconds, attackCooldown);
+            lastFlightWasAttack = false;
             platformBelow = landedOn; // the walkable area follows the enemy to its new platform
             if (bodyRenderer != null) bodyRenderer.material.color = restColor;
         }
@@ -399,6 +759,16 @@ namespace KineticEnergy.Level
 
         // ---------- Kill / respawn ----------
 
+        // Whether a launch hitting RIGHT NOW would kill - read by the crash pipeline.
+        // The windows map onto the enemy's own tells: the windup flash and the post-
+        // attack vulnerability pulse.
+        public bool CanBeKilledByLaunch => killWindow switch
+        {
+            EnemyKillWindow.WhileCoolingDown => vulnerableTimer > 0f,
+            EnemyKillWindow.WhileWindingUp => state == EnemyState.WindingUp,
+            _ => true,
+        };
+
         // Called by KineticCubeController when a launch hits this enemy. Deactivated, not
         // destroyed - a player respawn brings every enemy back (see ResetToSpawn).
         public void OnHitByLaunch()
@@ -417,6 +787,11 @@ namespace KineticEnergy.Level
             pauseRemaining = 0f;
             cooldownRemaining = 0f;
             fallVelocity = 0f;
+            returnLaunching = false;
+            lastFlightWasAttack = false;
+            dodgeCooldownRemaining = 0f;
+            vulnerableTimer = 0f;
+            dodgeScheduled = false;
             SetPlayerCollisionIgnored(false);
             if (bodyRenderer != null) bodyRenderer.material.color = restColor;
             if (Physics.Raycast(spawnPoint, Vector3.down, out RaycastHit hit, 5f)) platformBelow = hit.collider;

@@ -2186,6 +2186,161 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: Level 4 setup complete OK (L={L:F1}m, 3 flying enemies)");
         }
 
+        // ==================== Level 7 - hunter enemies ====================
+
+        // The HUNTER prefab: the ground enemy with its variant flags on - attacks airborne
+        // players, launches back to the nearest platform instead of falling, and sees
+        // further. Crimson so it reads as the dangerous cousin.
+        [MenuItem("Tools/Kinetic Energy/Create Hunter Enemy Prefab")]
+        public static void CreateHunterEnemyPrefab()
+        {
+            string path = PrefabFolder + "/HunterEnemy.prefab";
+            GameObject existing = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (existing != null)
+            {
+                // Prefab exists - stamp the newer hunter capabilities onto it (dodging),
+                // leaving every user-tuned value alone.
+                GameObject root = PrefabUtility.LoadPrefabContents(path);
+                try
+                {
+                    Enemy existingHunter = root.GetComponent<Enemy>();
+                    if (existingHunter != null
+                        && (!existingHunter.dodgePlayerLaunches || existingHunter.killWindow != EnemyKillWindow.WhileCoolingDown))
+                    {
+                        existingHunter.dodgePlayerLaunches = true;
+                        existingHunter.killWindow = EnemyKillWindow.WhileCoolingDown;
+                        PrefabUtility.SaveAsPrefabAsset(root, path);
+                        Debug.Log("KineticEnergySetup: HunterEnemy prefab updated (dodge + cooldown kill window) OK");
+                    }
+                }
+                finally { PrefabUtility.UnloadPrefabContents(root); }
+                return;
+            }
+
+            GameObject temp = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            temp.name = "HunterEnemy";
+            temp.transform.localScale = Vector3.one * 2f;
+            Material material = MakeMaterial("HunterEnemyMaterial", new Color(0.8f, 0.2f, 0.15f));
+            temp.GetComponent<Renderer>().sharedMaterial = material;
+            Enemy hunter = temp.AddComponent<Enemy>();
+            hunter.attackAirbornePlayers = true;
+            hunter.returnLaunchToPlatform = true;
+            hunter.dodgePlayerLaunches = true;
+            hunter.killWindow = EnemyKillWindow.WhileCoolingDown;
+            hunter.detectionRadius = 20f;
+            hunter.moveSpeed = 4.5f;
+            PrefabUtility.SaveAsPrefabAsset(temp, path);
+            UnityEngine.Object.DestroyImmediate(temp);
+            Debug.Log("KineticEnergySetup: HunterEnemy prefab created OK");
+        }
+
+        // Hunter variant B: the STALKER - killable only during its attack TELEGRAPH (it is
+        // committed then and cannot dodge), untouchable the rest of the time.
+        [MenuItem("Tools/Kinetic Energy/Create Stalker Enemy Prefab")]
+        public static void CreateStalkerEnemyPrefab()
+        {
+            string path = PrefabFolder + "/StalkerEnemy.prefab";
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null) return;
+
+            GameObject temp = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            temp.name = "StalkerEnemy";
+            temp.transform.localScale = Vector3.one * 2f;
+            Material material = MakeMaterial("StalkerEnemyMaterial", new Color(0.45f, 0.12f, 0.4f));
+            temp.GetComponent<Renderer>().sharedMaterial = material;
+            Enemy stalker = temp.AddComponent<Enemy>();
+            stalker.attackAirbornePlayers = true;
+            stalker.returnLaunchToPlatform = true;
+            stalker.dodgePlayerLaunches = true;
+            stalker.killWindow = EnemyKillWindow.WhileWindingUp;
+            stalker.detectionRadius = 20f;
+            stalker.moveSpeed = 4.5f;
+            PrefabUtility.SaveAsPrefabAsset(temp, path);
+            UnityEngine.Object.DestroyImmediate(temp);
+            Debug.Log("KineticEnergySetup: StalkerEnemy prefab created OK");
+        }
+
+        // A stepped platform cluster over the void - hunters roam it, punish airborne
+        // crossings, and hop back when baited off edges. Tuning copied from Level 6.
+        [MenuItem("Tools/Kinetic Energy/Setup Level 7")]
+        public static void SetupLevel7()
+        {
+            const string level7Path = "Assets/Scenes/Level7.unity";
+
+            EditorSceneManager.OpenScene("Assets/Scenes/Level6.unity", OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find Level 6's Player/camera to copy tuning from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            CreateHunterEnemyPrefab();
+            MeasureLaunchDistances(out float L, out float H);
+            NewEmptyScene(level7Path);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("Level7Course");
+            Transform tf = course.transform;
+            Vector3 platformSize = new Vector3(12f, 2f, 12f);
+
+            // A stepped cluster: heights vary, so airborne crossings are constant - which
+            // is exactly what hunters punish.
+            CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
+            Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
+
+            CreateBlock(tf, "StepA", new Vector3(0.35f * L, -1f, 0.04f * L), new Vector3(18f, 2f, 18f), platformMat);
+            SpawnHunter("HunterA", new Vector3(0.35f * L, 1f, 0.04f * L), EnemyWanderMode.PlatformSurface, 10f);
+
+            CreateBlock(tf, "StepB", new Vector3(0.62f * L, 3f, -0.08f * L), new Vector3(18f, 2f, 18f), platformMat);
+            SpawnHunter("HunterB", new Vector3(0.62f * L, 5f, -0.08f * L), EnemyWanderMode.PlatformSurface, 10f);
+
+            CreateBlock(tf, "StepC", new Vector3(0.9f * L, 7f, 0.02f * L), new Vector3(20f, 2f, 20f), platformMat);
+            SpawnHunter("HunterC", new Vector3(0.9f * L, 9f, 0.02f * L), EnemyWanderMode.WithinRadius, 8f);
+
+            CreateBlock(tf, "EndPlatform", new Vector3(1.25f * L, 7f, 0f), platformSize, platformMat);
+
+            GameObject respawnPoint = new GameObject("RespawnPoint");
+            respawnPoint.transform.position = playerSpawn;
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(0.62f * L, -14f, 0f), new Vector3(1.25f * L + 60f, 2f, L + 60f), damageMat);
+            DamageWalls damage = damageFloor.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(damage);
+
+            GameObject finish = InstantiatePrefab("FinishTrigger");
+            finish.transform.position = new Vector3(1.25f * L, 10f, 0f);
+            FinishLineNextScene finishComp = finish.GetComponent<FinishLineNextScene>();
+            if (finishComp != null) finishComp.nextSceneName = "MainMenu";
+            EditorUtility.SetDirty(finish);
+
+            CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
+            PointCameraAt(rig, new Vector3(0.35f * L, 0f, 0f));
+            OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
+            WireStandaloneMeters(rig);
+
+            SaveOpenScene(level7Path);
+            Debug.Log($"KineticEnergySetup: Level 7 setup complete OK (L={L:F1}m, 3 hunters)");
+        }
+
+        static void SpawnHunter(string name, Vector3 position, EnemyWanderMode mode, float radius)
+        {
+            GameObject instance = InstantiatePrefab("HunterEnemy");
+            instance.name = name;
+            instance.transform.position = position;
+            Enemy hunter = instance.GetComponent<Enemy>();
+            hunter.wanderMode = mode;
+            hunter.wanderRadius = radius;
+            EditorUtility.SetDirty(hunter);
+        }
+
         // ==================== Level 5 - turrets / Level 6 - laser walls ====================
 
         [MenuItem("Tools/Kinetic Energy/Create Turret Prefab")]
