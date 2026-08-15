@@ -31,9 +31,44 @@ namespace KineticEnergy.Player
         [Tooltip("What the preview shows before any runtime SetMode call.")]
         public PredictionMode initialMode = PredictionMode.Trail;
 
+        [Header("Anti-jitter (visual smoothing only - the prediction itself is untouched)")]
+        [Tooltip("Seconds of positional smoothing on the landing cursor. Short enough to stay under perceptible input latency, long enough to absorb per-frame prediction wobble.")]
+        public float cursorSmoothTime = 0.055f;
+        [Tooltip("Seconds of positional smoothing on each trail dot.")]
+        public float dotSmoothTime = 0.05f;
+        [Tooltip("A cursor/dot whose target jumps farther than this snaps instantly instead of gliding - a landing teleporting across geometry must not sweep the visuals through the air.")]
+        public float smoothSnapDistance = 3f;
+        [Tooltip("The cursor survives losing the landing for this long, holding its last valid spot - single-frame prediction misses no longer blink it out.")]
+        public float cursorHideGraceSeconds = 0.12f;
+        [Tooltip("Per-frame target movement at or below this gets FULL smoothing; faster (deliberate) sweeps proportionally bypass it - far dots and the cursor track camera turns raw instead of breaking away behind them.")]
+        public float smoothNoiseReference = 0.08f;
+
         PredictionMode currentMode = PredictionMode.Trail;
         bool isVisible;
         bool hasLanding = true;
+
+        // Anti-jitter state.
+        Vector3 cursorVelocity;
+        bool cursorWasShown;
+        float noLandingTimer;
+        Vector3 lastCursorPosition;
+        Quaternion lastCursorRotation = Quaternion.identity;
+        Vector3 cursorPrevTarget;
+        float smoothedArcLength;
+        Vector3[] dotVelocities;
+        bool[] dotWasActive;
+        Vector3[] dotPrevTargets;
+
+        float SmoothDt => Mathf.Min(Time.unscaledDeltaTime, 1f / 30f);
+
+        // Noise moves a target millimetres per frame; a deliberate camera sweep moves the
+        // far targets much more. The smoothing time shrinks in proportion, so shimmer is
+        // absorbed while intentional motion tracks essentially raw - the fixed smoothing
+        // made the far dots and cursor visibly break away during turns.
+        float AdaptiveTau(float baseTau, float targetDelta)
+        {
+            return baseTau * Mathf.Clamp01(smoothNoiseReference / Mathf.Max(targetDelta, 0.0001f));
+        }
 
         public PredictionMode CurrentMode => currentMode;
 
@@ -45,6 +80,18 @@ namespace KineticEnergy.Player
         public void SetVisible(bool visible)
         {
             isVisible = visible;
+            if (!visible)
+            {
+                // A fresh aim must SNAP its visuals into place, never glide from where
+                // the previous aim left them.
+                cursorWasShown = false;
+                noLandingTimer = 0f;
+                smoothedArcLength = 0f;
+                if (dotWasActive != null)
+                {
+                    for (int i = 0; i < dotWasActive.Length; i++) dotWasActive[i] = false;
+                }
+            }
             ApplyModeVisibility();
         }
 
@@ -61,19 +108,58 @@ namespace KineticEnergy.Player
         // the marker flush against the landing face (wall, floor, ceiling alike).
         public void SetLandingPoint(Vector3 lineStart, Vector3 landingPoint, Vector3[] trajectory, int trajectoryCount, bool didLand, Vector3 landingNormal = default)
         {
-            hasLanding = didLand;
+            // GRACE on losing the landing: single-frame prediction misses used to blink
+            // the cursor out (and a moving camera made it pop in late) - the cursor now
+            // holds its last valid spot briefly and only hides if the miss persists.
+            if (didLand)
+            {
+                noLandingTimer = 0f;
+                Vector3 normal = landingNormal.sqrMagnitude > 0.0001f ? landingNormal.normalized : Vector3.up;
+                lastCursorPosition = landingPoint + normal * (markerGroundOffset + markerSurfaceLift);
+                lastCursorRotation = Quaternion.FromToRotation(Vector3.up, normal);
+            }
+            else
+            {
+                noLandingTimer += SmoothDt;
+            }
+            hasLanding = didLand || (cursorWasShown && noLandingTimer <= cursorHideGraceSeconds);
             ApplyModeVisibility();
 
-            // The cursor tracks the prediction INSTANTLY - no smoothing glide. The aim's
-            // feedback loop lives on this marker, so any lag reads as input latency.
+            // The cursor follows the prediction through a VERY short smoothing (~3 frames):
+            // under the latency a hand can feel, but enough to absorb the per-frame
+            // prediction wobble that read as heavy cursor jitter. Far jumps (the landing
+            // teleporting to different geometry) and fresh appearances still SNAP.
             if (hasLanding && crosshairGroup != null)
             {
-                Vector3 normal = landingNormal.sqrMagnitude > 0.0001f ? landingNormal.normalized : Vector3.up;
-                crosshairGroup.transform.position = landingPoint + normal * (markerGroundOffset + markerSurfaceLift);
-                crosshairGroup.transform.rotation = Quaternion.FromToRotation(Vector3.up, normal);
+                float cursorTargetDelta = Vector3.Distance(cursorPrevTarget, lastCursorPosition);
+                float cursorTau = AdaptiveTau(cursorSmoothTime, cursorTargetDelta);
+                if (!cursorWasShown || cursorTau <= 0.001f
+                    || Vector3.Distance(crosshairGroup.transform.position, lastCursorPosition) > smoothSnapDistance)
+                {
+                    crosshairGroup.transform.position = lastCursorPosition;
+                    crosshairGroup.transform.rotation = lastCursorRotation;
+                    cursorVelocity = Vector3.zero;
+                }
+                else
+                {
+                    crosshairGroup.transform.position = Vector3.SmoothDamp(
+                        crosshairGroup.transform.position, lastCursorPosition,
+                        ref cursorVelocity, cursorTau, Mathf.Infinity, SmoothDt);
+                    crosshairGroup.transform.rotation = Quaternion.Slerp(
+                        crosshairGroup.transform.rotation, lastCursorRotation,
+                        Mathf.Clamp01(SmoothDt / Mathf.Max(cursorTau, 0.0001f)));
+                }
             }
+            cursorPrevTarget = lastCursorPosition;
+            cursorWasShown = hasLanding;
 
             if (trailDots == null || trailDots.Length == 0) return;
+            if (dotVelocities == null || dotVelocities.Length != trailDots.Length)
+            {
+                dotVelocities = new Vector3[trailDots.Length];
+                dotWasActive = new bool[trailDots.Length];
+                dotPrevTargets = new Vector3[trailDots.Length];
+            }
 
             // Real arc length (summed segment distance), not the straight-line chord - a
             // lofted shot's path is meaningfully longer than the chord between its endpoints.
@@ -90,7 +176,12 @@ namespace KineticEnergy.Player
                 totalLength = Vector3.Distance(lineStart, landingPoint);
             }
 
-            int neededDots = Mathf.Clamp(Mathf.CeilToInt(totalLength / Mathf.Max(maxDotSpacing, 0.01f)), 1, trailDots.Length);
+            // The DOT COUNT derives from a time-smoothed arc length: the raw length
+            // wobbles every frame, and count flapping blinked the tail dots on and off.
+            smoothedArcLength = smoothedArcLength <= 0f
+                ? totalLength
+                : Mathf.Lerp(smoothedArcLength, totalLength, Mathf.Clamp01(SmoothDt / 0.08f));
+            int neededDots = Mathf.Clamp(Mathf.CeilToInt(smoothedArcLength / Mathf.Max(maxDotSpacing, 0.01f)), 1, trailDots.Length);
 
             // A small FIXED buffer keeps the last dot from sitting exactly on the marker,
             // without growing with trajectory length.
@@ -110,12 +201,13 @@ namespace KineticEnergy.Player
                     if (i >= neededDots)
                     {
                         trailDots[i].gameObject.SetActive(false);
+                        dotWasActive[i] = false;
                         continue;
                     }
                     trailDots[i].gameObject.SetActive(true);
 
                     float t = totalLength > 0.0001f ? (usableLength * (i + 1) / neededDots) / totalLength : 0f;
-                    trailDots[i].position = Vector3.Lerp(lineStart, landingPoint, t);
+                    PlaceDotSmoothed(i, Vector3.Lerp(lineStart, landingPoint, t));
                 }
             }
         }
@@ -137,6 +229,7 @@ namespace KineticEnergy.Player
                 if (d >= neededDots)
                 {
                     trailDots[d].gameObject.SetActive(false);
+                    dotWasActive[d] = false;
                     continue;
                 }
                 trailDots[d].gameObject.SetActive(true);
@@ -154,8 +247,31 @@ namespace KineticEnergy.Player
                     ? Mathf.Clamp01((targetLength - segmentStartLength) / segmentLength)
                     : 0f;
 
-                trailDots[d].position = Vector3.Lerp(trajectory[segmentEnd - 1], trajectory[segmentEnd], segmentT);
+                PlaceDotSmoothed(d, Vector3.Lerp(trajectory[segmentEnd - 1], trajectory[segmentEnd], segmentT));
             }
+        }
+
+        // Dots glide onto their freshly computed spots through a ~3-frame smoothing, so
+        // the whole trail stops shimmering with the prediction. Fresh activations and
+        // far target jumps snap - a dot must never be seen sweeping across the level.
+        void PlaceDotSmoothed(int index, Vector3 targetPosition)
+        {
+            Transform dot = trailDots[index];
+            float targetDelta = Vector3.Distance(dotPrevTargets[index], targetPosition);
+            float tau = AdaptiveTau(dotSmoothTime, targetDelta);
+            if (!dotWasActive[index] || tau <= 0.001f
+                || Vector3.Distance(dot.position, targetPosition) > smoothSnapDistance)
+            {
+                dot.position = targetPosition;
+                dotVelocities[index] = Vector3.zero;
+            }
+            else
+            {
+                dot.position = Vector3.SmoothDamp(dot.position, targetPosition,
+                    ref dotVelocities[index], tau, Mathf.Infinity, SmoothDt);
+            }
+            dotPrevTargets[index] = targetPosition;
+            dotWasActive[index] = true;
         }
 
         void ApplyModeVisibility()

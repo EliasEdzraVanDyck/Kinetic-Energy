@@ -157,14 +157,28 @@ namespace KineticEnergy.Camera
         // violent whipping when a target jumps (direct request).
         public float framingTurnSpeed = 300f;
         // How close (degrees, per axis) the cursor must be to the AIM for the view to centre
-        // on it. Past this the view stays glued to the aim - never pulled partway - so a
-        // steeply-up shot, which arcs over and lands far BELOW you, can't drag the view down
-        // and read as an upward pitch cap (direct report, twice).
+        // on it. Past this the view stays glued to the aim, so a steeply-up shot, which
+        // arcs over and lands far BELOW you, can't drag the view down and read as an
+        // upward pitch cap (direct report, twice).
         public float framingMaxDeviation = 45f;
+        [Tooltip("Fully cursor-framed while the cursor is within this many degrees of the aim; from here to Framing Max Deviation the view BLENDS gradually back to the raw aim instead of switching at the edge (the hard edge made steep low-energy up-aims rotate abruptly - direct report).")]
+        public float framingBlendStartDegrees = 25f;
+        [Tooltip("How fast the framing blend weight may change per second (1 = a full handover takes a second). The TIME smoothing is what keeps the blend jitter-free: landing-prediction wobble can no longer whip the blend within a frame.")]
+        public float framingBlendSpeed = 2.5f;
+        [Tooltip("Seconds of world-space smoothing on the landing point before the view frames it. Close landings turn tiny prediction wobble into big view rotation - this absorbs the wobble at its source while deliberate cursor moves still track promptly.")]
+        public float framingPointSmoothTime = 0.12f;
 
         bool framingActive;
         Vector3 framingPoint;
         bool framingJustStarted;
+        float framedWeightCurrent; // time-smoothed framing blend weight (see UpdateFirstPersonViewAngles)
+        // The landing point is smoothed IN WORLD SPACE before any angle is derived from
+        // it: a low-energy steep aim lands CLOSE, where even centimetres of per-frame
+        // prediction wobble become degrees of view rotation - the true source of the
+        // aim-framing jitter. Snapped whenever framing (re)opens.
+        Vector3 framingPointSmoothed;
+        Vector3 framingPointVelocity;
+        bool framingWasActive;
 
         // The first-person VIEW's own yaw/pitch, eased toward the framing target. Kept as
         // separate angles (not a quaternion slerp) on purpose: interpolating between two
@@ -324,11 +338,31 @@ namespace KineticEnergy.Camera
             }
         }
 
+        [Tooltip("Seconds of smoothing on the aim zoom - wheel notches and dial steps GLIDE the FOV (and everything derived from it: OTS anchor, pull-back, sensitivity) instead of stepping it.")]
+        public float aimZoomSmoothTime = 0.09f;
+        float aimZoomTarget;
+        float aimZoomVelocity;
+
+        // Records the zoom TARGET; the applied zoom eases toward it in LateUpdate. The
+        // energy dial arrives in steps (a mouse wheel is notched by nature), and applying
+        // it raw stepped the FOV - the glide is what makes zooming read as smooth.
         public void SetAimZoom(float chargeFraction01)
+        {
+            aimZoomTarget = Mathf.Clamp01(chargeFraction01);
+            if (!firstPerson)
+            {
+                // Outside an aim (including the aim CLOSE) the zoom snaps - the mode
+                // switch has its own transition, a lingering FOV glide would fight it.
+                aimZoomFraction = aimZoomTarget;
+                aimZoomVelocity = 0f;
+                ApplyAimZoomFov();
+            }
+        }
+
+        void ApplyAimZoomFov()
         {
             if (cam == null) cam = GetComponent<UnityEngine.Camera>();
             if (cam == null) return;
-            aimZoomFraction = Mathf.Clamp01(chargeFraction01);
             // OTS variants lean LESS on the FOV (zoomFovFraction of the full optical range)
             // - the zoom feel comes from the pull-back distance and corner glide instead.
             // The first-person baseline keeps its full optical zoom.
@@ -442,6 +476,16 @@ namespace KineticEnergy.Camera
         {
             if (target == null) return;
             if (Time.timeScale <= 0f) return;
+
+            // The aim zoom GLIDES toward its dialed target - runs before everything
+            // else, since the FOV feeds the anchor solve and the look sensitivity.
+            if (firstPerson && Mathf.Abs(aimZoomFraction - aimZoomTarget) > 0.0001f)
+            {
+                aimZoomFraction = Mathf.SmoothDamp(aimZoomFraction, aimZoomTarget,
+                    ref aimZoomVelocity, aimZoomSmoothTime, Mathf.Infinity,
+                    Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
+                ApplyAimZoomFov();
+            }
 
             Vector2 look = lookAction != null && lookAction.action != null
                 ? lookAction.action.ReadValue<Vector2>()
@@ -776,18 +820,73 @@ namespace KineticEnergy.Camera
         {
             float targetYaw = yaw;
             float targetPitch = pitch;
-            Vector3 framingDir = framingPoint - transform.position;
-            if (framingActive && framingDir.sqrMagnitude > 0.0001f)
+            // Framed from the PLAYER's position, never the camera's own: the camera
+            // position is derived from these view angles, so measuring the cursor angle
+            // from it closes a feedback loop - harmless under the old all-or-nothing
+            // framing, but at PARTIAL blend weights it self-oscillates (view turns ->
+            // position shifts -> measured angle changes -> target moves), which was the
+            // jitter that survived the weight smoothing.
+            Vector3 framingOrigin = target != null ? target.position : transform.position;
+
+            // Absorb landing-prediction wobble at its SOURCE, in world space. A fresh
+            // framing engagement snaps the smoothed point so the aim-open snap still
+            // lands exactly on the cursor.
+            if (framingActive)
+            {
+                if (!framingWasActive || framingJustStarted)
+                {
+                    framingPointSmoothed = framingPoint;
+                    framingPointVelocity = Vector3.zero;
+                }
+                else
+                {
+                    framingPointSmoothed = Vector3.SmoothDamp(framingPointSmoothed, framingPoint,
+                        ref framingPointVelocity, framingPointSmoothTime, Mathf.Infinity,
+                        Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
+                }
+            }
+            framingWasActive = framingActive;
+
+            Vector3 framingDir = framingPointSmoothed - framingOrigin;
+            float framingYawDelta = 0f;
+            float framingPitchDelta = 0f;
+            float targetWeight = 0f;
+            bool framingValid = framingActive && framingDir.sqrMagnitude > 0.0001f;
+            if (framingValid)
             {
                 float framingYaw = Mathf.Atan2(framingDir.x, framingDir.z) * Mathf.Rad2Deg;
                 float framingPitch = -Mathf.Asin(Mathf.Clamp(framingDir.normalized.y, -1f, 1f)) * Mathf.Rad2Deg;
-                float framingYawDelta = Mathf.DeltaAngle(yaw, framingYaw);
-                float framingPitchDelta = framingPitch - pitch;
-                if (Mathf.Abs(framingYawDelta) <= framingMaxDeviation && Mathf.Abs(framingPitchDelta) <= framingMaxDeviation)
+                framingYawDelta = Mathf.DeltaAngle(yaw, framingYaw);
+                framingPitchDelta = framingPitch - pitch;
+                // GRADUAL handover instead of a cliff at the deviation limit: fully
+                // framed inside framingBlendStartDegrees, zero at framingMaxDeviation,
+                // smoothstepped between - a steep low-energy up-aim rotates smoothly
+                // through the band, and large deviations still pull nothing at all.
+                float deviation = Mathf.Max(Mathf.Abs(framingYawDelta), Mathf.Abs(framingPitchDelta));
+                if (deviation <= framingMaxDeviation)
                 {
-                    targetYaw = yaw + framingYawDelta;
-                    targetPitch = pitch + framingPitchDelta;
+                    // EASE-OUT curve, not smoothstep: the weight stays near 1 through
+                    // most of the band and releases only close to the outer edge - with
+                    // smoothstep, a cursor 35 degrees below a slightly-up aim was left
+                    // ~29 degrees off-centre, pushing it (and any target there) just
+                    // below the screen. Still perfectly continuous at both edges.
+                    float blendSpan = Mathf.Max(framingMaxDeviation - framingBlendStartDegrees, 0.01f);
+                    float t = Mathf.Clamp01((deviation - framingBlendStartDegrees) / blendSpan);
+                    targetWeight = 1f - t * t;
                 }
+            }
+
+            // The weight itself is eased over TIME, never applied raw: inside the band
+            // the raw weight's slope amplifies every landing-prediction wobble into a
+            // multi-degree target swing (that read as heavy jitter - direct report).
+            // Rate-limited, the wobble moves the weight imperceptibly per frame while
+            // the deliberate handover still glides across the band.
+            framedWeightCurrent = Mathf.MoveTowards(framedWeightCurrent, targetWeight,
+                framingBlendSpeed * Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
+            if (framingValid && framedWeightCurrent > 0.0001f)
+            {
+                targetYaw = yaw + framingYawDelta * framedWeightCurrent;
+                targetPitch = pitch + framingPitchDelta * framedWeightCurrent;
             }
 
             if (framingJustStarted || !viewAnglesSeeded)
@@ -796,6 +895,7 @@ namespace KineticEnergy.Camera
                 viewPitch = targetPitch;
                 viewAnglesSeeded = true;
                 framingJustStarted = false;
+                framedWeightCurrent = targetWeight; // the aim OPEN starts at the true weight
             }
             else
             {
