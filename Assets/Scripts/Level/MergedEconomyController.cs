@@ -8,10 +8,12 @@ namespace KineticEnergy.Level
 {
     public enum MergedEconomyVariant
     {
-        RevocableExtra,    // A - the latest chain extra stays provisional orange; a lapse revokes it
-        BankedExtra,       // B - every chain extra banks INSTANTLY as normal energy; a lapse only resets the multiplier
-        RevocableExtraMax, // C - variant A, but every launch fires at MAX energy automatically
-        BankedExtraMax,    // D - variant B, but every launch fires at MAX energy automatically
+        RevocableExtra,     // A - the latest chain extra stays provisional orange; a lapse revokes it
+        BankedExtra,        // B - every chain extra banks INSTANTLY as normal energy; a lapse only resets the multiplier
+        RevocableExtraMax,  // C - variant A, but every launch fires at MAX energy automatically
+        BankedExtraMax,     // D - variant B, but every launch fires at MAX energy automatically
+        DualRefundRevocable, // E - manual energy; the landing pays from BOTH the flight's first launch and its midair relaunches, each with its own base + combo increment; extra revocable
+        DualRefundBanked,    // F - variant E with the extras banking instantly
     }
 
     // QuarryEconomy2's single MERGED economy (a scene object, never a prefab) - the combo
@@ -29,13 +31,16 @@ namespace KineticEnergy.Level
     //      this harness) and the ground-pound boost pipeline fill the last 20%.
     public class MergedEconomyController : MonoBehaviour
     {
-        [Tooltip("A: revocable chain extra (capped at 20% of the tank). B: extras bank instantly. C/D: the same two with every launch auto-firing at MAX energy. Cycle with V / D-pad Right and C / D-pad Left.")]
+        [Tooltip("A: revocable chain extra (at a FULL tank the boosted part caps at the top 20%; below full it may exceed 20%). B: extras bank instantly. C/D: the same two with every launch auto-firing at MAX energy. Cycle with V / D-pad Right and C / D-pad Left.")]
         public MergedEconomyVariant currentVariant = MergedEconomyVariant.RevocableExtra;
 
         bool BankedMode => currentVariant == MergedEconomyVariant.BankedExtra
-            || currentVariant == MergedEconomyVariant.BankedExtraMax;
+            || currentVariant == MergedEconomyVariant.BankedExtraMax
+            || currentVariant == MergedEconomyVariant.DualRefundBanked;
         bool AutoMaxMode => currentVariant == MergedEconomyVariant.RevocableExtraMax
             || currentVariant == MergedEconomyVariant.BankedExtraMax;
+        bool DualRefundMode => currentVariant == MergedEconomyVariant.DualRefundRevocable
+            || currentVariant == MergedEconomyVariant.DualRefundBanked;
 
         [Header("1 - Combo refunds")]
         [Tooltip("Refund fraction of the spent energy for an unchained landing, any aim method.")]
@@ -51,6 +56,20 @@ namespace KineticEnergy.Level
         public Color comboMeterColor = new Color(1f, 0.62f, 0.1f);
         [Tooltip("Scene objects (found by name at Start) whose surface never counts: no refund, no chain. Only the big flat floor - QuarryTerrain must NOT be listed.")]
         public string[] bigFloorObjectNames = { "QuarryFloor" };
+
+        [Header("E/F - Dual-launch refunds")]
+        [Tooltip("E/F: refund multiplier on the FLIGHT-OPENING launch's spend, at combo level 0.")]
+        public float firstLaunchBaseRefund = 0.6f;
+        [Tooltip("E/F: added to the first-launch multiplier per chained landing.")]
+        public float firstLaunchStepPerLevel = 0.1f;
+        [Tooltip("E/F: refund multiplier on the MIDAIR relaunch spend (all relaunches of the flight together), at combo level 0.")]
+        public float midairLaunchBaseRefund = 0.85f;
+        [Tooltip("E/F: added to the midair-relaunch multiplier per chained landing.")]
+        public float midairLaunchStepPerLevel = 0.15f;
+        [Tooltip("E/F's OWN safety recharge trigger - dropping below this switches the grounded recharge on in the dual variants.")]
+        [Range(0f, 1f)] public float dualSafetyTriggerFraction = 0.1f;
+        [Tooltip("E/F's OWN safety recharge ceiling - the recharge fills to here, then switches off until the next dip below the trigger.")]
+        [Range(0f, 1f)] public float dualSafetyCeilingFraction = 0.4f;
 
         [Header("2 - Safety recharge")]
         [Tooltip("Dropping below this fraction switches the grounded recharge ON.")]
@@ -76,10 +95,16 @@ namespace KineticEnergy.Level
         // the multiplier inflation: the base refund flows through the (ceiling-capped)
         // controller pipeline, the chain EXTRA is paid here directly so it may pass the cap.
         int comboCount;
-        float comboExtra;        // the latest landing's extra (variant A/C) - revocable orange, never above 20%
+        float comboExtra;        // the latest landing's extra (revocable variants) - orange; capped at 20% only at a FULL tank
         float windowRemaining;
         bool chainInFlight;
         Transform launchSurface;
+
+        // E/F flight bookkeeping: the opening launch's spend and the summed midair
+        // relaunch spends of the CURRENT flight - the landing pays from both.
+        bool flightOpen;
+        float flightFirstSpend;
+        float flightMidairSpend;
 
         // Safety recharge state.
         bool safetyActive;
@@ -115,12 +140,9 @@ namespace KineticEnergy.Level
                 if (floor != null) floorObjects.Add(floor);
             }
 
-            // The one-time economy wiring: base combo refunds through the ordinary
-            // pipeline, capped at the premium floor; slow-down stays free.
+            // The one-time economy wiring (per-variant refund routing lives in
+            // ApplyVariant); slow-down stays free.
             controller.slowdownMode = SlowdownMode.Unlimited;
-            controller.groundedRefundMultiplier = comboBaseRefund;
-            controller.midairRefundBaseMultiplier = comboBaseRefund;
-            controller.midairRefundSpendFactor = 0f;
             controller.ordinaryRefundCeiling = PremiumBoundary;
             // The safety recharge IS this scene's stranding failsafe - the grounded
             // reserve (unspendable bottom slice) is disabled, the whole tank fires.
@@ -164,6 +186,14 @@ namespace KineticEnergy.Level
             // Entering a banked variant solidifies any provisional extra into normal energy.
             if (BankedMode) comboExtra = 0f;
             controller.alwaysMaxCharge = AutoMaxMode;
+
+            // Refund routing: A-D pay the base through the ordinary (ceiling-capped)
+            // pipeline; E/F silence the pipeline entirely - their whole payout comes
+            // from the dual-launch computation on landing.
+            controller.groundedRefundMultiplier = DualRefundMode ? 0f : comboBaseRefund;
+            controller.midairRefundBaseMultiplier = DualRefundMode ? 0f : comboBaseRefund;
+            controller.midairRefundSpendFactor = 0f;
+
             RefreshHudLabel();
         }
 
@@ -208,9 +238,12 @@ namespace KineticEnergy.Level
 
             // A chained flight that ended WITHOUT a landing crash (NonStick bounce, enemy
             // hit, soft touch-down) thaws once the player stands with no launch running.
-            if (chainInFlight && controller.IsGrounded && !controller.HasLaunched)
+            if (controller.IsGrounded && !controller.HasLaunched)
             {
+                // However the flight ended, standing still means it is over: the chain
+                // freeze thaws and E/F's flight bookkeeping closes unpaid.
                 chainInFlight = false;
+                flightOpen = false;
             }
 
             if (windowRemaining > 0f && !chainInFlight)
@@ -219,13 +252,25 @@ namespace KineticEnergy.Level
                 if (windowRemaining <= 0f) ResetCombo(revoke: true);
             }
 
+            // The boost cap bites ONLY at a FULL tank: reaching 100% converts any
+            // provisional extra beyond the premium segment's 20% into normal energy.
+            // Below full, the boost may grow past 20% freely.
+            if (comboExtra > 1f - PremiumBoundary && controller.EnergyFraction >= 0.999f)
+            {
+                comboExtra = 1f - PremiumBoundary;
+            }
+
             UpdateSafetyRecharge();
         }
+
+        // E/F carry their own recharge trigger/ceiling; A-D share the base pair.
+        float ActiveSafetyTrigger => DualRefundMode ? dualSafetyTriggerFraction : safetyTriggerFraction;
+        float ActiveSafetyCeiling => DualRefundMode ? dualSafetyCeilingFraction : safetyCeilingFraction;
 
         void UpdateSafetyRecharge()
         {
             float energyNow = controller.EnergyFraction;
-            if (!safetyActive && energyNow < safetyTriggerFraction) safetyActive = true;
+            if (!safetyActive && energyNow < ActiveSafetyTrigger) safetyActive = true;
 
             if (safetyActive)
             {
@@ -237,14 +282,14 @@ namespace KineticEnergy.Level
                 // launch is in the air), the chain is the income - no double-dipping.
                 bool comboIdle = windowRemaining <= 0f && !chainInFlight;
                 bool restingOnSurface = controller.IsGrounded || controller.IsStuck;
-                if (comboIdle && restingOnSurface && energyNow < safetyCeilingFraction)
+                if (comboIdle && restingOnSurface && energyNow < ActiveSafetyCeiling)
                 {
-                    float headroom = safetyCeilingFraction - energyNow;
+                    float headroom = ActiveSafetyCeiling - energyNow;
                     float gained = Mathf.Min(regenPerSecond * Time.unscaledDeltaTime, headroom);
                     controller.AddEnergy(gained);
                     regenPool += gained;
                 }
-                if (controller.EnergyFraction >= safetyCeilingFraction - 0.0001f) safetyActive = false;
+                if (controller.EnergyFraction >= ActiveSafetyCeiling - 0.0001f) safetyActive = false;
             }
 
             // Fresh regen is orange only BRIEFLY, then converts to yellow: the pool
@@ -268,6 +313,20 @@ namespace KineticEnergy.Level
             // tip clears with it.
             regenPool = 0f;
 
+            // E/F flight bookkeeping: the first launch OPENS the flight, every further
+            // launch before the landing is a midair relaunch - both spends pay out at
+            // the landing with their own multipliers.
+            if (!flightOpen)
+            {
+                flightOpen = true;
+                flightFirstSpend = controller.LastLaunchEnergySpent;
+                flightMidairSpend = 0f;
+            }
+            else
+            {
+                flightMidairSpend += controller.LastLaunchEnergySpent;
+            }
+
             launchSurface = null;
             if (Physics.Raycast(controller.transform.position, Vector3.down, out RaycastHit hit, 4f,
                 Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
@@ -280,15 +339,38 @@ namespace KineticEnergy.Level
         void OnCrash(Vector3 position)
         {
             // Landings that never COUNT: the big floor, and the launch's own takeoff
-            // object - the refund just granted is taken back and the chain neither grows
-            // nor refreshes.
+            // object - the refund just granted is taken back (E/F pay nothing to begin
+            // with) and the chain neither grows nor refreshes.
             Collider crashSurface = controller.LastCrashSurface;
             if (crashSurface != null && (IsBigFloor(crashSurface.transform)
                 || (launchSurface != null && crashSurface.transform == launchSurface)))
             {
                 if (controller.LastCrashRefund > 0f) controller.AddEnergy(-controller.LastCrashRefund);
                 chainInFlight = false;
+                flightOpen = false;
                 return;
+            }
+
+            // E/F: the landing's WHOLE payout is computed here, from both of the
+            // flight's launch types. The base parts respect the 80% ordinary ceiling
+            // exactly like the pipeline would; the combo-driven parts on top are boost
+            // (they may pass the ceiling) and follow the variant's extra rules.
+            if (DualRefundMode)
+            {
+                float m1 = Mathf.Min(firstLaunchBaseRefund + firstLaunchStepPerLevel * comboCount, comboMaxMultiplier);
+                float m2 = Mathf.Min(midairLaunchBaseRefund + midairLaunchStepPerLevel * comboCount, comboMaxMultiplier);
+
+                float baseGain = flightFirstSpend * firstLaunchBaseRefund + flightMidairSpend * midairLaunchBaseRefund;
+                float baseHeadroom = Mathf.Max(PremiumBoundary - controller.EnergyFraction, 0f);
+                controller.AddEnergy(Mathf.Min(baseGain, baseHeadroom));
+
+                float extraGain = flightFirstSpend * (m1 - firstLaunchBaseRefund)
+                    + flightMidairSpend * (m2 - midairLaunchBaseRefund);
+                if (extraGain > 0f)
+                {
+                    controller.AddEnergy(extraGain);
+                    comboExtra = BankedMode ? 0f : Mathf.Min(extraGain, controller.EnergyFraction);
+                }
             }
 
             // The chain EXTRA for this landing, from the PRE-landing chain level (the base
@@ -296,19 +378,23 @@ namespace KineticEnergy.Level
             // pass the premium boundary - this and the pound boost are the only ways up
             // there. Under the positional 80/20 rule, whatever lands below 80% is normal
             // energy immediately; only the part sitting above 80% is at risk.
-            float extraRate = NextMultiplier - comboBaseRefund;
-            if (extraRate > 0f && comboCount > 0)
+            // A-D: the chain EXTRA on top of the pipeline-paid base refund.
+            if (!DualRefundMode)
             {
-                float extra = controller.LastLaunchEnergySpent * extraRate;
-                controller.AddEnergy(extra);
-                // A: the LATEST extra stays provisional orange (replace, not accumulate) -
-                // but the BOOSTED slice is hard-capped at the premium segment's 20%, so a
-                // full tank never has more than its top two blocks at risk. B: every
-                // extra is normal energy the instant it's paid.
-                comboExtra = BankedMode
-                    ? 0f
-                    : Mathf.Min(extra, Mathf.Min(controller.EnergyFraction, 1f - PremiumBoundary));
+                float extraRate = NextMultiplier - comboBaseRefund;
+                if (extraRate > 0f && comboCount > 0)
+                {
+                    float extra = controller.LastLaunchEnergySpent * extraRate;
+                    controller.AddEnergy(extra);
+                    // Revocable variants: the LATEST extra stays provisional orange
+                    // (replace, not accumulate), free to exceed 20% below a full tank -
+                    // the cap bites only at 100% (see the full-tank conversion in
+                    // Update). Banked: normal energy the instant it's paid.
+                    comboExtra = BankedMode ? 0f : Mathf.Min(extra, controller.EnergyFraction);
+                }
             }
+
+            flightOpen = false;
 
             comboCount++;
             if (comboStepPerLevel > 0f)
@@ -343,6 +429,7 @@ namespace KineticEnergy.Level
             ResetCombo(revoke: false);
             safetyActive = false;
             regenPool = 0f;
+            flightOpen = false;
         }
 
         bool IsBigFloor(Transform surfaceTransform)
@@ -377,7 +464,12 @@ namespace KineticEnergy.Level
                     comboCircle.SetActive(showCircle);
                     if (showCircle && comboText != null)
                     {
-                        comboText.text = "x" + NextMultiplier.ToString("0.0##");
+                        // E/F show their midair multiplier (the headline number); A-D
+                        // the ordinary chain multiplier.
+                        float circleMultiplier = DualRefundMode
+                            ? Mathf.Min(midairLaunchBaseRefund + midairLaunchStepPerLevel * comboCount, comboMaxMultiplier)
+                            : NextMultiplier;
+                        comboText.text = "x" + circleMultiplier.ToString("0.0##");
                     }
                 }
             }
@@ -518,6 +610,8 @@ namespace KineticEnergy.Level
                 MergedEconomyVariant.BankedExtra => "Variant B - Merged economy (extras bank instantly)",
                 MergedEconomyVariant.RevocableExtraMax => "Variant C - A + auto max-energy launches",
                 MergedEconomyVariant.BankedExtraMax => "Variant D - B + auto max-energy launches",
+                MergedEconomyVariant.DualRefundRevocable => "Variant E - Dual-launch refunds (revocable extra)",
+                MergedEconomyVariant.DualRefundBanked => "Variant F - Dual-launch refunds (banked)",
                 _ => "Variant ?",
             };
         }

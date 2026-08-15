@@ -3345,7 +3345,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.MergedEconomyController
   currentVariant: 0
-  comboBaseRefund: 0.85
+  comboBaseRefund: 0.8
   comboStepPerLevel: 0.05
   comboWindowSeconds: 2
   comboMaxMultiplier: 2
@@ -3353,10 +3353,16 @@ MonoBehaviour:
   comboMeterColor: {r: 1, g: 0.62, b: 0.1, a: 1}
   bigFloorObjectNames:
   - QuarryFloor
+  firstLaunchBaseRefund: 0.9
+  firstLaunchStepPerLevel: 0.05
+  midairLaunchBaseRefund: 0.9
+  midairLaunchStepPerLevel: 0.05
+  dualSafetyTriggerFraction: 0.1
+  dualSafetyCeilingFraction: 0.2
   safetyTriggerFraction: 0.1
   safetyCeilingFraction: 0.4
   regenPerSecond: 0.08
-  premiumFloorFraction: 0.75
+  regenOrangeFadeSeconds: 0.35
 --- !u!4 &1373401295
 Transform:
   m_ObjectHideFlags: 0
