@@ -1146,7 +1146,7 @@ PrefabInstance:
       objectReference: {fileID: 1249443992}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: downLaunchDamping
-      value: 0
+      value: 0.5
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: previewLineHeight
@@ -4981,6 +4981,7 @@ MonoBehaviour:
   followThresholdDegrees: 60
   followBandDegrees: 5
   followSpeed: 60
+  newControlsMouseOrbitMultiplier: 0.51
 --- !u!4 &1999971138
 Transform:
   m_ObjectHideFlags: 0

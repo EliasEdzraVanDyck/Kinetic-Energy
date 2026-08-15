@@ -3345,20 +3345,39 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.MergedEconomyController
   currentVariant: 0
+  autoMaxEnergy: 0
   comboBaseRefund: 0.8
   comboStepPerLevel: 0.05
   comboWindowSeconds: 2
   comboMaxMultiplier: 2
   comboMeterDropPixels: 44
   comboMeterColor: {r: 1, g: 0.62, b: 0.1, a: 1}
-  bigFloorObjectNames:
-  - QuarryFloor
   firstLaunchBaseRefund: 0.9
   firstLaunchStepPerLevel: 0.05
   midairLaunchBaseRefund: 0.9
   midairLaunchStepPerLevel: 0.05
   dualSafetyTriggerFraction: 0.1
   dualSafetyCeilingFraction: 0.2
+  totalLossBaseRefund: 1.1
+  totalLossStepPerLevel: 0.05
+  totalLossSafetyTriggerFraction: 0.1
+  totalLossSafetyCeilingFraction: 0.3
+  introText: "MERGED ECONOMY VARIANTS\n\nCombo refunds + an under-threshold recharge
+    + a premium top: the first 80% of the tank is\nnormal energy, the last 20% (the
+    two big meter blocks) only fills from combo extras or the\npound boost - and
+    dies when your chain stops.\n\nSwitch variants with V / D-pad Right (back: C
+    / D-pad Left):\nA - Revocable extra: the latest chain bonus stays orange, lost
+    if the window lapses.\nB - Banked extra: every chain bonus becomes normal energy
+    instantly.\nC - Dual refunds: landings pay from BOTH the flight's first launch
+    and its midair\n     relaunches, each with its own rate; the bonus part stays
+    revocable orange.\nD - Dual refunds (banked): the same, with bonuses banking
+    instantly.\nE - Total loss: miss a combo window and ALL energy is gone - the
+    ground recharge\n     then rebuilds you to its threshold.\n\nX / D-pad Down toggles
+    AUTO MAX ENERGY in ANY variant: every launch fires with the\nmaximum the tank
+    can pay - no manual regulation.\n\nStanding still below the recharge threshold
+    slowly refills the tank (fresh energy shows\norange, then turns yellow as it
+    banks). If you are completely empty you cannot launch.\n\nPress any button to
+    start."
   safetyTriggerFraction: 0.1
   safetyCeilingFraction: 0.4
   regenPerSecond: 0.08

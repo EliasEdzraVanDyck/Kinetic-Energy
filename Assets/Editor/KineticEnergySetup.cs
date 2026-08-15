@@ -586,10 +586,13 @@ namespace KineticEnergy.EditorSetup
                     throw new Exception("KineticEnergySetup: PauseSystem.prefab is missing PauseCanvas/PausePanel or PauseController.");
                 }
 
+                // Renamed Info -> BuildInfo (direct request); the old name is cleared too
+                // so re-runs on an older prefab replace it cleanly.
                 DestroyDirectChildIfExists(pausePanel, "InfoButton");
+                DestroyDirectChildIfExists(pausePanel, "BuildInfoButton");
                 Font font = FindBestFont();
                 Color accent = new Color(1f, 0.82f, 0.2f);
-                GameObject info = CreateButton("InfoButton", pausePanel, "Info", font, accent,
+                GameObject info = CreateButton("BuildInfoButton", pausePanel, "BuildInfo", font, accent,
                     Vector2.zero, new Vector2(200f, 56f));
                 RectTransform infoRect = info.GetComponent<RectTransform>();
                 infoRect.anchorMin = new Vector2(1f, 0f);
