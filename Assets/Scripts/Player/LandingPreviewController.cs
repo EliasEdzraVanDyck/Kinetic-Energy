@@ -34,9 +34,7 @@ namespace KineticEnergy.Player
         [Header("Anti-jitter (visual smoothing only - the prediction itself is untouched)")]
         [Tooltip("Seconds of positional smoothing on the landing cursor. Short enough to stay under perceptible input latency, long enough to absorb per-frame prediction wobble.")]
         public float cursorSmoothTime = 0.055f;
-        [Tooltip("Seconds of positional smoothing on each trail dot.")]
-        public float dotSmoothTime = 0.05f;
-        [Tooltip("A cursor/dot whose target jumps farther than this snaps instantly instead of gliding - a landing teleporting across geometry must not sweep the visuals through the air.")]
+        [Tooltip("A cursor whose target jumps farther than this snaps instantly instead of gliding - a landing teleporting across geometry must not sweep the marker through the air.")]
         public float smoothSnapDistance = 3f;
         [Tooltip("The cursor survives losing the landing for this long, holding its last valid spot - single-frame prediction misses no longer blink it out.")]
         public float cursorHideGraceSeconds = 0.12f;
@@ -55,9 +53,6 @@ namespace KineticEnergy.Player
         Quaternion lastCursorRotation = Quaternion.identity;
         Vector3 cursorPrevTarget;
         float smoothedArcLength;
-        Vector3[] dotVelocities;
-        bool[] dotWasActive;
-        Vector3[] dotPrevTargets;
 
         float SmoothDt => Mathf.Min(Time.unscaledDeltaTime, 1f / 30f);
 
@@ -87,10 +82,6 @@ namespace KineticEnergy.Player
                 cursorWasShown = false;
                 noLandingTimer = 0f;
                 smoothedArcLength = 0f;
-                if (dotWasActive != null)
-                {
-                    for (int i = 0; i < dotWasActive.Length; i++) dotWasActive[i] = false;
-                }
             }
             ApplyModeVisibility();
         }
@@ -154,12 +145,6 @@ namespace KineticEnergy.Player
             cursorWasShown = hasLanding;
 
             if (trailDots == null || trailDots.Length == 0) return;
-            if (dotVelocities == null || dotVelocities.Length != trailDots.Length)
-            {
-                dotVelocities = new Vector3[trailDots.Length];
-                dotWasActive = new bool[trailDots.Length];
-                dotPrevTargets = new Vector3[trailDots.Length];
-            }
 
             // Real arc length (summed segment distance), not the straight-line chord - a
             // lofted shot's path is meaningfully longer than the chord between its endpoints.
@@ -181,7 +166,12 @@ namespace KineticEnergy.Player
             smoothedArcLength = smoothedArcLength <= 0f
                 ? totalLength
                 : Mathf.Lerp(smoothedArcLength, totalLength, Mathf.Clamp01(SmoothDt / 0.08f));
-            int neededDots = Mathf.Clamp(Mathf.CeilToInt(smoothedArcLength / Mathf.Max(maxDotSpacing, 0.01f)), 1, trailDots.Length);
+            // FIXED arc-length spacing anchors every dot to the geometry. The old layout
+            // divided the (wobbling) total length evenly among the dots, so every length
+            // breath slid ALL of them along the arc - the whole line shimmered lengthwise.
+            // At a constant interval, a length wobble only ever touches the tail dot.
+            float dotSpacing = Mathf.Max(maxDotSpacing, 0.01f);
+            int neededDots = Mathf.Clamp(Mathf.FloorToInt(smoothedArcLength / dotSpacing), 1, trailDots.Length);
 
             // A small FIXED buffer keeps the last dot from sitting exactly on the marker,
             // without growing with trajectory length.
@@ -190,7 +180,7 @@ namespace KineticEnergy.Player
 
             if (trajectory != null && trajectoryCount > 1)
             {
-                PlaceDotsAlongTrajectory(trajectory, trajectoryCount, usableLength, neededDots);
+                PlaceDotsAlongTrajectory(trajectory, trajectoryCount, usableLength, neededDots, dotSpacing);
             }
             else
             {
@@ -201,13 +191,14 @@ namespace KineticEnergy.Player
                     if (i >= neededDots)
                     {
                         trailDots[i].gameObject.SetActive(false);
-                        dotWasActive[i] = false;
                         continue;
                     }
                     trailDots[i].gameObject.SetActive(true);
 
-                    float t = totalLength > 0.0001f ? (usableLength * (i + 1) / neededDots) / totalLength : 0f;
-                    PlaceDotSmoothed(i, Vector3.Lerp(lineStart, landingPoint, t));
+                    float t = totalLength > 0.0001f
+                        ? Mathf.Min(dotSpacing * (i + 1), usableLength) / totalLength
+                        : 0f;
+                    trailDots[i].position = Vector3.Lerp(lineStart, landingPoint, t);
                 }
             }
         }
@@ -216,7 +207,7 @@ namespace KineticEnergy.Player
         // travelled - sampling by array index would be uniform in simulation time instead,
         // bunching dots where the cube moves slowly (the apex) and spreading them where it
         // moves fast.
-        void PlaceDotsAlongTrajectory(Vector3[] trajectory, int trajectoryCount, float usableLength, int neededDots)
+        void PlaceDotsAlongTrajectory(Vector3[] trajectory, int trajectoryCount, float usableLength, int neededDots, float dotSpacing)
         {
             int segmentEnd = 1;
             float segmentStartLength = 0f;
@@ -229,12 +220,11 @@ namespace KineticEnergy.Player
                 if (d >= neededDots)
                 {
                     trailDots[d].gameObject.SetActive(false);
-                    dotWasActive[d] = false;
                     continue;
                 }
                 trailDots[d].gameObject.SetActive(true);
 
-                float targetLength = usableLength * (d + 1) / neededDots;
+                float targetLength = Mathf.Min(dotSpacing * (d + 1), usableLength);
 
                 while (segmentEnd < trajectoryCount - 1 && segmentStartLength + segmentLength < targetLength)
                 {
@@ -247,31 +237,12 @@ namespace KineticEnergy.Player
                     ? Mathf.Clamp01((targetLength - segmentStartLength) / segmentLength)
                     : 0f;
 
-                PlaceDotSmoothed(d, Vector3.Lerp(trajectory[segmentEnd - 1], trajectory[segmentEnd], segmentT));
+                // Placed RAW on the simulated arc, always: per-dot positional smoothing
+                // lagged each dot by a different amount while the aim moved, which BENT
+                // the line off the true path. Dots live exactly on the arc; the visual
+                // calm comes from the fixed spacing and the smoothed count instead.
+                trailDots[d].position = Vector3.Lerp(trajectory[segmentEnd - 1], trajectory[segmentEnd], segmentT);
             }
-        }
-
-        // Dots glide onto their freshly computed spots through a ~3-frame smoothing, so
-        // the whole trail stops shimmering with the prediction. Fresh activations and
-        // far target jumps snap - a dot must never be seen sweeping across the level.
-        void PlaceDotSmoothed(int index, Vector3 targetPosition)
-        {
-            Transform dot = trailDots[index];
-            float targetDelta = Vector3.Distance(dotPrevTargets[index], targetPosition);
-            float tau = AdaptiveTau(dotSmoothTime, targetDelta);
-            if (!dotWasActive[index] || tau <= 0.001f
-                || Vector3.Distance(dot.position, targetPosition) > smoothSnapDistance)
-            {
-                dot.position = targetPosition;
-                dotVelocities[index] = Vector3.zero;
-            }
-            else
-            {
-                dot.position = Vector3.SmoothDamp(dot.position, targetPosition,
-                    ref dotVelocities[index], tau, Mathf.Infinity, SmoothDt);
-            }
-            dotPrevTargets[index] = targetPosition;
-            dotWasActive[index] = true;
         }
 
         void ApplyModeVisibility()
