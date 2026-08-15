@@ -98,7 +98,7 @@ namespace KineticEnergy.Level
         enum EnemyState { Wandering, WindingUp, Launching, Recovering }
 
         Rigidbody body;
-        KineticCubeController player;
+        protected KineticCubeController player; // subclasses shove the player on failed kills
         Collider bodyCollider;
         Collider playerCollider;
         Renderer bodyRenderer;
@@ -119,7 +119,9 @@ namespace KineticEnergy.Level
         float flightElapsed;
         float fallVelocity;      // vertical speed while unsupported outside a launch
 
-        void Start()
+        // Virtual for the sized variants: their override applies the size multipliers
+        // FIRST, then runs this base wiring unchanged.
+        protected virtual void Start()
         {
             spawnPoint = transform.position;
             originalSpawn = spawnPoint;
@@ -768,6 +770,15 @@ namespace KineticEnergy.Level
             EnemyKillWindow.WhileWindingUp => state == EnemyState.WindingUp,
             _ => true,
         };
+
+        // The minimum launch-energy fraction a kill requires (on top of the kill window).
+        // The base enemy asks nothing; the sized variants raise it per class, and the
+        // crash pipeline routes a cheaper launch to PunishFailedKill instead.
+        public virtual float MinKillEnergyFraction => 0f;
+
+        // A vulnerable enemy hit by an UNDER-charged launch: base enemies never get here
+        // (their minimum is 0), the sized variants hurt the player back.
+        public virtual void PunishFailedKill() { }
 
         // Called by KineticCubeController when a launch hits this enemy. Deactivated, not
         // destroyed - a player respawn brings every enemy back (see ResetToSpawn).

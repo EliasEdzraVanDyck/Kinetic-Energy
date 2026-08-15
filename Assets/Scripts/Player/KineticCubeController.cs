@@ -1867,15 +1867,29 @@ namespace KineticEnergy.Player
             {
                 if (hasLaunched && !isStuck)
                 {
+                    // The kill checks below need THIS launch's spend - RegisterCrash's
+                    // refund zeroes it, so it's captured first.
+                    float launchSpend = lastLaunchEnergySpent;
                     RegisterCrash(collision.GetContact(0).normal, velocityBeforePhysicsStep.magnitude, collision.collider);
                     isStuck = false;
                     nonStickyReleaseTimer = 0f;
                     rb.useGravity = true;
                     rb.linearDamping = plainFallDamping;
                     // Ground enemies may carry a KILL WINDOW (hunter variants): outside it
-                    // the crash registers exactly the same, but the enemy survives.
-                    if (enemy != null) { if (enemy.CanBeKilledByLaunch) enemy.OnHitByLaunch(); }
-                    else if (flyer != null) flyer.OnHitByLaunch();
+                    // the crash registers exactly the same, but the enemy survives. The
+                    // sized variants also demand a minimum launch spend - a cheaper launch
+                    // bounces off and hurts the player instead.
+                    if (enemy != null)
+                    {
+                        if (enemy.CanBeKilledByLaunch)
+                        {
+                            if (launchSpend >= enemy.MinKillEnergyFraction) enemy.OnHitByLaunch();
+                            else enemy.PunishFailedKill();
+                        }
+                    }
+                    // Weak-spot flyers only die to a hit ON their back cube; the base
+                    // flyer allows every collider.
+                    else if (flyer != null) { if (flyer.LaunchKillAllowedFor(collision.collider)) flyer.OnHitByLaunch(); }
                     else turret.OnHitByLaunch();
                 }
                 return;

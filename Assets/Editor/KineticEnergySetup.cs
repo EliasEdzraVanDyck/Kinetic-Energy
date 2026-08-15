@@ -2211,6 +2211,88 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: FlyingEnemy prefab created OK");
         }
 
+        // Swaps a component for a SUBCLASS in place, carrying every serialized value over
+        // (m_Script excluded, so the new type sticks) - the literal "inherits all their
+        // behaviour and values" for the enemy variant prefabs.
+        static T SwapForSubclass<T>(Component source) where T : Component
+        {
+            T replacement = source.gameObject.AddComponent<T>();
+            var src = new SerializedObject(source);
+            var dst = new SerializedObject(replacement);
+            SerializedProperty property = src.GetIterator();
+            if (property.NextVisible(true))
+            {
+                do
+                {
+                    if (property.propertyPath != "m_Script") dst.CopyFromSerializedProperty(property);
+                } while (property.NextVisible(false));
+            }
+            dst.ApplyModifiedPropertiesWithoutUndo();
+            UnityEngine.Object.DestroyImmediate(source);
+            return replacement;
+        }
+
+        // The sized ground enemy: one prefab, Small/Medium/Large picked per placed
+        // instance on the SizedEnemy component. Values inherited from Enemy.prefab.
+        [MenuItem("Tools/Kinetic Energy/Create Sized Enemy Prefab")]
+        public static void CreateSizedEnemyPrefab()
+        {
+            string path = PrefabFolder + "/SizedEnemy.prefab";
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null)
+            {
+                Debug.Log("KineticEnergySetup: SizedEnemy prefab already exists OK");
+                return;
+            }
+
+            GameObject baseAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/Enemy.prefab");
+            if (baseAsset == null) throw new Exception("KineticEnergySetup: Enemy.prefab missing - the sized variant inherits from it.");
+            GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(baseAsset);
+            PrefabUtility.UnpackPrefabInstance(instance, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            instance.name = "SizedEnemy";
+
+            SwapForSubclass<SizedEnemy>(instance.GetComponent<Enemy>());
+
+            PrefabUtility.SaveAsPrefabAsset(instance, path);
+            UnityEngine.Object.DestroyImmediate(instance);
+            Debug.Log("KineticEnergySetup: SizedEnemy prefab created OK (size class per instance)");
+        }
+
+        // The armoured flyer: FlyingEnemy plus a golden back cube - the only killable
+        // spot. Values inherited from FlyingEnemy.prefab.
+        [MenuItem("Tools/Kinetic Energy/Create Weak Spot Flyer Prefab")]
+        public static void CreateWeakSpotFlyerPrefab()
+        {
+            string path = PrefabFolder + "/WeakSpotFlyer.prefab";
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null)
+            {
+                Debug.Log("KineticEnergySetup: WeakSpotFlyer prefab already exists OK");
+                return;
+            }
+
+            CreateFlyingEnemyPrefab();
+            GameObject baseAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/FlyingEnemy.prefab");
+            GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(baseAsset);
+            PrefabUtility.UnpackPrefabInstance(instance, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            instance.name = "WeakSpotFlyer";
+
+            WeakSpotFlyingEnemy weak = SwapForSubclass<WeakSpotFlyingEnemy>(instance.GetComponent<FlyingEnemy>());
+
+            // The back cube: parked on top of the sphere, slightly sticking out. Its own
+            // collider is what the crash pipeline must report for a kill.
+            Material weakMat = MakeMaterial("WeakSpotMaterial", new Color(1f, 0.85f, 0.2f));
+            GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            cube.name = "WeakSpot";
+            cube.transform.SetParent(instance.transform, false);
+            cube.transform.localPosition = new Vector3(0f, 0.55f, 0f);
+            cube.transform.localScale = Vector3.one * 0.42f;
+            cube.GetComponent<Renderer>().sharedMaterial = weakMat;
+            weak.weakSpot = cube.GetComponent<Collider>();
+
+            PrefabUtility.SaveAsPrefabAsset(instance, path);
+            UnityEngine.Object.DestroyImmediate(instance);
+            Debug.Log("KineticEnergySetup: WeakSpotFlyer prefab created OK (back-cube kill spot)");
+        }
+
         // A SMALL flying-gauntlet: islands over a hazard floor, guarded by projectile-
         // shooting flyers. Player tuning copied from Level 3 (the previous reference).
         [MenuItem("Tools/Kinetic Energy/Setup Level 4")]
