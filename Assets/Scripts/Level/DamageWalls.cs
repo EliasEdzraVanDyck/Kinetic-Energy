@@ -12,6 +12,10 @@ namespace KineticEnergy.Level
         [Tooltip("Where the player reappears - wired per scene. Falls back to the world origin if left empty.")]
         public Transform respawnPoint;
 
+        // Raised after any hazard respawn completes - Level 8's challenge controller
+        // listens, resetting its walls so a retry never faces mid-run hazard state.
+        public static event System.Action PlayerRespawned;
+
         void OnCollisionEnter(Collision collision)
         {
             TryRespawn(collision.collider);
@@ -47,6 +51,8 @@ namespace KineticEnergy.Level
             {
                 Destroy(projectile.gameObject);
             }
+
+            PlayerRespawned?.Invoke();
         }
     }
 }

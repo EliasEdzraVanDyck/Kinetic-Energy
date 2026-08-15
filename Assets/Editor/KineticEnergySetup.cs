@@ -2454,6 +2454,188 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(hunter);
         }
 
+        // ==================== Level 8 - the challenge gauntlet ====================
+
+        // The translucent hazard look - a MakeMaterial with the URP Lit transparent
+        // surface switched on, so the purple walls read as a barrier without hiding the
+        // level behind them.
+        static Material MakeTransparentMaterial(string assetName, Color color)
+        {
+            Material mat = MakeMaterial(assetName, color);
+            mat.SetFloat("_Surface", 1f);
+            mat.SetOverrideTag("RenderType", "Transparent");
+            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetInt("_ZWrite", 0);
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        [MenuItem("Tools/Kinetic Energy/Create Death Wall Prefab")]
+        public static void CreateDeathWallPrefab()
+        {
+            string path = PrefabFolder + "/DeathWall.prefab";
+            Material material = MakeTransparentMaterial("DeathWallMaterial", new Color(0.55f, 0.15f, 0.85f, 0.45f));
+
+            GameObject existing = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (existing != null)
+            {
+                GameObject root = PrefabUtility.LoadPrefabContents(path);
+                try
+                {
+                    root.GetComponent<Renderer>().sharedMaterial = material;
+                    PrefabUtility.SaveAsPrefabAsset(root, path);
+                }
+                finally { PrefabUtility.UnloadPrefabContents(root); }
+                Debug.Log("KineticEnergySetup: DeathWall prefab restyled OK");
+                return;
+            }
+
+            // A unit cube scaled per use: the chase wall stretches its scene instance, the
+            // seal walls get sealWallSize at spawn. Trigger collider - death on touch, no
+            // physical shove - and a kinematic body so the moving variant sweeps properly.
+            GameObject temp = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            temp.name = "DeathWall";
+            temp.GetComponent<Renderer>().sharedMaterial = material;
+            temp.GetComponent<BoxCollider>().isTrigger = true;
+            Rigidbody rb = temp.AddComponent<Rigidbody>();
+            rb.isKinematic = true;
+            rb.useGravity = false;
+            temp.AddComponent<DeathWall>();
+            PrefabUtility.SaveAsPrefabAsset(temp, path);
+            UnityEngine.Object.DestroyImmediate(temp);
+            Debug.Log("KineticEnergySetup: DeathWall prefab created OK");
+        }
+
+        // Level 1's challenge twin: the same growing-gap platform run, but played FOUR
+        // times in sequence - limited slowdown, overcharge scatter, the chasing wall, and
+        // the sealing walls - advancing at the end pad. The pause Scenes panel gets a
+        // second column that jumps straight to a stage (always a restart of the level).
+        [MenuItem("Tools/Kinetic Energy/Setup Level 8")]
+        public static void SetupLevel8()
+        {
+            const string level8Path = "Assets/Scenes/Level8.unity";
+
+            // Tuning copied from Level 1 - this level should feel identical to play.
+            EditorSceneManager.OpenScene(Level1ScenePath, OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find Level 1's Player/camera to copy tuning from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            CreateDeathWallPrefab();
+            MeasureLaunchDistances(out float L, out float H);
+            NewEmptyScene(level8Path);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("Level8Course");
+            Transform tf = course.transform;
+            Vector3 platformSize = new Vector3(10f, 2f, 10f);
+
+            // Level 1's run: gaps grow with every jump. The last platform IS the end pad.
+            float[] gapFractions = { 0.15f, 0.25f, 0.35f, 0.5f, 0.65f, 0.8f };
+            var platforms = new List<Transform>();
+            platforms.Add(CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat).transform);
+            Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
+            float x = 0f;
+            for (int i = 0; i < gapFractions.Length; i++)
+            {
+                x += platformSize.x + gapFractions[i] * L;
+                string name = i == gapFractions.Length - 1 ? "EndPlatform" : "Platform" + (i + 1);
+                platforms.Add(CreateBlock(tf, name, new Vector3(x, -1f, 0f), platformSize, platformMat).transform);
+            }
+            float endX = x;
+
+            GameObject respawnPoint = new GameObject("RespawnPoint");
+            respawnPoint.transform.position = playerSpawn;
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(endX * 0.5f, -12f, 0f), new Vector3(endX + 80f, 2f, 80f), damageMat);
+            DamageWalls damage = damageFloor.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(damage);
+
+            // The chase wall: one stretched DeathWall parked behind the start, sweeping
+            // toward the end. Speed and start position are edited on this instance.
+            GameObject chaseGo = InstantiatePrefab("DeathWall");
+            chaseGo.name = "ChaseWall";
+            chaseGo.transform.position = new Vector3(-1.2f * L, 13f, 0f);
+            chaseGo.transform.localScale = new Vector3(2f, 46f, 70f);
+            DeathWall chase = chaseGo.GetComponent<DeathWall>();
+            chase.moveSpeed = 4f;
+            chase.moveDirection = Vector3.right;
+            EditorUtility.SetDirty(chase);
+
+            // The end pad advances the stage sequence instead of loading another scene.
+            GameObject finish = new GameObject("ChallengeFinish");
+            finish.transform.position = new Vector3(endX, 2f, 0f);
+            BoxCollider finishBox = finish.AddComponent<BoxCollider>();
+            finishBox.isTrigger = true;
+            finishBox.size = new Vector3(4f, 4f, 8f);
+            finish.AddComponent<ChallengeFinishTrigger>();
+
+            GameObject stagesGo = new GameObject("ChallengeStages");
+            ChallengeStageController stages = stagesGo.AddComponent<ChallengeStageController>();
+            stages.chaseWall = chase;
+            stages.sealWallPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/DeathWall.prefab");
+            stages.coursePlatforms = platforms.ToArray();
+            stages.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(stages);
+
+            CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
+
+            // The challenge column in the Scenes panel: four direct-to-stage buttons next
+            // to the ordinary scene list, wired to the PauseController stage loaders.
+            Font font = FindBestFont();
+            Color accent = new Color(1f, 0.82f, 0.2f);
+            Text columnTitle = CreateText("ChallengeColumnTitle", rig.scenesPanel.transform,
+                "Challenges (restarts Level 8)", font, 24, new Vector2(380f, 170f), new Vector2(380f, 40f));
+            columnTitle.color = new Color(1f, 1f, 1f, 0.8f);
+            string[] stageLabels = { "1 - Limited slowdown", "2 - Overcharge scatter", "3 - Chasing wall", "4 - Sealing walls" };
+            UnityEngine.Events.UnityAction<string>[] stageCalls =
+            {
+                rig.pauseController.LoadChallengeStage1,
+                rig.pauseController.LoadChallengeStage2,
+                rig.pauseController.LoadChallengeStage3,
+                rig.pauseController.LoadChallengeStage4,
+            };
+            float stageButtonY = 100f;
+            for (int i = 0; i < stageLabels.Length; i++)
+            {
+                GameObject stageButton = CreateButton("ChallengeStage_" + (i + 1) + "Button",
+                    rig.scenesPanel.transform, stageLabels[i], font, accent, new Vector2(380f, stageButtonY), new Vector2(340f, 70f));
+                WireSceneButton(stageButton, stageCalls[i], "Level8");
+                stageButtonY -= 90f;
+            }
+
+            PointCameraAt(rig, new Vector3(platformSize.x + gapFractions[0] * L, 0f, 0f));
+            OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
+            WireStandaloneMeters(rig);
+
+            // Level 8 reloads ITSELF by name (stage advance + the pause stage buttons), so
+            // it must sit in Build Settings - appended once, existing entries untouched.
+            var buildScenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
+            if (!buildScenes.Exists(s => s.path == level8Path))
+            {
+                buildScenes.Add(new EditorBuildSettingsScene(level8Path, true));
+                EditorBuildSettings.scenes = buildScenes.ToArray();
+            }
+
+            SaveOpenScene(level8Path);
+            Debug.Log($"KineticEnergySetup: Level 8 setup complete OK (L={L:F1}m, 4 challenge stages)");
+        }
+
         // ==================== Level 5 - turrets / Level 6 - laser walls ====================
 
         [MenuItem("Tools/Kinetic Energy/Create Turret Prefab")]

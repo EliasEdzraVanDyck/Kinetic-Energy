@@ -268,6 +268,35 @@ namespace KineticEnergy.UI
             LoadSceneByName(sceneName);
         }
 
+        // Level 8's challenge-stage buttons - the Gauntlet-variant pattern: bake the
+        // choice into the static selection, then (re)load the level, which always means
+        // starting the run over on that stage.
+        public void LoadChallengeStage1(string sceneName)
+        {
+            LoadChallengeStage(sceneName, KineticEnergy.Level.ChallengeStage.LimitedSlowdown);
+        }
+
+        public void LoadChallengeStage2(string sceneName)
+        {
+            LoadChallengeStage(sceneName, KineticEnergy.Level.ChallengeStage.OverchargeScatter);
+        }
+
+        public void LoadChallengeStage3(string sceneName)
+        {
+            LoadChallengeStage(sceneName, KineticEnergy.Level.ChallengeStage.ChasingWall);
+        }
+
+        public void LoadChallengeStage4(string sceneName)
+        {
+            LoadChallengeStage(sceneName, KineticEnergy.Level.ChallengeStage.SealingWalls);
+        }
+
+        void LoadChallengeStage(string sceneName, KineticEnergy.Level.ChallengeStage stage)
+        {
+            KineticEnergy.Level.ChallengeStageSelection.PendingStage = stage;
+            LoadSceneByName(sceneName);
+        }
+
         public void OnQuitClicked()
         {
 #if UNITY_EDITOR
