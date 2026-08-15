@@ -120,6 +120,10 @@ namespace KineticEnergy.Player
         public float energyCostPerFullCharge = 1f;
         [Tooltip("GROUNDED launches can never spend the tank below this reserve. Midair launches may commit everything.")]
         [Range(0f, 1f)] public float minEnergyReserve = 0.05f;
+        [Tooltip("Ordinary landing refunds never fill the tank past this fraction (1 = rule off). The pound-boost pipeline and direct AddEnergy payments ignore it - the merged economy scene sets 0.8 so the top of the tank stays premium.")]
+        [Range(0f, 1f)] public float ordinaryRefundCeiling = 1f;
+        [Tooltip("Every charge reads as the MAXIMUM the tank can pay - no manual energy regulation (the merged economy scene's auto-max variants set this).")]
+        public bool alwaysMaxCharge = false;
         [Tooltip("Multiplies real seconds of holding into charge-seconds - the main knob for how fast charging feels.")]
         public float chargeAccumulationRate = 0.3f;
         // The grounded aim charge, the forward hold-charge, and the midair energy dial all
@@ -1378,6 +1382,14 @@ namespace KineticEnergy.Player
 
         float ChargeFraction()
         {
+            // Auto-max mode: every consumer of the charge (fire force, spend, scatter,
+            // aim arrow, meter) sees the maximum the tank can pay right now - the dialed
+            // chargeTime becomes irrelevant, so no input regulates energy.
+            if (alwaysMaxCharge)
+            {
+                float maxTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
+                return maxChargeTime > 0f ? Mathf.Clamp01(maxTime / maxChargeTime) : 1f;
+            }
             return maxChargeTime > 0f ? Mathf.Clamp01(chargeTime / maxChargeTime) : 1f;
         }
 
@@ -2077,7 +2089,15 @@ namespace KineticEnergy.Player
                 // spend * (base + factor * spend): the multiplier rises with how much was committed.
                 gain = lastLaunchEnergySpent * (midairRefundBaseMultiplier + midairRefundSpendFactor * lastLaunchEnergySpent);
             }
-            energyFraction = Mathf.Clamp01(energyFraction + gain);
+            float refunded = Mathf.Clamp01(energyFraction + gain);
+            // The merged economy's premium tank: ORDINARY refunds stop at the ceiling -
+            // only the privileged pipelines (the pound boost, the harness-paid combo
+            // extras) fill past it. Energy already above the ceiling is never clawed back.
+            if (ordinaryRefundCeiling < 1f)
+            {
+                refunded = Mathf.Min(refunded, Mathf.Max(ordinaryRefundCeiling, energyBeforeRefund));
+            }
+            energyFraction = refunded;
             ClampEnergyFloor();
             LastCrashRefund = Mathf.Max(energyFraction - energyBeforeRefund, 0f);
         }

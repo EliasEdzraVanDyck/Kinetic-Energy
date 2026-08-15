@@ -672,6 +672,179 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: quarry economy scene setup complete OK");
         }
 
+        // The merged economy's meter: a variant of the standalone EnergyMeter prefab
+        // where the bar is 8 normal blocks (same 31.4px block width, dividers 8/9
+        // retired) with a two-block PREMIUM segment welded flush to its right edge -
+        // same block width, 30% taller, own outline/backdrop, and orange/blue fills
+        // that start EMPTY (they only show actual premium energy/charge).
+        [MenuItem("Tools/Kinetic Energy/Create Premium Energy Meter Prefab")]
+        public static void CreatePremiumEnergyMeterPrefab()
+        {
+            string sourcePath = PrefabFolder + "/EnergyMeter.prefab";
+            string path = PrefabFolder + "/PremiumEnergyMeter.prefab";
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null)
+            {
+                Debug.Log("KineticEnergySetup: PremiumEnergyMeter prefab already exists OK");
+                return;
+            }
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(sourcePath) == null)
+            {
+                throw new Exception("KineticEnergySetup: EnergyMeter.prefab missing - the premium meter is its variant.");
+            }
+            if (!AssetDatabase.CopyAsset(sourcePath, path))
+            {
+                throw new Exception("KineticEnergySetup: copying EnergyMeter.prefab failed.");
+            }
+
+            GameObject root = PrefabUtility.LoadPrefabContents(path);
+            try
+            {
+                Transform body = root.transform.Find("Body");
+                RectTransform bodyRect = body.GetComponent<RectTransform>();
+
+                // The source layout: inset 3, block width 31.4, ten blocks. The main bar
+                // keeps blocks 1-8 EXACTLY as they are (divider positions untouched);
+                // the freed width becomes the premium segment.
+                const float inset = 3f;
+                const float blockWidth = 31.4f;
+                float oldWidth = bodyRect.sizeDelta.x;                  // 323
+                float newWidth = inset + 8f * blockWidth + inset;       // 257.2
+                float zoneWidth = oldWidth - newWidth;                  // 65.8 = 2 blocks + border
+                float bodyHeight = bodyRect.sizeDelta.y;                // 30
+                float zoneHeight = bodyHeight * 1.3f;                   // 30% taller
+
+                // Body pivot is right-side: shrinking keeps the right edge, so the shift
+                // left frees exactly the zone's strip while the total footprint stays.
+                bodyRect.sizeDelta = new Vector2(newWidth, bodyHeight);
+                bodyRect.anchoredPosition -= new Vector2(zoneWidth, 0f);
+
+                Transform dividers = body.Find("MeterDividers");
+                Transform divider8 = dividers != null ? dividers.Find("Divider8") : null;
+                Transform divider9 = dividers != null ? dividers.Find("Divider9") : null;
+                if (divider8 != null) divider8.gameObject.SetActive(false);
+                if (divider9 != null) divider9.gameObject.SetActive(false);
+
+                // Look sampled straight from the source meter's own images.
+                Image outlineImage = body.Find("Outline").GetComponent<Image>();
+                Image backdropImage = body.Find("Backdrop").GetComponent<Image>();
+                Image bonusImage = body.Find("BonusFill").GetComponent<Image>();
+                Image chargeImage = body.Find("ChargeFill").GetComponent<Image>();
+
+                GameObject zone = new GameObject("PremiumZone", typeof(RectTransform));
+                zone.transform.SetParent(body, false);
+                RectTransform zoneRect = zone.GetComponent<RectTransform>();
+                zoneRect.anchorMin = new Vector2(1f, 0.5f);
+                zoneRect.anchorMax = new Vector2(1f, 0.5f);
+                zoneRect.pivot = new Vector2(0f, 0.5f);
+                zoneRect.anchoredPosition = Vector2.zero;
+                zoneRect.sizeDelta = new Vector2(zoneWidth, zoneHeight);
+
+                MakePremiumImage(zone.transform, "PremiumOutline", outlineImage.color, null, false, Vector2.zero);
+                MakePremiumImage(zone.transform, "PremiumBackdrop", backdropImage.color, null, false, new Vector2(-6f, -6f));
+                MakePremiumImage(zone.transform, "PremiumBoostFill", bonusImage.color, bonusImage.sprite, true, new Vector2(-6f, -6f));
+                MakePremiumImage(zone.transform, "PremiumChargeFill", chargeImage.color, chargeImage.sprite, true, new Vector2(-6f, -6f));
+
+                GameObject line = new GameObject("PremiumDivider", typeof(RectTransform));
+                line.transform.SetParent(zone.transform, false);
+                RectTransform lineRect = line.GetComponent<RectTransform>();
+                lineRect.anchorMin = new Vector2(0.5f, 0f);
+                lineRect.anchorMax = new Vector2(0.5f, 1f);
+                lineRect.pivot = new Vector2(0.5f, 0.5f);
+                lineRect.sizeDelta = new Vector2(3f, -6f);
+                line.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.9f);
+
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+            Debug.Log("KineticEnergySetup: PremiumEnergyMeter prefab created OK (8 + 2 taller blocks)");
+        }
+
+        static void MakePremiumImage(Transform parent, string name, Color color, Sprite sprite, bool filled, Vector2 sizeDelta)
+        {
+            GameObject go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            RectTransform rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = sizeDelta;
+            Image image = go.AddComponent<Image>();
+            image.color = color;
+            image.sprite = sprite;
+            if (filled)
+            {
+                image.type = Image.Type.Filled;
+                image.fillMethod = Image.FillMethod.Horizontal;
+                image.fillOrigin = (int)Image.OriginHorizontal.Left;
+                image.fillAmount = 0f; // empty until the harness feeds it real premium energy
+            }
+        }
+
+        // QuarryEconomy2: a copy of the economy scene running the single MERGED design
+        // (combo refunds + safety recharge + premium top 20%) instead of the five-way
+        // variant harness. The copy is made from QuarryEconomy, so the locked camera and
+        // all hand-tuned scene values carry over.
+        [MenuItem("Tools/Kinetic Energy/Setup Quarry Economy 2 Scene")]
+        public static void SetupQuarryEconomy2()
+        {
+            const string sourcePath = "Assets/Scenes/QuarryEconomy.unity";
+            const string scenePath = "Assets/Scenes/QuarryEconomy2.unity";
+
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(sourcePath) == null)
+                {
+                    throw new Exception("KineticEnergySetup: QuarryEconomy.unity does not exist - set it up first.");
+                }
+                if (!AssetDatabase.CopyAsset(sourcePath, scenePath))
+                {
+                    throw new Exception("KineticEnergySetup: copying QuarryEconomy.unity to QuarryEconomy2.unity failed.");
+                }
+            }
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            // The five-way variant harness belongs to the FIRST economy scene only.
+            var oldHarness = UnityEngine.Object.FindAnyObjectByType<EconomyVariantController>(FindObjectsInactive.Include);
+            if (oldHarness != null) UnityEngine.Object.DestroyImmediate(oldHarness.gameObject);
+
+            if (UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include) == null)
+            {
+                new GameObject("MergedEconomy").AddComponent<MergedEconomyController>();
+            }
+
+            // Swap the standalone meter for the premium 8+2 variant (idempotent), keeping
+            // the old instance's placement and wiring the Player to the replacement.
+            CreatePremiumEnergyMeterPrefab();
+            KineticCubeController playerController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            if (playerController != null && playerController.energyMeter != null
+                && playerController.energyMeter.gameObject.name != "PremiumEnergyMeter")
+            {
+                EnergyMeterController oldMeter = playerController.energyMeter;
+                RectTransform oldRect = oldMeter.GetComponent<RectTransform>();
+
+                GameObject premium = (GameObject)PrefabUtility.InstantiatePrefab(
+                    AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PremiumEnergyMeter.prefab"));
+                premium.name = "PremiumEnergyMeter";
+                premium.transform.SetParent(oldMeter.transform.parent, false);
+                RectTransform newRect = premium.GetComponent<RectTransform>();
+                if (oldRect != null && newRect != null)
+                {
+                    newRect.anchorMin = oldRect.anchorMin;
+                    newRect.anchorMax = oldRect.anchorMax;
+                    newRect.pivot = oldRect.pivot;
+                    newRect.anchoredPosition = oldRect.anchoredPosition;
+                    newRect.localScale = oldRect.localScale;
+                }
+
+                playerController.energyMeter = premium.GetComponent<EnergyMeterController>();
+                EditorUtility.SetDirty(playerController);
+                UnityEngine.Object.DestroyImmediate(oldMeter.gameObject);
+            }
+
+            SaveOpenScene(scenePath);
+            Debug.Log("KineticEnergySetup: quarry economy 2 (merged) scene setup complete OK");
+        }
+
         // ADDITIVE: the first-boot aim-variant explainer overlay for QuarryNew - shown once
         // per game process, dismissed by any input, frozen game underneath.
         [MenuItem("Tools/Kinetic Energy/Add Aim Intro To QuarryNew")]
