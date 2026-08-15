@@ -104,7 +104,12 @@ namespace KineticEnergy.Player
         {
             if (chargeFillImage == null) return;
             chargeFillImage.gameObject.SetActive(visible);
-            chargeFillImage.fillAmount = visible ? Mathf.Max(Mathf.Clamp01(fraction), 0.05f) : 0f;
+            // The visibility floor must never OVERSTATE: with the tank drained below 5%
+            // (the economy variants' drains can do that), the floored blue poked past the
+            // yellow, promising energy that isn't there - so the floor is capped by the
+            // actual energy fill behind it.
+            float displayFloor = Mathf.Min(0.05f, energyFillImage != null ? energyFillImage.fillAmount : 1f);
+            chargeFillImage.fillAmount = visible ? Mathf.Max(Mathf.Clamp01(fraction), displayFloor) : 0f;
         }
     }
 }

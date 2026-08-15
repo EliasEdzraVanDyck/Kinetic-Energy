@@ -62,6 +62,11 @@ namespace KineticEnergy.UI
 
         bool isPaused;
 
+        // Read by systems that must distinguish a genuine pause from other timeScale-0
+        // freezes (the midair aim's bullet time) - e.g. the economy harness's real-time
+        // combo window.
+        public bool IsPaused => isPaused;
+
         void OnEnable()
         {
             pauseAction?.action?.Enable();

@@ -1931,11 +1931,20 @@ namespace KineticEnergy.Player
 
         // Crash-stick: stop dead, freeze in place, gravity off, refund energy. Shared by
         // OnCollisionEnter and FixedUpdate's zero-clearance slam check.
+        // The surface the most recent registered crash landed on, and the energy that
+        // crash's refund actually added - the economy harness reads both to decide
+        // whether a landing counts (and to take the payout back when it doesn't).
+        public Collider LastCrashSurface { get; private set; }
+        public float LastCrashRefund { get; private set; }
+
         void RegisterCrash(Vector3 contactNormal, float crashSpeed, Collider surface)
         {
             // A NonStickSurface never registers as a crash at all - no freeze, no refund;
             // physics carries the cube onward.
             if (surface != null && surface.GetComponentInParent<NonStickSurface>() != null) return;
+
+            LastCrashSurface = surface;
+            LastCrashRefund = 0f; // stamped by RefundEnergyForCrash when a payout happens
 
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
@@ -1990,8 +1999,10 @@ namespace KineticEnergy.Player
             }
 
             // Breakable crack panes never refund energy - they exist to be smashed through,
-            // not farmed.
-            if (surface == null || surface.GetComponentInParent<BreakableCrackWall>() == null)
+            // not farmed. NoRefundSurface marks other farm-proof surfaces the same way
+            // (the economy scene's big floor, under its refund-boosted variants).
+            if (surface == null || (surface.GetComponentInParent<BreakableCrackWall>() == null
+                && surface.GetComponentInParent<NoRefundSurface>() == null))
             {
                 RefundEnergyForCrash();
             }
@@ -2041,6 +2052,10 @@ namespace KineticEnergy.Player
                 return;
             }
 
+            // What this refund ACTUALLY adds (clamps included) - measured, not derived, so
+            // the economy harness can take back exactly what a non-counting landing paid.
+            float energyBeforeRefund = energyFraction;
+
             if (lastLaunchWasPound)
             {
                 float flightSpend = flightEnergySpent > 0.0001f ? flightEnergySpent : lastLaunchEnergySpent;
@@ -2048,6 +2063,7 @@ namespace KineticEnergy.Player
                 // The boost extra keys off the POUND launch alone, not the whole flight.
                 poundPendingRefund = lastLaunchEnergySpent;
                 ClampEnergyFloor();
+                LastCrashRefund = Mathf.Max(energyFraction - energyBeforeRefund, 0f);
                 return;
             }
 
@@ -2063,6 +2079,7 @@ namespace KineticEnergy.Player
             }
             energyFraction = Mathf.Clamp01(energyFraction + gain);
             ClampEnergyFloor();
+            LastCrashRefund = Mathf.Max(energyFraction - energyBeforeRefund, 0f);
         }
 
         // ---------- Landing prediction ----------

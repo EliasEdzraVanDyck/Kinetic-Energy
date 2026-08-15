@@ -59,6 +59,10 @@ namespace KineticEnergy.Level
         [Header("1 - Aim drain")]
         [Tooltip("Tank fraction lost per real second while the midair aim is open.")]
         public float aimDrainPerSecond = 0.08f;
+        [Tooltip("GROUNDED-aim launch refunds in this variant are the scene's own tuning times this - slightly above 1, so landings pay back a bit more.")]
+        public float aimDrainGroundedRefundBoost = 1.15f;
+        [Tooltip("MIDAIR-aim launch refunds in this variant are the scene's own tuning times this - tuned separately from the grounded boost.")]
+        public float aimDrainMidairRefundBoost = 1.15f;
 
         [Header("2 - Combo refund")]
         [Tooltip("Refund fraction of the spent energy for an unchained landing, any aim method.")]
@@ -67,6 +71,8 @@ namespace KineticEnergy.Level
         public float comboStepPerLevel = 0.1f;
         [Tooltip("Seconds after a landing to fire the next launch before the combo (and its orange extra) is lost.")]
         public float comboWindowSeconds = 2f;
+        [Tooltip("The chain multiplier can never exceed this refund fraction (2 = 200%) - the count stops growing once a landing reaches it.")]
+        public float comboMaxMultiplier = 2f;
         [Tooltip("How far down the combo meter moves so its circle clears the energy meter.")]
         public float comboMeterDropPixels = 44f;
         public Color comboMeterColor = new Color(1f, 0.62f, 0.1f); // matches the pound-boost orange
@@ -74,6 +80,12 @@ namespace KineticEnergy.Level
         [Header("C - Charge drain (every charge type)")]
         [Tooltip("Tank fraction lost per REAL second while ANY charge is open: grounded aim, up/pound hold charges, and the midair aim alike.")]
         public float chargeDrainPerSecond = 0.06f;
+        [Tooltip("Launch refunds in THIS variant are the scene's own refund tuning times this - slightly above 1, so landings pay back a bit more.")]
+        public float chargeDrainRefundBoost = 1.15f;
+
+        [Header("B - Landings that pay nothing")]
+        [Tooltip("Scene objects (found by name at Start) whose surface never counts in the COMBO variant - only the big flat floor. Landing there (or back on the launch object) pays no refund and never chains. (QuarryTerrain must NOT be listed: it is most of the level.)")]
+        public string[] bigFloorObjectNames = { "QuarryFloor" };
 
         [Header("D - Tuned (flat refunds + grounded recharge)")]
         [Tooltip("Every landed launch refunds this fraction of its spend - below 1, so launching can never be energy-positive.")]
@@ -90,6 +102,7 @@ namespace KineticEnergy.Level
         [Range(0f, 1f)] public float targetMinReward = 0.15f;
 
         KineticCubeController controller;
+        KineticEnergy.UI.PauseController pauseController;
 
         // Scene defaults, captured once so switching variants never permanently mutates
         // the Player's tuned values.
@@ -107,6 +120,16 @@ namespace KineticEnergy.Level
         float comboExtra;        // revocable orange energy (variant 2 only)
         float windowRemaining;
         bool chainInFlight;      // fired inside the window - frozen until that launch lands
+        Transform launchSurface; // what the current launch took off from - landing back on it never chains
+
+        // Variant D: how much of the CURRENT tank came from standing-still regen - shown
+        // in orange on the meter. Spending eats this pool first, so the orange vanishes
+        // with use and re-grows while standing.
+        float regenPool;
+        float lastEnergySeen;
+
+        // The big-floor objects that pay no refunds in the boosted variants.
+        readonly System.Collections.Generic.List<GameObject> floorObjects = new System.Collections.Generic.List<GameObject>();
 
         // Runtime UI.
         GameObject comboCircle;
@@ -140,6 +163,16 @@ namespace KineticEnergy.Level
             controller.LaunchFired += OnLaunchFired;
             controller.CrashRegistered += OnCrash;
             TargetSphere.Collected += OnTargetCollected;
+            DamageWalls.PlayerRespawned += OnPlayerRespawned;
+
+            pauseController = FindAnyObjectByType<KineticEnergy.UI.PauseController>(FindObjectsInactive.Include);
+
+            floorObjects.Clear();
+            foreach (string floorName in bigFloorObjectNames)
+            {
+                GameObject floor = GameObject.Find(floorName);
+                if (floor != null) floorObjects.Add(floor);
+            }
 
             BuildHudTag();
             ApplyVariant();
@@ -155,9 +188,20 @@ namespace KineticEnergy.Level
         void OnDestroy()
         {
             TargetSphere.Collected -= OnTargetCollected;
+            DamageWalls.PlayerRespawned -= OnPlayerRespawned;
             if (controller == null) return;
             controller.LaunchFired -= OnLaunchFired;
             controller.CrashRegistered -= OnCrash;
+        }
+
+        // A hazard respawn wipes the run state: the energy tank was just reset by the
+        // controller, so the chain clears WITHOUT the revoke penalty, and the regen-pool
+        // display starts over from the fresh tank.
+        void OnPlayerRespawned()
+        {
+            ResetCombo(revoke: false);
+            regenPool = 0f;
+            if (controller != null) lastEnergySeen = controller.EnergyFraction;
         }
 
         // Variant E: a collected target pays the flight's spend times the bonus multiplier
@@ -171,7 +215,19 @@ namespace KineticEnergy.Level
 
         void Update()
         {
-            if (Time.timeScale <= 0f || controller == null) return;
+            if (controller == null) return;
+
+            // timeScale 0 is BOTH the pause/intro freeze AND the midair aim's bullet-time
+            // freeze. The harness must keep running through the AIM freeze - the combo
+            // window and the charge rents run on REAL seconds precisely so aiming can't
+            // hide from them (this gate was why the window sat at full through every
+            // midair aim) - while a genuine pause or the intro overlay halts everything.
+            if (Time.timeScale <= 0f)
+            {
+                bool trulyPaused = (pauseController != null && pauseController.IsPaused)
+                    || KineticEnergy.UI.AimIntroScreen.InputBlocked;
+                if (trulyPaused || !controller.IsAimingOrCharging) return;
+            }
 
             bool forward = (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
                 || (Gamepad.current != null && Gamepad.current.dpad.right.wasPressedThisFrame);
@@ -182,6 +238,15 @@ namespace KineticEnergy.Level
                 int count = System.Enum.GetValues(typeof(EconomyVariant)).Length;
                 currentVariant = (EconomyVariant)(((int)currentVariant + (forward ? 1 : count - 1)) % count);
                 ApplyVariant();
+            }
+
+            // A chained flight normally thaws via its landing crash - but flights can end
+            // WITHOUT one (a NonStick bounce, an enemy hit, a soft touch-down). Standing
+            // on the ground with no launch in progress means the flight is over however it
+            // ended, so the frozen window must resume; without this it stuck at full.
+            if (ComboLike && chainInFlight && controller.IsGrounded && !controller.HasLaunched)
+            {
+                chainInFlight = false;
             }
 
             // Combo window: ticks only BETWEEN launches (frozen while a chained launch is
@@ -196,19 +261,30 @@ namespace KineticEnergy.Level
             // tuning fields the refund code already uses.
             if (currentVariant == EconomyVariant.ComboRefund)
             {
-                float refund = comboBaseRefund + comboStepPerLevel * comboCount;
+                float refund = Mathf.Min(comboBaseRefund + comboStepPerLevel * comboCount, comboMaxMultiplier);
                 controller.groundedRefundMultiplier = refund;
                 controller.midairRefundBaseMultiplier = refund;
                 controller.midairRefundSpendFactor = 0f;
             }
 
             // Variant D rule 2: the ground slowly recharges the tank, up to its ceiling -
-            // a soft-lock is impossible, but the top of the tank stays earned-only.
-            if (currentVariant == EconomyVariant.Tuned && controller.IsGrounded
-                && controller.EnergyFraction < tunedRegenCeiling)
+            // a soft-lock is impossible, but the top of the tank stays earned-only. The
+            // regen pool tracks how much of the tank the ground gave (drawn in orange);
+            // any spend since last frame comes out of the pool first.
+            if (currentVariant == EconomyVariant.Tuned)
             {
-                float headroom = tunedRegenCeiling - controller.EnergyFraction;
-                controller.AddEnergy(Mathf.Min(tunedRegenPerSecond * Time.unscaledDeltaTime, headroom));
+                float energyNow = controller.EnergyFraction;
+                if (energyNow < lastEnergySeen) regenPool = Mathf.Max(0f, regenPool - (lastEnergySeen - energyNow));
+
+                if (controller.IsGrounded && energyNow < tunedRegenCeiling)
+                {
+                    float headroom = tunedRegenCeiling - energyNow;
+                    float gained = Mathf.Min(tunedRegenPerSecond * Time.unscaledDeltaTime, headroom);
+                    controller.AddEnergy(gained);
+                    regenPool += gained;
+                }
+                regenPool = Mathf.Min(regenPool, controller.EnergyFraction);
+                lastEnergySeen = controller.EnergyFraction;
             }
 
             // Variant C: rent on EVERY charge - grounded aim, hold charges, midair aim.
@@ -223,6 +299,7 @@ namespace KineticEnergy.Level
         {
             if (controller == null) return;
             UpdateComboUi();
+            UpdateRegenUi();
         }
 
         // ---------- Variant application ----------
@@ -238,11 +315,20 @@ namespace KineticEnergy.Level
             controller.launchScatterMaxAngle = 0f;
             ResetCombo(revoke: true);
 
+            // The regen-pool display state starts fresh with every variant.
+            regenPool = 0f;
+            lastEnergySeen = controller.EnergyFraction;
+
             switch (currentVariant)
             {
                 case EconomyVariant.AimDrain:
                     controller.slowdownMode = SlowdownMode.EnergyTank;
                     controller.tankDrainPerSecond = aimDrainPerSecond;
+                    // Landings pay back slightly more than the scene's own tuning here -
+                    // the grounded and midair aims carry their own separate boosts.
+                    controller.groundedRefundMultiplier = defaultGroundedRefund * aimDrainGroundedRefundBoost;
+                    controller.midairRefundBaseMultiplier = defaultMidairBase * aimDrainMidairRefundBoost;
+                    controller.midairRefundSpendFactor = defaultMidairSpendFactor * aimDrainMidairRefundBoost;
                     break;
 
                 case EconomyVariant.ComboRefund:
@@ -253,6 +339,9 @@ namespace KineticEnergy.Level
                     // The drain is applied manually in Update (EnergyTank mode would only
                     // meter the midair aim - C charges rent on EVERY charge type).
                     controller.slowdownMode = SlowdownMode.Unlimited;
+                    controller.groundedRefundMultiplier = defaultGroundedRefund * chargeDrainRefundBoost;
+                    controller.midairRefundBaseMultiplier = defaultMidairBase * chargeDrainRefundBoost;
+                    controller.midairRefundSpendFactor = defaultMidairSpendFactor * chargeDrainRefundBoost;
                     break;
 
                 case EconomyVariant.Tuned:
@@ -292,12 +381,34 @@ namespace KineticEnergy.Level
         void OnLaunchFired()
         {
             if (!ComboLike) return;
+            // Where this launch left FROM (grounded launches; a midair relaunch has no
+            // surface below and matches nothing) - landing back on the same object must
+            // not build the chain.
+            launchSurface = null;
+            if (Physics.Raycast(controller.transform.position, Vector3.down, out RaycastHit hit, 4f,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                launchSurface = hit.collider.transform;
+            }
             if (windowRemaining > 0f) chainInFlight = true; // chain stays alive through the flight
         }
 
         void OnCrash(Vector3 position)
         {
             if (!ComboLike) return;
+
+            // Landings that never COUNT in the combo variant: the big quarry floor, and
+            // the very object this launch took off from. They pay nothing - the refund
+            // just granted is taken straight back - and the chain neither grows nor
+            // refreshes (an in-flight freeze just thaws).
+            Collider crashSurface = controller.LastCrashSurface;
+            if (crashSurface != null && (IsBigFloor(crashSurface.transform)
+                || (launchSurface != null && crashSurface.transform == launchSurface)))
+            {
+                if (controller.LastCrashRefund > 0f) controller.AddEnergy(-controller.LastCrashRefund);
+                chainInFlight = false;
+                return;
+            }
 
             // The refund for THIS landing was just paid with the multipliers derived from
             // the pre-landing combo level. Only the LATEST landing's extra stays provisional
@@ -312,8 +423,26 @@ namespace KineticEnergy.Level
             }
 
             comboCount++;
+            // Capped chain: the count stops at the level whose multiplier reaches the cap.
+            if (comboStepPerLevel > 0f)
+            {
+                int maxLevels = Mathf.Max(Mathf.FloorToInt((comboMaxMultiplier - comboBaseRefund) / comboStepPerLevel + 0.0001f), 0);
+                comboCount = Mathf.Min(comboCount, maxLevels);
+            }
             chainInFlight = false;
             windowRemaining = ActiveWindow;
+        }
+
+        bool IsBigFloor(Transform surfaceTransform)
+        {
+            foreach (GameObject floor in floorObjects)
+            {
+                if (floor != null && (surfaceTransform == floor.transform || surfaceTransform.IsChildOf(floor.transform)))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         void ResetCombo(bool revoke)
@@ -446,8 +575,8 @@ namespace KineticEnergy.Level
                     if (showCircle && comboText != null)
                     {
                         // The MULTIPLIER the next landing pays, not the chain length:
-                        // x0.7, x0.8, x0.9, x1, x1.1 ...
-                        float multiplier = comboBaseRefund + comboStepPerLevel * comboCount;
+                        // x0.7, x0.8, x0.9, x1, x1.1 ... capped at comboMaxMultiplier.
+                        float multiplier = Mathf.Min(comboBaseRefund + comboStepPerLevel * comboCount, comboMaxMultiplier);
                         comboText.text = "x" + multiplier.ToString("0.0##");
                     }
                 }
@@ -461,6 +590,20 @@ namespace KineticEnergy.Level
                 energyMeter.SetEnergy(energy - comboExtra);
                 energyMeter.SetBonus(energy, true);
             }
+        }
+
+        // Variant D: the ground-regen energy rides the meter in the same ORANGE bonus
+        // segment - what standing still gave you stays visibly distinct from earned
+        // energy until it's spent. Runs after the controller's own meter update.
+        void UpdateRegenUi()
+        {
+            if (currentVariant != EconomyVariant.Tuned) return;
+            var energyMeter = controller.energyMeter;
+            if (energyMeter == null || regenPool <= 0.001f) return;
+
+            float energy = controller.EnergyFraction;
+            energyMeter.SetEnergy(energy - regenPool);
+            energyMeter.SetBonus(energy, true);
         }
 
     }

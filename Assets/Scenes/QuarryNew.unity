@@ -1598,18 +1598,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 812e429b0d5d3c840bf8f4f95a2e490c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.UI.AimIntroScreen
-  bodyText: "AIM CAMERA VARIANTS\n\nThis build contains six aiming cameras. Switch
-    with V / D-pad Right (back: C / D-pad Left).\n\nA - First person: the aim view
-    you know - you see through the ball.\n\nB - Behind the player: over-the-shoulder,
-    the ball stays visible in the corner as a size reference.\n     Q / Right Stick
-    Click swaps the shoulder. Adds a small wobble as a parrallax affect as well.\n\nC
-    - First person + landing window: A, plus a corner window showing your\n     landing
-    spot whenever the cursor itself is off-screen or hidden.\n\nD - Behind player
-    + landing window: B plus that same landing window.\n\nE - First person + look
-    around: WASD / Right Stick rotates your view without\n     moving the aim. Controller
-    energy inputs move to RB (add) / LB (remove).\n\nF - Behind player + look around:
-    the same, over the shoulder.\n\nThe feedback form in the pause menu asks which
-    variant you preferred.\n\nPress any button to start."
+  introKey: aim
+  bodyText: "AIM CAMERA VARIANTS\n\nThis build contains six aiming cameras. Go to
+    the next variant with V / D-pad Right, go to the previous variant with C / D-pad
+    Left.\n\nA - First person: the aim view you know - you see through the ball.\n\nB
+    - Behind the player: over-the-shoulder, the ball stays visible in the corner
+    as a size reference.\n     Q / Right Stick Click swaps the shoulder. Adds a small
+    wobble as a parrallax affect as well.\n\nC - First person + landing window: A,
+    plus a corner window showing your\n     landing spot whenever the cursor itself
+    is off-screen or hidden.\n\nD - Behind player + landing window: B plus that same
+    landing window.\n\nE - First person + look around: WASD / Right Stick rotates
+    your view without\n     moving the aim. Controller energy inputs move to RB (add)
+    / LB (remove).\n\nF - Behind player + look around: the same, over the shoulder.\n\nThe
+    feedback form in the pause menu asks which variant you preferred.\n\nPress any
+    button to start."
 --- !u!4 &757765639
 Transform:
   m_ObjectHideFlags: 0
