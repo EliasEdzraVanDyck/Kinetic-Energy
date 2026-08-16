@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using KineticEnergy.Level;
 
 namespace KineticEnergy.Player
 {
@@ -55,6 +56,16 @@ namespace KineticEnergy.Player
         [Tooltip("Per-frame target movement at or below this gets FULL smoothing; faster (deliberate) sweeps proportionally bypass it - far dots and the cursor track camera turns raw instead of breaking away behind them.")]
         public float smoothNoiseReference = 0.12f;
 
+        [Header("Landing outcome colours")]
+        [Tooltip("Dots + cursor while the predicted landing is SUCCESSFUL: no respawn hazard, and not the side of grounded geometry (floating objects' sides are fine - you stick and relaunch).")]
+        public Color successColor = new Color(0.25f, 0.95f, 0.62f, 0.95f);
+        [Tooltip("Dots + cursor while the landing would fail - a hazard, the side of non-floating geometry, or no landing at all.")]
+        public Color failColor = new Color(1f, 0.32f, 0.44f, 0.95f);
+        [Tooltip("The arrow's darker take on the success colour - same relationship to the dots the blue arrow had to the yellow.")]
+        public Color successArrowColor = new Color(0.08f, 0.5f, 0.32f, 0.95f);
+        [Tooltip("The arrow's darker take on the fail colour.")]
+        public Color failArrowColor = new Color(0.58f, 0.13f, 0.22f, 0.95f);
+
         PredictionMode currentMode = PredictionMode.Trail;
         bool isVisible;
         bool hasLanding = true;
@@ -72,6 +83,18 @@ namespace KineticEnergy.Player
         // The landing arrow, built ONCE from the serialized arrowLength - no measuring,
         // no per-frame sizing. Material cloned blue from the cursor's own.
         GameObject landingArrowRoot;
+
+        // Outcome tint state. Property blocks tint per-RENDERER, so the shared aim
+        // materials (assets) are never mutated.
+        bool outcomeSuccess;
+        bool outcomeTintApplied;
+        MaterialPropertyBlock tintBlock;
+        Renderer[] dotRenderers;
+        Renderer[] cursorRenderers;
+        readonly System.Collections.Generic.List<Renderer> arrowRenderers = new System.Collections.Generic.List<Renderer>();
+        // Steepness boundary between "a face you rest on" and "a side" - the same 0.7
+        // dot-with-up the wall-launch stake uses, so the colours agree with the economy.
+        const float SteepSurfaceDot = 0.7f;
         // Guaranteed clearance off the landing face, whatever the serialized lift says.
         const float MinSurfaceLift = 0.15f;
 
@@ -152,6 +175,10 @@ namespace KineticEnergy.Player
                 Quaternion.Euler(0f, 0f, 45f),
                 new Vector3(arrowLength * 0.42f, arrowLength * 0.14f, arrowLength * 0.06f), arrowMaterial);
             landingArrowRoot.SetActive(false);
+
+            // The freshly built parts must catch up with the current outcome tint.
+            outcomeTintApplied = false;
+            ApplyOutcomeTint();
         }
 
         void AddArrowPart(string name, Vector3 localPosition, Quaternion localRotation, Vector3 localScale, Material material)
@@ -163,7 +190,90 @@ namespace KineticEnergy.Player
             part.transform.localPosition = localPosition;
             part.transform.localRotation = localRotation;
             part.transform.localScale = localScale;
-            part.GetComponent<Renderer>().sharedMaterial = material;
+            Renderer partRenderer = part.GetComponent<Renderer>();
+            partRenderer.sharedMaterial = material;
+            arrowRenderers.Add(partRenderer);
+        }
+
+        // ---------- Landing outcome (colour) ----------
+
+        // A landing SUCCEEDS unless it respawns you (hazard surfaces, or no landing at
+        // all) or it's the SIDE of non-floating geometry. Floating objects' sides are
+        // genuine landings - you stick and relaunch with the wall stake.
+        bool LandingIsSuccessful(Collider landing, Vector3 point, Vector3 normal)
+        {
+            if (landing == null) return false;
+            if (landing.GetComponentInParent<DamageWalls>() != null) return false;
+            if (landing.GetComponentInParent<DeathWall>() != null) return false;
+            if (Vector3.Dot(normal, Vector3.up) >= SteepSurfaceDot) return true;
+            return ObjectIsFloating(landing, point, normal);
+        }
+
+        // Floating = there is AIR under the object, not support. Probed just off the hit
+        // face: if the first thing straight below is the same collider, its own geometry
+        // continues down (terrain walls, ramps) - grounded. Otherwise the object floats
+        // when its underside sits clearly above whatever is beneath it.
+        bool ObjectIsFloating(Collider landing, Vector3 point, Vector3 normal)
+        {
+            Vector3 probe = point + normal * 0.5f;
+            RaycastHit[] hits = Physics.RaycastAll(probe, Vector3.down, 500f, ~0, QueryTriggerInteraction.Ignore);
+            bool found = false;
+            RaycastHit closest = default;
+            foreach (RaycastHit hit in hits)
+            {
+                if (hit.collider == null) continue;
+                if (hit.collider.GetComponentInParent<KineticCubeController>() != null) continue;
+                if (hit.collider.GetComponentInParent<AimPreviewIgnored>() != null) continue;
+                if (!found || hit.distance < closest.distance)
+                {
+                    closest = hit;
+                    found = true;
+                }
+            }
+            if (!found) return true; // nothing below at all - hanging over the void
+            if (closest.collider == landing) return false;
+            return landing.bounds.min.y > closest.point.y + 0.35f;
+        }
+
+        // Tints dots + cursor with the outcome colour and the arrow with its darker
+        // sibling - via property blocks, so the shared aim material assets stay untouched.
+        void ApplyOutcomeTint()
+        {
+            if (outcomeTintApplied) return;
+            outcomeTintApplied = true;
+
+            if (dotRenderers == null && trailDots != null)
+            {
+                dotRenderers = new Renderer[trailDots.Length];
+                for (int i = 0; i < trailDots.Length; i++)
+                {
+                    if (trailDots[i] != null) dotRenderers[i] = trailDots[i].GetComponentInChildren<Renderer>(true);
+                }
+            }
+            if (cursorRenderers == null && crosshairGroup != null)
+            {
+                cursorRenderers = crosshairGroup.GetComponentsInChildren<Renderer>(true);
+            }
+
+            Color main = outcomeSuccess ? successColor : failColor;
+            Color arrow = outcomeSuccess ? successArrowColor : failArrowColor;
+            TintRenderers(dotRenderers, main);
+            TintRenderers(cursorRenderers, main);
+            TintRenderers(arrowRenderers.ToArray(), arrow);
+        }
+
+        void TintRenderers(Renderer[] renderers, Color color)
+        {
+            if (renderers == null) return;
+            if (tintBlock == null) tintBlock = new MaterialPropertyBlock();
+            foreach (Renderer target in renderers)
+            {
+                if (target == null) continue;
+                target.GetPropertyBlock(tintBlock);
+                tintBlock.SetColor("_BaseColor", color); // URP shaders
+                tintBlock.SetColor("_Color", color);     // legacy/unlit fallbacks
+                target.SetPropertyBlock(tintBlock);
+            }
         }
 
         // Hovers over the landing marker along its surface normal, tip toward the zone,
@@ -201,8 +311,28 @@ namespace KineticEnergy.Player
         // SPOT, which doesn't exist then, so it hides; the trail still shows the arc, since
         // "here's the path, and it lands nowhere" is still meaningful. landingNormal orients
         // the marker flush against the landing face (wall, floor, ceiling alike).
-        public void SetLandingPoint(Vector3 lineStart, Vector3 landingPoint, Vector3[] trajectory, int trajectoryCount, bool didLand, Vector3 landingNormal = default)
+        public void SetLandingPoint(Vector3 lineStart, Vector3 landingPoint, Vector3[] trajectory, int trajectoryCount, bool didLand, Vector3 landingNormal = default, Collider landingCollider = null)
         {
+            // Outcome colour: judged on real landings; a lost landing keeps its colour
+            // through the same grace the cursor gets (single-frame prediction misses must
+            // not flash red), then settles on fail - no landing means a fall reset.
+            if (didLand)
+            {
+                Vector3 judgedNormal = landingNormal.sqrMagnitude > 0.0001f ? landingNormal.normalized : lastValidNormal;
+                bool success = LandingIsSuccessful(landingCollider, landingPoint, judgedNormal);
+                if (success != outcomeSuccess)
+                {
+                    outcomeSuccess = success;
+                    outcomeTintApplied = false;
+                }
+            }
+            else if (noLandingTimer > cursorHideGraceSeconds && outcomeSuccess)
+            {
+                outcomeSuccess = false;
+                outcomeTintApplied = false;
+            }
+            ApplyOutcomeTint();
+
             // GRACE on losing the landing: single-frame prediction misses used to blink
             // the cursor out (and a moving camera made it pop in late) - the cursor now
             // holds its last valid spot briefly and only hides if the miss persists.

@@ -440,6 +440,9 @@ namespace KineticEnergy.Player
         bool hasValidPredictedLanding;
         int lastTrajectoryStepCount;
         Vector3 lastPredictedLandingNormal = Vector3.up;
+        // The real scene collider the predicted flight ends on (mapped back from its
+        // physics-scene proxy) - lets the preview judge the landing's outcome.
+        Collider lastPredictedLandingSource;
         GameObject predictionClone;
         Rigidbody predictionRb;
         BoxCollider predictionCloneCollider;
@@ -2213,7 +2216,7 @@ namespace KineticEnergy.Player
 
             if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
             {
-                landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand, lastPredictedLandingNormal);
+                landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand, lastPredictedLandingNormal, lastPredictedLandingSource);
             }
         }
 
@@ -2315,8 +2318,23 @@ namespace KineticEnergy.Player
             lastPredictedLandingNormal = predictionStopper != null && predictionStopper.HasContact
                 ? predictionStopper.LastContactNormal
                 : Vector3.up;
+            lastPredictedLandingSource = predictionStopper != null && predictionStopper.HasContact
+                ? ResolvePredictionSource(predictionStopper.LastContactCollider)
+                : null;
 
             return landing;
+        }
+
+        // The stopper's contact lives in the isolated physics scene - walk the proxy list
+        // back to the real scene collider it mirrors.
+        Collider ResolvePredictionSource(Collider proxyCollider)
+        {
+            if (proxyCollider == null) return null;
+            foreach (PredictionGeometryProxy entry in geometryProxies)
+            {
+                if (entry.proxy == proxyCollider.gameObject) return entry.source;
+            }
+            return null;
         }
 
         void EnsurePredictionClone()

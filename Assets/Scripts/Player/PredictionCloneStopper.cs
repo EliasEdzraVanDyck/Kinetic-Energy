@@ -16,6 +16,9 @@ namespace KineticEnergy.Player
         // actually lands on (wall, floor, ceiling alike). Cleared via ClearContact before every
         // prediction run.
         public Vector3 LastContactNormal { get; private set; } = Vector3.up;
+        // The PROXY collider the clone stopped on - the controller maps it back to the real
+        // scene object so the preview can judge the landing (deadly? side of grounded geometry?).
+        public Collider LastContactCollider { get; private set; }
         public bool HasContact { get; private set; }
 
         Rigidbody rb;
@@ -29,6 +32,7 @@ namespace KineticEnergy.Player
         {
             HasContact = false;
             LastContactNormal = Vector3.up;
+            LastContactCollider = null;
         }
 
         void OnCollisionEnter(Collision collision)
@@ -38,6 +42,7 @@ namespace KineticEnergy.Player
             if (collision.contactCount > 0)
             {
                 LastContactNormal = collision.GetContact(0).normal;
+                LastContactCollider = collision.collider;
                 HasContact = true;
             }
         }
