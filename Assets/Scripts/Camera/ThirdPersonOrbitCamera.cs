@@ -163,6 +163,9 @@ namespace KineticEnergy.Camera
         public float framingMaxDeviation = 45f;
         [Tooltip("Cursor framing during midair aims: the view centres the landing cursor when it's near the aim. OFF = the view follows the raw aim 1:1, fully free (the aim-lab scenes) - the aim can then never outrun the view.")]
         public bool trajectoryFramingEnabled = true;
+
+        [Tooltip("The player hides OUTRIGHT when the camera is squeezed closer than this (wall crashes collapse the OTS pull-in into the model): a giant near-plane-clipped player reads broken - fully invisible is better. Shown again as soon as there is room.")]
+        public float playerHideDistance = 1.1f;
         [Tooltip("Fully cursor-framed while the cursor is within this many degrees of the aim; from here to Framing Max Deviation the view BLENDS gradually back to the raw aim instead of switching at the edge (the hard edge made steep low-energy up-aims rotate abruptly - direct report).")]
         public float framingBlendStartDegrees = 25f;
         [Tooltip("How fast the framing blend weight may change per second (1 = a full handover takes a second). The TIME smoothing is what keeps the blend jitter-free: landing-prediction wobble can no longer whip the blend within a frame.")]
@@ -299,6 +302,46 @@ namespace KineticEnergy.Camera
         // camera exits first person AT the player - the launch simply flies past it and the
         // catch-up reads as instant, no matter the smooth time. Starting from the orbit slot
         // makes the launch trailing develop exactly like a grounded launch's.
+        // Player renderers hidden by camera PROXIMITY (see playerHideDistance) - only
+        // renderers that were enabled at hide time are restored, so this never fights
+        // other systems that disable renderers for their own reasons.
+        System.Collections.Generic.List<Renderer> proximityHiddenRenderers;
+
+        void UpdatePlayerProximityHiding()
+        {
+            if (target == null) return;
+            float distance = Vector3.Distance(transform.position, target.position);
+            // Hysteresis: hide below the distance, show again only past a small margin,
+            // so a camera hovering at the boundary can't flicker the player.
+            bool tooClose = proximityHiddenRenderers != null
+                ? distance < playerHideDistance * 1.15f
+                : distance < playerHideDistance;
+
+            if (tooClose && proximityHiddenRenderers == null)
+            {
+                proximityHiddenRenderers = new System.Collections.Generic.List<Renderer>();
+                foreach (Renderer rend in target.GetComponentsInChildren<Renderer>(false))
+                {
+                    if (rend == null || !rend.enabled) continue;
+                    // The AIM visuals (trail dots, landing cursor, arrow) live under the
+                    // player object but must SURVIVE the hide - only the body (and its
+                    // shadow) disappears, the aim readout stays.
+                    if (rend.GetComponentInParent<KineticEnergy.Player.LandingPreviewController>() != null) continue;
+                    if (rend.GetComponentInParent<KineticEnergy.Player.AimArrowIndicator>() != null) continue;
+                    rend.enabled = false;
+                    proximityHiddenRenderers.Add(rend);
+                }
+            }
+            else if (!tooClose && proximityHiddenRenderers != null)
+            {
+                foreach (Renderer rend in proximityHiddenRenderers)
+                {
+                    if (rend != null) rend.enabled = true;
+                }
+                proximityHiddenRenderers = null;
+            }
+        }
+
         // The scene-start pose, captured on the first LateUpdate (after CameraStartFacing
         // and every Start had their say) - a respawn resets the camera to exactly this.
         float startYaw;
@@ -770,6 +813,10 @@ namespace KineticEnergy.Camera
             // switching into first person still needs to run every frame, or a wall occluded the
             // instant before RMB was pressed would stay disabled for the entire aim.
             UpdateWallOcclusion(focusPoint);
+
+            // After the FINAL position: a camera squeezed into the player hides them
+            // outright rather than showing a giant near-plane-clipped model.
+            UpdatePlayerProximityHiding();
         }
 
         // Over-the-shoulder aim placement - SCREEN-ANCHORED (direct request: the player
