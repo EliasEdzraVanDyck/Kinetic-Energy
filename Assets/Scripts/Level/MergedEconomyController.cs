@@ -223,11 +223,12 @@ namespace KineticEnergy.Level
             if (BankedMode) comboExtra = 0f;
             controller.alwaysMaxCharge = autoMaxEnergy;
 
-            // Refund routing: A-D pay the base through the ordinary (ceiling-capped)
-            // pipeline; E/F silence the pipeline entirely - their whole payout comes
-            // from the dual-launch computation on landing.
-            controller.groundedRefundMultiplier = DualRefundMode ? 0f : ActiveComboBase;
-            controller.midairRefundBaseMultiplier = DualRefundMode ? 0f : ActiveComboBase;
+            // Refund routing: A/B pay the base through the ordinary (ceiling-capped)
+            // pipeline; C/D and E silence the pipeline entirely - their whole payout is
+            // computed by the harness on landing from the flight's spends.
+            bool harnessPaysRefund = DualRefundMode || TotalLossMode;
+            controller.groundedRefundMultiplier = harnessPaysRefund ? 0f : ActiveComboBase;
+            controller.midairRefundBaseMultiplier = harnessPaysRefund ? 0f : ActiveComboBase;
             controller.midairRefundSpendFactor = 0f;
 
             RefreshHudLabel();
@@ -370,18 +371,25 @@ namespace KineticEnergy.Level
                 flightOpen = true;
                 flightFirstSpend = controller.LastLaunchEnergySpent;
                 flightMidairSpend = 0f;
+
+                // The no-self-hop rule keys on the FLIGHT'S takeoff object, captured only
+                // when the flight opens FROM a surface. Midair relaunches must never
+                // overwrite it: a relaunch fired while diving low over the destination
+                // platform used to stamp THAT platform as the "takeoff", falsely voiding
+                // the whole landing's refund (the missing grounded+midair dual payout).
+                launchSurface = null;
+                if ((controller.IsGrounded || controller.IsStuck)
+                    && Physics.Raycast(controller.transform.position, Vector3.down, out RaycastHit hit, 4f,
+                        Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                {
+                    launchSurface = hit.collider.transform;
+                }
             }
             else
             {
                 flightMidairSpend += controller.LastLaunchEnergySpent;
             }
 
-            launchSurface = null;
-            if (Physics.Raycast(controller.transform.position, Vector3.down, out RaycastHit hit, 4f,
-                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
-            {
-                launchSurface = hit.collider.transform;
-            }
             if (windowRemaining > 0f) chainInFlight = true;
         }
 
@@ -421,14 +429,28 @@ namespace KineticEnergy.Level
                     comboExtra = BankedMode ? 0f : Mathf.Min(extraGain, controller.EnergyFraction);
                 }
             }
+            else if (TotalLossMode)
+            {
+                // E: the WHOLE flight pays as one sum - (first launch + midair
+                // relaunches) times E's combo multiplier (direct request). Base part
+                // ceiling-capped exactly like the pipeline; the combo-driven part on
+                // top is boost and may pass the ceiling.
+                float m = NextMultiplier;
+                float totalSpend = flightFirstSpend + flightMidairSpend;
+                float baseGain = totalSpend * totalLossBaseRefund;
+                float baseHeadroom = Mathf.Max(PremiumBoundary - controller.EnergyFraction, 0f);
+                controller.AddEnergy(Mathf.Min(baseGain, baseHeadroom));
+                float extraGain = totalSpend * (m - totalLossBaseRefund);
+                if (extraGain > 0f) controller.AddEnergy(extraGain);
+            }
 
             // The chain EXTRA for this landing, from the PRE-landing chain level (the base
             // refund was already paid by the ordinary pipeline). Paid directly, so it can
             // pass the premium boundary - this and the pound boost are the only ways up
             // there. Under the positional 80/20 rule, whatever lands below 80% is normal
             // energy immediately; only the part sitting above 80% is at risk.
-            // A-D: the chain EXTRA on top of the pipeline-paid base refund.
-            if (!DualRefundMode)
+            // A/B: the chain EXTRA on top of the pipeline-paid base refund.
+            if (!DualRefundMode && !TotalLossMode)
             {
                 float extraRate = NextMultiplier - ActiveComboBase;
                 if (extraRate > 0f && comboCount > 0)

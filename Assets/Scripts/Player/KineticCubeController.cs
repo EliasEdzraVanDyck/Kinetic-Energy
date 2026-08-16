@@ -124,6 +124,8 @@ namespace KineticEnergy.Player
         [Range(0f, 1f)] public float ordinaryRefundCeiling = 1f;
         [Tooltip("Every charge reads as the MAXIMUM the tank can pay - no manual energy regulation (the merged economy scene's auto-max variants set this).")]
         public bool alwaysMaxCharge = false;
+        [Tooltip("Midair launches ADD the velocity the cube carried into the aim (captured at aim open) on top of the launch impulse - Level1Economy's momentum option, toggled there with the 1 key.")]
+        public bool addPreAimVelocityToLaunch = false;
         [Tooltip("Multiplies real seconds of holding into charge-seconds - the main knob for how fast charging feels.")]
         public float chargeAccumulationRate = 0.3f;
         // The grounded aim charge, the forward hold-charge, and the midair energy dial all
@@ -1301,7 +1303,10 @@ namespace KineticEnergy.Player
             // The launch impulse ADDS to the current motion. While the slowdown resource
             // holds, the cube is frozen (velocity zero) - once it runs dry the cube keeps
             // falling through the aim and the preview accounts for that live velocity.
-            ShowLandingPreview(rb.linearVelocity + direction * force / rb.mass, damping);
+            // The MOMENTUM option additionally carries the velocity the cube had when the
+            // aim opened - included here so the cursor stays honest about it.
+            Vector3 momentumCarry = addPreAimVelocityToLaunch ? preAirAimVelocity : Vector3.zero;
+            ShowLandingPreview(rb.linearVelocity + momentumCarry + direction * force / rb.mass, damping);
 
             // Real-time estimate of that flight for the moving platforms' lead arrows: the
             // flight runs sped up (base + energy bonus, plus the descent ramp on average).
@@ -1314,6 +1319,10 @@ namespace KineticEnergy.Player
             {
                 chargeTime = fireFraction * maxChargeTime; // pay exactly for what fires
                 QueueLaunch(direction, force, damping);
+                // Momentum option: the flight resumes the velocity carried INTO the aim,
+                // with the impulse stacking on top at the physics tick - exactly the sum
+                // the preview above showed.
+                if (addPreAimVelocityToLaunch) rb.linearVelocity += preAirAimVelocity;
                 exactFlightNoNudge = true; // the shot follows the predicted line exactly
                 MidairAimFired?.Invoke(fireFraction, lastPredictedLanding);
                 suppressAimReleasedEvent = true;

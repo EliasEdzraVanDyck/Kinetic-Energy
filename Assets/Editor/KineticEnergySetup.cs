@@ -848,6 +848,44 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: quarry economy 2 (merged) scene setup complete OK");
         }
 
+        // OTS copies of both economy scenes: exact duplicates whose only change is the
+        // aim camera locked to variant D - over-the-shoulder plus the landing
+        // picture-in-picture window when the cursor is off screen.
+        [MenuItem("Tools/Kinetic Energy/Setup Economy OTS Scenes")]
+        public static void SetupEconomyOtsScenes()
+        {
+            MakeOtsCopy("Assets/Scenes/QuarryEconomy.unity", "Assets/Scenes/QuarryEconomyOts.unity");
+            MakeOtsCopy("Assets/Scenes/QuarryEconomy2.unity", "Assets/Scenes/QuarryEconomy2Ots.unity");
+            Debug.Log("KineticEnergySetup: economy OTS scenes setup complete OK");
+        }
+
+        static void MakeOtsCopy(string sourcePath, string copyPath)
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(copyPath) == null)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(sourcePath) == null)
+                {
+                    throw new Exception($"KineticEnergySetup: {sourcePath} does not exist.");
+                }
+                if (!AssetDatabase.CopyAsset(sourcePath, copyPath))
+                {
+                    throw new Exception($"KineticEnergySetup: copying {sourcePath} to {copyPath} failed.");
+                }
+            }
+            EditorSceneManager.OpenScene(copyPath, OpenSceneMode.Single);
+
+            var cameraVariants = UnityEngine.Object.FindAnyObjectByType<AimCameraVariantController>(FindObjectsInactive.Include);
+            if (cameraVariants == null)
+            {
+                throw new Exception($"KineticEnergySetup: no AimCameraVariantController in {copyPath}.");
+            }
+            cameraVariants.variantSwitchingEnabled = false;
+            cameraVariants.currentVariant = AimCameraVariant.OtsParallaxPip;
+            EditorUtility.SetDirty(cameraVariants);
+
+            SaveOpenScene(copyPath);
+        }
+
         // Level1Economy: an EXACT copy of Level 1 running QuarryEconomy2's merged economy
         // (variants A-E, the X/D-pad-Down auto-max toggle, the 8+2 premium meter, the
         // intro) with the aim camera LOCKED to QuarryNew's variant D - over-the-shoulder
@@ -919,6 +957,12 @@ namespace KineticEnergy.EditorSetup
                 playerController.slowdownMeter = slowdownMeter.GetComponent<EnergyMeterController>();
             }
             EditorUtility.SetDirty(playerController);
+
+            // The momentum-launch experiment (1-key toggle) lives in THIS scene only.
+            if (UnityEngine.Object.FindAnyObjectByType<MomentumLaunchToggle>(FindObjectsInactive.Include) == null)
+            {
+                new GameObject("MomentumLaunchToggle").AddComponent<MomentumLaunchToggle>();
+            }
 
             SaveOpenScene(scenePath);
             Debug.Log("KineticEnergySetup: Level 1 Economy scene setup complete OK (merged economy + OTS/landing-window camera)");
