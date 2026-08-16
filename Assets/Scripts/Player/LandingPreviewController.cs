@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace KineticEnergy.Player
 {
@@ -42,6 +43,13 @@ namespace KineticEnergy.Player
         public float smoothSnapDistance = 3f;
         [Tooltip("The cursor survives losing the landing for this long, holding its last valid spot - single-frame prediction misses no longer blink it out.")]
         public float cursorHideGraceSeconds = 0.12f;
+
+        [Header("Landing Arrow (V / D-pad Left toggles)")]
+        [Tooltip("The blue arrow hovering over the landing zone, billboarded to the viewer. On by default; V or D-pad Left flips it.")]
+        public bool landingArrowEnabled = true;
+        public Color landingArrowColor = new Color(0.25f, 0.55f, 1f, 0.95f);
+        [Tooltip("Arrow length as a fraction of the cursor's measured diameter - applied ONCE when the arrow is built.")]
+        public float arrowLengthFraction = 0.75f;
         [Tooltip("Per-frame target movement at or below this gets FULL smoothing; faster (deliberate) sweeps proportionally bypass it - far dots and the cursor track camera turns raw instead of breaking away behind them.")]
         public float smoothNoiseReference = 0.12f;
 
@@ -58,6 +66,11 @@ namespace KineticEnergy.Player
         Vector3 cursorPrevTarget;
         Vector3 lastValidNormal = Vector3.up;
         float smoothedArcLength;
+
+        // The landing arrow, built ONCE: geometry sized from the cursor's diameter at
+        // build time (never re-measured), material cloned blue from the cursor's own.
+        GameObject landingArrowRoot;
+        float arrowLength = -1f;
         // Guaranteed clearance off the landing face, whatever the serialized lift says.
         const float MinSurfaceLift = 0.15f;
 
@@ -89,6 +102,7 @@ namespace KineticEnergy.Player
                 cursorWasShown = false;
                 noLandingTimer = 0f;
                 smoothedArcLength = 0f;
+                if (landingArrowRoot != null) landingArrowRoot.SetActive(false);
             }
             ApplyModeVisibility();
         }
@@ -97,6 +111,93 @@ namespace KineticEnergy.Player
         {
             currentMode = mode;
             ApplyModeVisibility();
+        }
+
+        void Update()
+        {
+            // The landing-arrow toggle: V / D-pad Left, any time.
+            bool togglePressed = (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
+                || (Gamepad.current != null && Gamepad.current.dpad.left.wasPressedThisFrame);
+            if (togglePressed)
+            {
+                landingArrowEnabled = !landingArrowEnabled;
+                if (!landingArrowEnabled && landingArrowRoot != null) landingArrowRoot.SetActive(false);
+            }
+        }
+
+        // Built ONCE, on the first frame the cursor is measurable: the length comes from
+        // the cursor's rendered diameter times arrowLengthFraction - cached, never
+        // recomputed - and the material is the cursor's own, cloned and tinted blue.
+        void EnsureLandingArrow()
+        {
+            if (landingArrowRoot != null || crosshairGroup == null) return;
+
+            Renderer[] cursorRenderers = crosshairGroup.GetComponentsInChildren<Renderer>(true);
+            if (cursorRenderers.Length == 0) return;
+            Bounds bounds = cursorRenderers[0].bounds;
+            for (int i = 1; i < cursorRenderers.Length; i++) bounds.Encapsulate(cursorRenderers[i].bounds);
+            float diameter = Mathf.Max(bounds.size.x, Mathf.Max(bounds.size.y, bounds.size.z));
+            if (diameter < 0.01f) return;
+            arrowLength = diameter * Mathf.Max(arrowLengthFraction, 0.05f);
+
+            Material arrowMaterial = new Material(cursorRenderers[0].sharedMaterial);
+            arrowMaterial.color = landingArrowColor;
+
+            // Tip at the local ORIGIN, body extending up +Y: a shaft plus two angled
+            // wings forming the point. All thin boxes sharing the blue material.
+            landingArrowRoot = new GameObject("LandingArrow");
+            landingArrowRoot.transform.SetParent(transform, false);
+            AddArrowPart("Shaft", new Vector3(0f, arrowLength * 0.62f, 0f), Quaternion.identity,
+                new Vector3(arrowLength * 0.16f, arrowLength * 0.76f, arrowLength * 0.06f), arrowMaterial);
+            AddArrowPart("WingLeft", new Vector3(-arrowLength * 0.14f, arrowLength * 0.17f, 0f),
+                Quaternion.Euler(0f, 0f, -45f),
+                new Vector3(arrowLength * 0.42f, arrowLength * 0.14f, arrowLength * 0.06f), arrowMaterial);
+            AddArrowPart("WingRight", new Vector3(arrowLength * 0.14f, arrowLength * 0.17f, 0f),
+                Quaternion.Euler(0f, 0f, 45f),
+                new Vector3(arrowLength * 0.42f, arrowLength * 0.14f, arrowLength * 0.06f), arrowMaterial);
+            landingArrowRoot.SetActive(false);
+        }
+
+        void AddArrowPart(string name, Vector3 localPosition, Quaternion localRotation, Vector3 localScale, Material material)
+        {
+            GameObject part = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            part.name = name;
+            Destroy(part.GetComponent<Collider>());
+            part.transform.SetParent(landingArrowRoot.transform, false);
+            part.transform.localPosition = localPosition;
+            part.transform.localRotation = localRotation;
+            part.transform.localScale = localScale;
+            part.GetComponent<Renderer>().sharedMaterial = material;
+        }
+
+        // Hovers over the landing marker along its surface normal, tip toward the zone,
+        // BILLBOARDED: rotated around the normal so its face always turns to the viewer.
+        void UpdateLandingArrow()
+        {
+            if (!landingArrowEnabled)
+            {
+                if (landingArrowRoot != null && landingArrowRoot.activeSelf) landingArrowRoot.SetActive(false);
+                return;
+            }
+            EnsureLandingArrow();
+            if (landingArrowRoot == null) return;
+
+            bool show = isVisible && hasLanding && currentMode == PredictionMode.TrailAndCrosshair;
+            if (landingArrowRoot.activeSelf != show) landingArrowRoot.SetActive(show);
+            if (!show) return;
+
+            Vector3 tip = lastCursorPosition + lastValidNormal * (arrowLength * 0.18f);
+            Quaternion facing = Quaternion.FromToRotation(Vector3.up, lastValidNormal);
+            UnityEngine.Camera view = UnityEngine.Camera.main;
+            if (view != null)
+            {
+                Vector3 toCamera = Vector3.ProjectOnPlane(view.transform.position - tip, lastValidNormal);
+                if (toCamera.sqrMagnitude > 0.0001f)
+                {
+                    facing = Quaternion.LookRotation(toCamera.normalized, lastValidNormal);
+                }
+            }
+            landingArrowRoot.transform.SetPositionAndRotation(tip, facing);
         }
 
         // trajectory/trajectoryCount: the simulated arc the dots follow. didLand: false when
@@ -180,6 +281,7 @@ namespace KineticEnergy.Player
             }
             cursorPrevTarget = lastCursorPosition;
             cursorWasShown = hasLanding;
+            UpdateLandingArrow();
 
             if (trailDots == null || trailDots.Length == 0) return;
 
