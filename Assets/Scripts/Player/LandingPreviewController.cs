@@ -45,11 +45,13 @@ namespace KineticEnergy.Player
         public float cursorHideGraceSeconds = 0.12f;
 
         [Header("Landing Arrow (V / D-pad Left toggles)")]
-        [Tooltip("The blue arrow hovering over the landing zone, billboarded to the viewer. On by default; V or D-pad Left flips it.")]
+        [Tooltip("Scene gate: the landing arrow (and its V / D-pad Left toggle) only exist where this is ON - the aim-lab scene for now, so the toggle can't collide with the variant-cycling keys elsewhere.")]
+        public bool landingArrowAvailable = false;
+        [Tooltip("The blue arrow hovering over the landing zone, billboarded to the viewer. On by default where the arrow is available; V or D-pad Left flips it.")]
         public bool landingArrowEnabled = true;
         public Color landingArrowColor = new Color(0.25f, 0.55f, 1f, 0.95f);
-        [Tooltip("Arrow length as a fraction of the cursor's measured diameter - applied ONCE when the arrow is built.")]
-        public float arrowLengthFraction = 0.75f;
+        [Tooltip("Arrow length in world units - a fixed editor value (3/4 of the cursor ring's 1.5 diameter), never measured at runtime.")]
+        public float arrowLength = 1.125f;
         [Tooltip("Per-frame target movement at or below this gets FULL smoothing; faster (deliberate) sweeps proportionally bypass it - far dots and the cursor track camera turns raw instead of breaking away behind them.")]
         public float smoothNoiseReference = 0.12f;
 
@@ -67,10 +69,9 @@ namespace KineticEnergy.Player
         Vector3 lastValidNormal = Vector3.up;
         float smoothedArcLength;
 
-        // The landing arrow, built ONCE: geometry sized from the cursor's diameter at
-        // build time (never re-measured), material cloned blue from the cursor's own.
+        // The landing arrow, built ONCE from the serialized arrowLength - no measuring,
+        // no per-frame sizing. Material cloned blue from the cursor's own.
         GameObject landingArrowRoot;
-        float arrowLength = -1f;
         // Guaranteed clearance off the landing face, whatever the serialized lift says.
         const float MinSurfaceLift = 0.15f;
 
@@ -115,7 +116,8 @@ namespace KineticEnergy.Player
 
         void Update()
         {
-            // The landing-arrow toggle: V / D-pad Left, any time.
+            // The landing-arrow toggle: V / D-pad Left, in the scenes that carry the arrow.
+            if (!landingArrowAvailable) return;
             bool togglePressed = (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
                 || (Gamepad.current != null && Gamepad.current.dpad.left.wasPressedThisFrame);
             if (togglePressed)
@@ -125,20 +127,14 @@ namespace KineticEnergy.Player
             }
         }
 
-        // Built ONCE, on the first frame the cursor is measurable: the length comes from
-        // the cursor's rendered diameter times arrowLengthFraction - cached, never
-        // recomputed - and the material is the cursor's own, cloned and tinted blue.
+        // Built ONCE from the serialized arrowLength - nothing is measured or recomputed
+        // at runtime. The material is the cursor's own, cloned and tinted blue.
         void EnsureLandingArrow()
         {
-            if (landingArrowRoot != null || crosshairGroup == null) return;
+            if (landingArrowRoot != null || crosshairGroup == null || arrowLength <= 0.01f) return;
 
             Renderer[] cursorRenderers = crosshairGroup.GetComponentsInChildren<Renderer>(true);
             if (cursorRenderers.Length == 0) return;
-            Bounds bounds = cursorRenderers[0].bounds;
-            for (int i = 1; i < cursorRenderers.Length; i++) bounds.Encapsulate(cursorRenderers[i].bounds);
-            float diameter = Mathf.Max(bounds.size.x, Mathf.Max(bounds.size.y, bounds.size.z));
-            if (diameter < 0.01f) return;
-            arrowLength = diameter * Mathf.Max(arrowLengthFraction, 0.05f);
 
             Material arrowMaterial = new Material(cursorRenderers[0].sharedMaterial);
             arrowMaterial.color = landingArrowColor;
@@ -174,7 +170,7 @@ namespace KineticEnergy.Player
         // BILLBOARDED: rotated around the normal so its face always turns to the viewer.
         void UpdateLandingArrow()
         {
-            if (!landingArrowEnabled)
+            if (!landingArrowAvailable || !landingArrowEnabled)
             {
                 if (landingArrowRoot != null && landingArrowRoot.activeSelf) landingArrowRoot.SetActive(false);
                 return;

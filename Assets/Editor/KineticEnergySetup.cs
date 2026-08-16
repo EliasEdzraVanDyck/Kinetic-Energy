@@ -899,6 +899,52 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: ComboMeter prefab created OK (width 503.6, circle aligns with the energy meter's left edge)");
         }
 
+        // Grows the aim trail's dot POOL to 100 (long arcs were running out of dots and
+        // ending short) and widens the spacing by 20%. The pool is a fixed array of
+        // Transforms on the Player prefab, so both are prefab edits; extra dots are
+        // clones of the existing ones, so they inherit the exact look.
+        [MenuItem("Tools/Kinetic Energy/Expand Aim Trail Dots")]
+        public static void ExpandAimTrailDots()
+        {
+            const int wantDots = 100;
+            const float wantSpacing = 1.2f; // was 1.0 - the requested +20%
+
+            string playerPath = PrefabFolder + "/Player.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(playerPath);
+            try
+            {
+                LandingPreviewController preview = root.GetComponentInChildren<LandingPreviewController>(true);
+                if (preview == null) throw new Exception("KineticEnergySetup: Player.prefab has no LandingPreviewController.");
+                if (preview.trailDots == null || preview.trailDots.Length == 0)
+                {
+                    throw new Exception("KineticEnergySetup: the trail dot pool is empty - nothing to clone from.");
+                }
+
+                var dots = new List<Transform>(preview.trailDots);
+                Transform template = dots[dots.Count - 1];
+                Transform container = template.parent;
+                int added = 0;
+                while (dots.Count < wantDots)
+                {
+                    GameObject clone = UnityEngine.Object.Instantiate(template.gameObject, container);
+                    clone.name = "Dot" + dots.Count;
+                    clone.transform.localPosition = template.localPosition;
+                    clone.transform.localRotation = template.localRotation;
+                    clone.transform.localScale = template.localScale;
+                    dots.Add(clone.transform);
+                    added++;
+                }
+
+                preview.trailDots = dots.ToArray();
+                preview.maxDotSpacing = wantSpacing;
+                EditorUtility.SetDirty(preview);
+                PrefabUtility.SaveAsPrefabAsset(root, playerPath);
+                Debug.Log($"KineticEnergySetup: aim trail dots expanded OK ({dots.Count} dots, +{added} new, spacing {wantSpacing})");
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+            AssetDatabase.SaveAssets();
+        }
+
         // Level1Aim1.1: the fully-free midair aim camera (cursor framing OFF - the view
         // follows the raw aim 1:1) plus the grounded 60-65 degree edge-follow with its
         // hard aim clamp. Additive; nothing else in the scene is touched.
@@ -924,6 +970,17 @@ namespace KineticEnergy.EditorSetup
             aimPlayer.groundedAimFollowBand = 5f;
             aimPlayer.groundedAimFollowSpeed = 45f;
             EditorUtility.SetDirty(aimPlayer);
+
+            // The blue landing arrow lives in THIS scene only for now - the gate also
+            // keeps its V / D-pad Left toggle from colliding with the variant-cycling
+            // keys in the harness scenes.
+            var aimPreview = UnityEngine.Object.FindAnyObjectByType<LandingPreviewController>(FindObjectsInactive.Include);
+            if (aimPreview != null)
+            {
+                aimPreview.landingArrowAvailable = true;
+                aimPreview.landingArrowEnabled = true;
+                EditorUtility.SetDirty(aimPreview);
+            }
 
             // MOMENTUM stays ON (direct request) - the carry now REDIRECTS the brought
             // speed along the aim (KineticCubeController), so the reach is uniform in
