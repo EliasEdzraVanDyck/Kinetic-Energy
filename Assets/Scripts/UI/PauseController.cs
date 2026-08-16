@@ -111,6 +111,28 @@ namespace KineticEnergy.UI
             if (!isPaused) Pause();
         }
 
+        // The LOCKED win (the self-contained Level1 test scenes): the pause screen with
+        // its title reading "You win!" and the Resume button gone - the run is over.
+        // Everything else on the menu (Restart, BuildInfo, Scenes, Quit) works as usual;
+        // a Restart reloads the scene, which restores the title and the button.
+        public void ShowWinLocked()
+        {
+            if (pausePanel != null)
+            {
+                Text titleText = pausePanel.transform.Find("Title")?.GetComponent<Text>();
+                if (titleText != null) titleText.text = "You win!";
+                Transform resume = pausePanel.transform.Find("ResumeButton");
+                if (resume != null) resume.gameObject.SetActive(false);
+            }
+            if (!isPaused) Pause();
+            // Pause() selected the (now hidden) Resume - hand the gamepad focus to Restart.
+            if (pausePanel != null)
+            {
+                Transform restart = pausePanel.transform.Find("RestartButton");
+                if (restart != null) Select(restart.gameObject);
+            }
+        }
+
         void Update()
         {
             // The direct Start-button read is the Always Mouse escape hatch: that mode masks

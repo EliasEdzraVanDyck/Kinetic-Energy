@@ -241,7 +241,7 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 2585421025093495178, guid: 0e1921f90c6b93f4e96ba89a3ab5ac9f, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 735
+      value: 516
       objectReference: {fileID: 0}
     - target: {fileID: 2585421025093495178, guid: 0e1921f90c6b93f4e96ba89a3ab5ac9f, type: 3}
       propertyPath: m_LocalPosition.y
@@ -283,11 +283,35 @@ PrefabInstance:
       propertyPath: m_Name
       value: FinishTrigger (1)
       objectReference: {fileID: 0}
+    - target: {fileID: 7163778882451170670, guid: 0e1921f90c6b93f4e96ba89a3ab5ac9f, type: 3}
+      propertyPath: nextSceneName
+      value: 
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 5021757931957191376, guid: 0e1921f90c6b93f4e96ba89a3ab5ac9f, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 285070043}
   m_SourcePrefab: {fileID: 100100000, guid: 0e1921f90c6b93f4e96ba89a3ab5ac9f, type: 3}
+--- !u!1 &285070042 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 5021757931957191376, guid: 0e1921f90c6b93f4e96ba89a3ab5ac9f, type: 3}
+  m_PrefabInstance: {fileID: 285070041}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &285070043
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 285070042}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c8b480fdac373864d98219f0790880cf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.WinOnFinish
 --- !u!1 &305680348
 GameObject:
   m_ObjectHideFlags: 0
@@ -1353,7 +1377,7 @@ MonoBehaviour:
   autoMaxEnergy: 0
   comboBaseRefund: 1
   comboStepPerLevel: 0.05
-  comboWindowSeconds: 3
+  comboWindowSeconds: 2.5
   comboMaxMultiplier: 2
   comboMeterDropPixels: 20
   comboMeterColor: {r: 1, g: 0.62, b: 0.1, a: 1}
@@ -1368,26 +1392,21 @@ MonoBehaviour:
   totalLossStepPerLevel: 0.05
   totalLossSafetyTriggerFraction: 0.1
   totalLossSafetyCeilingFraction: 0.4
-  introText: "MERGED ECONOMY VARIANTS\n\nCombo refunds + an under-threshold recharge
-    + a premium top: the first 80% of the tank is\nnormal energy, the last 20% (the
-    two big meter blocks) only fills from combo extras or the\npound boost - and
-    dies when your chain stops.\n\nSwitch variants with V / D-pad Right (back: C
-    / D-pad Left):\nA - Revocable extra: the latest chain bonus stays orange, lost
-    if the window lapses.\nB - Banked extra: every chain bonus becomes normal energy
-    instantly.\nC - Dual refunds: landings pay from BOTH the flight's first launch
-    and its midair\n     relaunches, each with its own rate; the bonus part stays
-    revocable orange.\nD - Dual refunds (banked): the same, with bonuses banking
-    instantly.\nE - Total loss: miss a combo window and ALL energy is gone - the
-    ground recharge\n     then rebuilds you to its threshold.\n\nX / D-pad Down toggles
-    AUTO MAX ENERGY in ANY variant: every launch fires with the\nmaximum the tank
-    can pay - no manual regulation.\n\nStanding still below the recharge threshold
-    slowly refills the tank (fresh energy shows\norange, then turns yellow as it
-    banks). If you are completely empty you cannot launch.\n\nPress any button to
-    start."
+  introKey: level1economy
+  introText: "HOW THIS LEVEL'S ENERGY WORKS\n\nTHE METER: the first 4 blocks (40%)
+    are normal energy. The 6 taller blocks are boosted energy, only combo bonuses
+    and the groundpound boost can fill them.\n\nCOMBOS: a succesful launch refunds
+    the energy of your launch(es) times the combo multiplier. \nRelaunch within the
+    window to raise the multiplier. Landing back on the object you launched from
+    pays nothing.\nIf you miss the window, your energy reverts to 40%, everything
+    boosted is lost.\n\nGROUND POUND: if you groundpound and aim within the slow-mo
+    window, the pound pays\nback 1.5x what you put in.\n\nReach the finish to win.\n\nPress
+    any button to start."
   safetyTriggerFraction: 0.1
   safetyCeilingFraction: 0.4
   regenPerSecond: 0.12
   regenOrangeFadeSeconds: 0.4
+  wallLaunchStakeFraction: 0.3
   premiumBoundaryFraction: 0.4
   lockSettings: 1
   momentumLaunches: 1

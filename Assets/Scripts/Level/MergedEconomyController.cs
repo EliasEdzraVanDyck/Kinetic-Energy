@@ -85,6 +85,8 @@ namespace KineticEnergy.Level
         [Range(0f, 1f)] public float totalLossSafetyCeilingFraction = 0.4f;
 
         [Header("Intro")]
+        [Tooltip("The first-boot key: each key shows once per game session. Scenes with their own intro text get their own key.")]
+        public string introKey = "economy2";
         [Tooltip("First-boot explainer (also opened by the pause menu's BuildInfo button). Edit freely.")]
         [TextArea(10, 30)]
         public string introText =
@@ -115,6 +117,15 @@ namespace KineticEnergy.Level
         public float regenPerSecond = 0.08f;
         [Tooltip("Seconds for freshly-regenerated energy to convert from ORANGE into normal yellow - a steady recharge shows a small orange tip at the fill edge that keeps turning yellow behind it.")]
         public float regenOrangeFadeSeconds = 0.35f;
+
+        [Header("Wall / midair launch stake (all variants)")]
+        // A launch that opens while NOT grounded (a wall or other object stick, or a
+        // genuine midair aim) is treated as carrying at least this much: it sets the
+        // synthesized momentum CARRY floor and the landing payout's stake floor. Its own
+        // value now - it used to ride the recharge ceiling, which conflated "where
+        // standing still fills to" with "what a wall launch is worth".
+        [Tooltip("Minimum stake for launches opened while NOT grounded (wall sticks, midair): the momentum carry floor and the payout stake floor. Independent of the recharge ceiling.")]
+        [Range(0f, 1f)] public float wallLaunchStakeFraction = 0.4f;
 
         [Header("Premium top (all variants)")]
         // The normal/boost split is POSITIONAL: everything below the boundary is normal
@@ -212,7 +223,7 @@ namespace KineticEnergy.Level
             // lives on this harness so it is editable alongside the variant tuning.
             GameObject introGo = new GameObject("MergedEconomyIntro");
             var intro = introGo.AddComponent<KineticEnergy.UI.AimIntroScreen>();
-            intro.introKey = "economy2";
+            intro.introKey = introKey;
             intro.bodyText = introText;
         }
 
@@ -246,9 +257,9 @@ namespace KineticEnergy.Level
             controller.alwaysMaxCharge = autoMaxEnergy;
 
             // The wall-launch momentum floor: launches from a wall stick synthesize a
-            // carry velocity worth at least the variant's recharge baseline (the
-            // VELOCITY reading of the wall stake - see KineticCubeController).
-            controller.wallLaunchMomentumFloorFraction = ActiveSafetyCeiling;
+            // carry velocity worth at least the wall stake (the VELOCITY reading of it -
+            // see KineticCubeController).
+            controller.wallLaunchMomentumFloorFraction = Mathf.Clamp01(wallLaunchStakeFraction);
 
             // Refund routing: A/B pay the base through the ordinary (ceiling-capped)
             // pipeline; C/D and E silence the pipeline entirely - their whole payout is
@@ -420,12 +431,12 @@ namespace KineticEnergy.Level
                 flightStartEnergy = Mathf.Min(controller.EnergyFraction + controller.LastLaunchEnergySpent, 1f);
 
                 // A flight opened while NOT grounded (stuck on a wall or another object,
-                // or genuinely midair) treats the recharge baseline as its minimum stake:
-                // the payout cap is floored at the variant's regen ceiling, while a
-                // grounded launch with a fuller tank keeps its real (higher) value.
+                // or genuinely midair) treats the wall stake as its minimum: the payout
+                // cap is floored there, while a grounded launch with a fuller tank keeps
+                // its real (higher) value.
                 if (!controller.IsGrounded)
                 {
-                    flightStartEnergy = Mathf.Max(flightStartEnergy, ActiveSafetyCeiling);
+                    flightStartEnergy = Mathf.Max(flightStartEnergy, Mathf.Clamp01(wallLaunchStakeFraction));
                 }
 
                 // The no-self-hop rule keys on the FLIGHT'S takeoff object, captured only
@@ -451,6 +462,26 @@ namespace KineticEnergy.Level
 
         void OnCrash(Vector3 position)
         {
+            // POUND landings belong entirely to the pound pipeline (the wash refund plus
+            // the windowed 1.5x boost) - the harness must neither void nor re-pay them.
+            // The sole-payer take-back was eating the wash, and the no-self-hop rule
+            // voided the classic slam back onto the takeoff platform - together "pounds
+            // pay nothing anymore" (direct report). The landing still counts for the
+            // chain; the ledger closes since the wash already returned the flight's spend.
+            if (controller.LastCrashWasPound)
+            {
+                flightOpen = false;
+                comboCount++;
+                if (comboStepPerLevel > 0f)
+                {
+                    int poundMaxLevels = Mathf.Max(Mathf.FloorToInt((comboMaxMultiplier - comboBaseRefund) / comboStepPerLevel + 0.0001f), 0);
+                    comboCount = Mathf.Min(comboCount, poundMaxLevels);
+                }
+                chainInFlight = false;
+                windowRemaining = comboWindowSeconds;
+                return;
+            }
+
             // The one landing that never COUNTS: back on the very object this launch
             // took off from (no self-hops - and the big floor is just another object
             // under this rule now, not a blanket exclusion). The refund just granted is

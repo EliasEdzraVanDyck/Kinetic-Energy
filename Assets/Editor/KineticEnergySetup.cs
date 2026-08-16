@@ -918,7 +918,45 @@ namespace KineticEnergy.EditorSetup
                 // end at ~-77.3 canvas units. 20 = the 10px near-gap placement plus the
                 // requested further 10px down.
                 merged.comboMeterDropPixels = 20f;
+
+                // These scenes carry their OWN BuildInfo text (and their own first-boot
+                // key), describing the locked E economy exactly as it currently works.
+                merged.introKey = scenePath.Contains("Challenge") ? "level1challenge" : "level1economy";
+                merged.introText =
+                    "HOW THIS LEVEL'S ENERGY WORKS\n\n" +
+                    "Only the merged E economy runs here - no variant switching, and midair launches\n" +
+                    "always carry the velocity you aimed with (momentum launches).\n\n" +
+                    "THE METER: the first 4 blocks (40%) are normal energy. The 6 taller blocks are\n" +
+                    "BOOSTED energy - only combo bonuses and the ground-pound boost can fill them.\n\n" +
+                    "COMBOS: a landed launch refunds (first launch + midair relaunches) x the combo\n" +
+                    "multiplier, capped at the energy you started the flight with. Relaunch within the\n" +
+                    "window to raise the multiplier - the circle by the combo bar always shows what\n" +
+                    "your next landing pays (grey while no chain runs). Landing back on the object you\n" +
+                    "launched from pays nothing.\n\n" +
+                    "MISS THE WINDOW and your energy reverts to 40% - everything boosted is lost.\n\n" +
+                    "RECHARGE: below 10%, standing still slowly refills you to 40% (fresh energy shows\n" +
+                    "orange, then banks yellow). Completely empty = you cannot launch.\n\n" +
+                    "WALLS: a launch from a wall or another object counts as carrying at least a 40%\n" +
+                    "launch's speed - more if your previous launch was stronger.\n\n" +
+                    "GROUND POUND: pound the ground and aim within the slow-mo window - the pound pays\n" +
+                    "back 1.5x what you put in, and it can fill the boosted blocks.\n\n" +
+                    "Reach the finish to win.\n\n" +
+                    "Press any button to start.";
                 EditorUtility.SetDirty(merged);
+
+                // The SELF-CONTAINED finish: the old next-scene trigger is neutralised
+                // (empty scene name = inert, prefab-instance friendly) and the locked
+                // "You win!" pause takes over.
+                var finishLine = UnityEngine.Object.FindAnyObjectByType<FinishLineNextScene>(FindObjectsInactive.Include);
+                if (finishLine != null)
+                {
+                    finishLine.nextSceneName = "";
+                    EditorUtility.SetDirty(finishLine);
+                    if (finishLine.GetComponent<WinOnFinish>() == null)
+                    {
+                        finishLine.gameObject.AddComponent<WinOnFinish>();
+                    }
+                }
 
                 // The combo meter is its own PREFAB in these scenes - the narrowed bar
                 // that aligns the xN circle with the energy meter's left edge.

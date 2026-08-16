@@ -2010,6 +2010,9 @@ namespace KineticEnergy.Player
         // whether a landing counts (and to take the payout back when it doesn't).
         public Collider LastCrashSurface { get; private set; }
         public float LastCrashRefund { get; private set; }
+        // Whether the most recent registered crash was a GROUND POUND landing - the
+        // economy harness leaves those to the pound pipeline (wash + windowed boost).
+        public bool LastCrashWasPound { get; private set; }
 
         void RegisterCrash(Vector3 contactNormal, float crashSpeed, Collider surface)
         {
@@ -2019,6 +2022,7 @@ namespace KineticEnergy.Player
 
             LastCrashSurface = surface;
             LastCrashRefund = 0f; // stamped by RefundEnergyForCrash when a payout happens
+            LastCrashWasPound = lastLaunchWasPound; // still true here; the bounce clears it below
 
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
