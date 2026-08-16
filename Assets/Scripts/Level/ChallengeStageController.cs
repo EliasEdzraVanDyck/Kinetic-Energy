@@ -58,6 +58,9 @@ namespace KineticEnergy.Level
         [Tooltip("Where a death-wall touch puts the player - the level's ordinary respawn point.")]
         public Transform respawnPoint;
 
+        [Tooltip("Show the bottom-right challenge tag.")]
+        public bool showHudTag = true;
+
         KineticCubeController controller;
         ChallengeStage stage;
         Text hudLabel;
@@ -243,6 +246,7 @@ namespace KineticEnergy.Level
 
         void BuildHudTag()
         {
+            if (!showHudTag) return; // label writes are all null-guarded
             GameObject root = new GameObject("ChallengeStageTag");
             Canvas canvas = root.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;

@@ -1541,6 +1541,11 @@ namespace KineticEnergy.Player
 
             energyFraction = infiniteEnergy ? 1f : startingEnergyFraction;
             Time.timeScale = 1f;
+
+            // The camera TELEPORTS with the respawn AND resets to the scene-start pose
+            // (position and angles alike, direct request) - a respawn looks exactly like
+            // the level start.
+            cameraOrbit?.ResetToStartPose();
         }
 
         bool CanStartNewLaunch()

@@ -297,6 +297,23 @@ namespace KineticEnergy.Camera
         // camera exits first person AT the player - the launch simply flies past it and the
         // catch-up reads as instant, no matter the smooth time. Starting from the orbit slot
         // makes the launch trailing develop exactly like a grounded launch's.
+        // The scene-start pose, captured on the first LateUpdate (after CameraStartFacing
+        // and every Start had their say) - a respawn resets the camera to exactly this.
+        float startYaw;
+        float startPitch;
+        bool startPoseCaptured;
+
+        public void ResetToStartPose()
+        {
+            if (startPoseCaptured)
+            {
+                yaw = startYaw;
+                pitch = startPitch;
+            }
+            recentering = false;
+            SnapToThirdPersonOrbit();
+        }
+
         public void SnapToThirdPersonOrbit()
         {
             firstPerson = false;
@@ -476,6 +493,13 @@ namespace KineticEnergy.Camera
         {
             if (target == null) return;
             if (Time.timeScale <= 0f) return;
+
+            if (!startPoseCaptured)
+            {
+                startYaw = yaw;
+                startPitch = pitch;
+                startPoseCaptured = true;
+            }
 
             // The aim zoom GLIDES toward its dialed target - runs before everything
             // else, since the FOV feeds the anchor solve and the look sensitivity.

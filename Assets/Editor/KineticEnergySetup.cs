@@ -866,6 +866,104 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: quarry economy 2 (merged) scene setup complete OK");
         }
 
+        // The COMBO meter prefab (Level1Economy/Level1Challenge): a SlowdownMeter variant
+        // whose bar is narrowed so that, with the harness's runtime xN circle anchored
+        // 10px left of the bar, the circle's LEFT edge lines up exactly with the energy
+        // meter's left edge - the bar's right edge stays where it always was.
+        //   energy meter left = (-10 - 323) * 1.7376512 = -578.6 canvas
+        //   bar left = -578.6 + 46 (circle) + 10 (gap) = -522.6; right edge -19
+        //   => width = 503.6 (was 560)
+        [MenuItem("Tools/Kinetic Energy/Create Combo Meter Prefab")]
+        public static void CreateComboMeterPrefab()
+        {
+            string sourcePath = PrefabFolder + "/SlowdownMeter.prefab";
+            string path = PrefabFolder + "/ComboMeter.prefab";
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null)
+            {
+                Debug.Log("KineticEnergySetup: ComboMeter prefab already exists OK");
+                return;
+            }
+            if (!AssetDatabase.CopyAsset(sourcePath, path))
+            {
+                throw new Exception("KineticEnergySetup: copying SlowdownMeter.prefab failed.");
+            }
+
+            GameObject root = PrefabUtility.LoadPrefabContents(path);
+            try
+            {
+                RectTransform bodyRect = root.transform.Find("Body").GetComponent<RectTransform>();
+                bodyRect.sizeDelta = new Vector2(503.6f, bodyRect.sizeDelta.y); // pivot (1,1): right edge stays
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+            Debug.Log("KineticEnergySetup: ComboMeter prefab created OK (width 503.6, circle aligns with the energy meter's left edge)");
+        }
+
+        // The two Level-1-derived merged-economy test scenes (Level1Economy and the
+        // user-made Level1Challenge copy): tag hidden, combo meter raised to sit ~5px
+        // under the premium meter's tall blocks. Also restores Level8's challenge tag,
+        // which an earlier pass disabled by mistake. Additive - nothing else touched.
+        [MenuItem("Tools/Kinetic Energy/Configure Level1 Test Scene Huds")]
+        public static void ConfigureLevel1TestSceneHuds()
+        {
+            CreateComboMeterPrefab();
+            foreach (string scenePath in new[] { "Assets/Scenes/Level1Economy.unity", "Assets/Scenes/Level1Challenge.unity" })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                var merged = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
+                if (merged == null) continue;
+                merged.showHudTag = false;
+                // Slowdown-prefab body top sits at -73; the premium meter's tall blocks
+                // end at ~-77.3 canvas units. 20 = the 10px near-gap placement plus the
+                // requested further 10px down.
+                merged.comboMeterDropPixels = 20f;
+                EditorUtility.SetDirty(merged);
+
+                // The combo meter is its own PREFAB in these scenes - the narrowed bar
+                // that aligns the xN circle with the energy meter's left edge.
+                KineticCubeController scenePlayer = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+                if (scenePlayer != null && (scenePlayer.slowdownMeter == null
+                    || scenePlayer.slowdownMeter.gameObject.name != "ComboMeter"))
+                {
+                    Transform meterParent = null;
+                    if (scenePlayer.slowdownMeter != null)
+                    {
+                        meterParent = scenePlayer.slowdownMeter.transform.parent;
+                        UnityEngine.Object.DestroyImmediate(scenePlayer.slowdownMeter.gameObject);
+                    }
+                    else
+                    {
+                        GameObject ps = GameObject.Find("PauseSystem");
+                        meterParent = ps != null ? ps.transform.Find("PauseCanvas") : null;
+                    }
+                    if (meterParent != null)
+                    {
+                        GameObject combo = (GameObject)PrefabUtility.InstantiatePrefab(
+                            AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/ComboMeter.prefab"));
+                        combo.name = "ComboMeter";
+                        combo.transform.SetParent(meterParent, false);
+                        scenePlayer.slowdownMeter = combo.GetComponent<EnergyMeterController>();
+                        EditorUtility.SetDirty(scenePlayer);
+                    }
+                }
+                SaveOpenScene(scenePath);
+            }
+
+            // Level8's tag was disabled on a wrong guess ("Level1Challenge" is its own
+            // scene) - back on.
+            EditorSceneManager.OpenScene("Assets/Scenes/Level8.unity", OpenSceneMode.Single);
+            var stages = UnityEngine.Object.FindAnyObjectByType<ChallengeStageController>(FindObjectsInactive.Include);
+            if (stages != null)
+            {
+                stages.showHudTag = true;
+                EditorUtility.SetDirty(stages);
+                SaveOpenScene("Assets/Scenes/Level8.unity");
+            }
+
+            Debug.Log("KineticEnergySetup: Level1 test scene HUDs configured OK (tags off, combo meter raised; Level8 tag restored)");
+        }
+
         // OTS copies of both economy scenes: exact duplicates whose only change is the
         // aim camera locked to variant D - over-the-shoulder plus the landing
         // picture-in-picture window when the cursor is off screen.
@@ -952,6 +1050,7 @@ namespace KineticEnergy.EditorSetup
             merged.momentumLaunches = true;
             merged.premiumBoundaryFraction = 0.4f;
             merged.totalLossKeepFraction = 0.4f;
+            merged.showHudTag = false; // locked scene - the tag says nothing useful
             EditorUtility.SetDirty(merged);
 
             GameObject pauseSystemGo = GameObject.Find("PauseSystem");

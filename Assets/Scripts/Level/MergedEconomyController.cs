@@ -56,6 +56,8 @@ namespace KineticEnergy.Level
         [Tooltip("How far down the combo meter moves so its circle clears the energy meter.")]
         public float comboMeterDropPixels = 44f;
         public Color comboMeterColor = new Color(1f, 0.62f, 0.1f);
+        [Tooltip("The xN circle's colour while NO combo is running - the circle and its value stay visible at all times, grey until a chain starts.")]
+        public Color comboIdleColor = new Color(0.55f, 0.55f, 0.55f, 0.9f);
         [Header("C/D - Dual-launch refunds")]
         [Tooltip("C/D: refund multiplier on the FLIGHT-OPENING launch's spend, at combo level 0.")]
         public float firstLaunchBaseRefund = 0.6f;
@@ -130,6 +132,8 @@ namespace KineticEnergy.Level
         public bool momentumLaunches = false;
         [Tooltip("E: a missed combo window clamps energy TO this fraction (0 = lose everything; Level1Economy uses 0.4).")]
         [Range(0f, 1f)] public float totalLossKeepFraction = 0f;
+        [Tooltip("Show the bottom-right variant tag (off in the locked test scenes).")]
+        public bool showHudTag = true;
 
         KineticCubeController controller;
         KineticEnergy.UI.PauseController pauseController;
@@ -161,6 +165,7 @@ namespace KineticEnergy.Level
 
         // Runtime UI (combo circle riding the repurposed slowdown meter, HUD tag).
         GameObject comboCircle;
+        Image comboCircleImage;
         Text comboText;
         Text hudLabel;
         Color defaultSlowFillColor = Color.cyan;
@@ -597,9 +602,15 @@ namespace KineticEnergy.Level
                 meter.SetEnergy(chainInFlight ? 1f : (comboWindowSeconds > 0f ? windowRemaining / comboWindowSeconds : 0f));
                 if (comboCircle != null)
                 {
-                    bool showCircle = comboCount > 0 && windowLive;
-                    comboCircle.SetActive(showCircle);
-                    if (showCircle && comboText != null)
+                    // ALWAYS shown, value included: grey while no chain runs (the value
+                    // then reads as "what your next landing pays"), orange once live.
+                    comboCircle.SetActive(true);
+                    bool comboLive = comboCount > 0 && windowLive;
+                    if (comboCircleImage != null)
+                    {
+                        comboCircleImage.color = comboLive ? comboMeterColor : comboIdleColor;
+                    }
+                    if (comboText != null)
                     {
                         // C/D show their midair multiplier (the headline number); the
                         // others the ordinary chain multiplier.
@@ -689,6 +700,7 @@ namespace KineticEnergy.Level
             Sprite knob = Resources.GetBuiltinResource<Sprite>("UI/Skin/Knob.psd");
             if (knob != null) circle.sprite = knob;
             circle.color = comboMeterColor;
+            comboCircleImage = circle;
 
             GameObject textGo = new GameObject("Count", typeof(RectTransform));
             textGo.transform.SetParent(comboCircle.transform, false);
@@ -713,6 +725,7 @@ namespace KineticEnergy.Level
 
         void BuildHudTag()
         {
+            if (!showHudTag) return; // label writes are all null-guarded
             GameObject root = new GameObject("MergedEconomyTag");
             Canvas canvas = root.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
