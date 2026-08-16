@@ -115,11 +115,21 @@ namespace KineticEnergy.Level
         public float regenOrangeFadeSeconds = 0.35f;
 
         [Header("Premium top (all variants)")]
-        // The normal/boost split is POSITIONAL and fixed at 80/20 (direct request): the
-        // first 80% of the tank is always normal energy whatever filled it, the last 20%
-        // is always boosted - only combo extras and the pound boost can fill it, and it
-        // is lost when the chain stops. Matches the meter's 8+2 block geometry exactly.
-        const float PremiumBoundary = 0.8f;
+        // The normal/boost split is POSITIONAL: everything below the boundary is normal
+        // energy whatever filled it, everything above is boosted - only combo extras and
+        // the pound boost can fill it, and it dies when the chain stops. MUST match the
+        // scene's meter prefab (0.8 = the 8+2 meter, 0.4 = Level1Economy's 4+6 meter).
+        [Tooltip("The normal/boost boundary. 0.8 pairs with the 8+2 meter, 0.4 with Level1Economy's 4+6 meter.")]
+        [Range(0f, 1f)] public float premiumBoundaryFraction = 0.8f;
+        float PremiumBoundary => Mathf.Clamp01(premiumBoundaryFraction);
+
+        [Header("Scene lockdown (Level1Economy)")]
+        [Tooltip("Freezes the setup: no variant cycling (V/C), no auto-max toggle (X/D-pad Down) - the scene tests exactly what the inspector says.")]
+        public bool lockSettings = false;
+        [Tooltip("Momentum launches (midair launches carry the velocity you aimed with) forced from Start - Level1Economy locks this ON.")]
+        public bool momentumLaunches = false;
+        [Tooltip("E: a missed combo window clamps energy TO this fraction (0 = lose everything; Level1Economy uses 0.4).")]
+        [Range(0f, 1f)] public float totalLossKeepFraction = 0f;
 
         KineticCubeController controller;
         KineticEnergy.UI.PauseController pauseController;
@@ -186,6 +196,8 @@ namespace KineticEnergy.Level
             controller.CrashRegistered += OnCrash;
             DamageWalls.PlayerRespawned += OnPlayerRespawned;
 
+            controller.addPreAimVelocityToLaunch = momentumLaunches;
+
             BuildHudTag();
             SetupComboMeter();
             BuildPremiumZone();
@@ -228,6 +240,11 @@ namespace KineticEnergy.Level
             if (BankedMode) comboExtra = 0f;
             controller.alwaysMaxCharge = autoMaxEnergy;
 
+            // The wall-launch momentum floor: launches from a wall stick synthesize a
+            // carry velocity worth at least the variant's recharge baseline (the
+            // VELOCITY reading of the wall stake - see KineticCubeController).
+            controller.wallLaunchMomentumFloorFraction = ActiveSafetyCeiling;
+
             // Refund routing: A/B pay the base through the ordinary (ceiling-capped)
             // pipeline; C/D and E silence the pipeline entirely - their whole payout is
             // computed by the harness on landing from the flight's spends.
@@ -263,8 +280,9 @@ namespace KineticEnergy.Level
                 if (trulyPaused || !controller.IsAimingOrCharging) return;
             }
 
-            // Variant cycling and the auto-max toggle, blocked while an aim is open.
-            if (!controller.IsAimingOrCharging)
+            // Variant cycling and the auto-max toggle, blocked while an aim is open -
+            // and entirely disabled in locked scenes (Level1Economy).
+            if (!lockSettings && !controller.IsAimingOrCharging)
             {
                 bool forward = (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
                     || (Gamepad.current != null && Gamepad.current.dpad.right.wasPressedThisFrame);
@@ -535,9 +553,9 @@ namespace KineticEnergy.Level
             {
                 if (TotalLossMode)
                 {
-                    // E: a missed window costs EVERYTHING - the recharge (whose trigger
-                    // sits far above zero) rebuilds the tank to E's own threshold.
-                    controller.ClampEnergyTo(0f);
+                    // E: a missed window costs everything down to the KEEP fraction -
+                    // 0 by default (total loss), 0.4 in Level1Economy ("revert to 40%").
+                    controller.ClampEnergyTo(totalLossKeepFraction);
                 }
                 else
                 {
@@ -601,7 +619,7 @@ namespace KineticEnergy.Level
             var energyMeter = controller.energyMeter;
             if (energyMeter != null)
             {
-                const float mainSpan = 0.8f; // 8 of the meter's 10 blocks
+                float mainSpan = PremiumBoundary; // the meter variant's normal-block span
                 float energy = controller.EnergyFraction;
                 bool charging = controller.IsAimingOrCharging;
                 float charge = controller.CurrentChargeFraction;
@@ -620,7 +638,7 @@ namespace KineticEnergy.Level
                 energyMeter.SetBonus(energyInMain / mainSpan, energyInMain - yellowInMain > 0.001f);
                 energyMeter.SetCharge(Mathf.Min(charge, mainSpan) / mainSpan, charging);
 
-                const float premiumSpan = 1f - mainSpan;
+                float premiumSpan = Mathf.Max(1f - mainSpan, 0.0001f);
                 if (premiumOrangeFill != null)
                 {
                     premiumOrangeFill.fillAmount = Mathf.Clamp01((energy - mainSpan) / premiumSpan);

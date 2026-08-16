@@ -124,8 +124,28 @@ namespace KineticEnergy.Player
         [Range(0f, 1f)] public float ordinaryRefundCeiling = 1f;
         [Tooltip("Every charge reads as the MAXIMUM the tank can pay - no manual energy regulation (the merged economy scene's auto-max variants set this).")]
         public bool alwaysMaxCharge = false;
-        [Tooltip("Midair launches ADD the velocity the cube carried into the aim (captured at aim open) on top of the launch impulse - Level1Economy's momentum option, toggled there with the 1 key.")]
+        [Tooltip("Midair launches ADD the velocity the cube carried into the aim (captured at aim open) on top of the launch impulse - Level1Economy's momentum option.")]
         public bool addPreAimVelocityToLaunch = false;
+        [Tooltip("Under the momentum option, a launch from a WALL stick synthesizes a carry velocity equal to a launch at AT LEAST this charge fraction (the previous launch's charge wins when higher) - a wall stick holds zero velocity, so without this wall relaunches got no momentum treatment at all. 0 = off; the merged economy harness stamps the recharge baseline here.")]
+        [Range(0f, 1f)] public float wallLaunchMomentumFloorFraction = 0f;
+        float previousLaunchChargeFraction; // the charge of the launch BEFORE the current one
+        // LATCHED at the wall crash, consumed by the next launch: the live stuck state
+        // flickers during the aim (the ground BoxCast clips a hugged wall and the
+        // grounded-restore path runs), which made the carry vanish a few frames in -
+        // the ARMED flag survives all of that until the launch actually fires.
+        bool wallCarryArmed;
+
+        // The synthesized WALL-launch momentum carry along the fire direction - the
+        // stand-in for the velocity a midair relaunch would have kept (a wall stick
+        // holds zero). Armed by a steep-surface crash, consumed by the next launch,
+        // active only under the momentum option with the floor stamped by the scene.
+        Vector3 WallMomentumCarry(Vector3 direction)
+        {
+            if (!addPreAimVelocityToLaunch || !wallCarryArmed || wallLaunchMomentumFloorFraction <= 0f) return Vector3.zero;
+            float carryFraction = Mathf.Max(wallLaunchMomentumFloorFraction, previousLaunchChargeFraction);
+            float carrySpeed = Mathf.Lerp(minLaunchForce, maxLaunchForce, carryFraction) / rb.mass;
+            return direction.normalized * carrySpeed;
+        }
         [Tooltip("Multiplies real seconds of holding into charge-seconds - the main knob for how fast charging feels.")]
         public float chargeAccumulationRate = 0.3f;
         // The grounded aim charge, the forward hold-charge, and the midair energy dial all
@@ -368,6 +388,7 @@ namespace KineticEnergy.Player
         Vector3 queuedDirection;
         float queuedForce;
         float queuedDamping;
+        Vector3 queuedExtraVelocity; // the wall-launch momentum carry, delivered WITH the impulse
 
         // Energy.
         float energyFraction;
@@ -433,6 +454,9 @@ namespace KineticEnergy.Player
         public float EnergyFraction => energyFraction;
         public bool IsStuck => isStuck;
         public bool IsGrounded => isGrounded;
+        // The surface normal of the current crash-stick - lets outside systems tell a
+        // WALL stick from a flat landing (the ground BoxCast can clip a hugged wall).
+        public Vector3 StuckSurfaceNormal => stuckSurfaceNormal;
         public bool IsAimingOrCharging => isAiming || airAiming || holdChargeDirection != HoldChargeDirection.None;
         public bool HasLaunched => hasLaunched;
         public int LaunchesSinceGrounded => launchesSinceGrounded;
@@ -1048,7 +1072,9 @@ namespace KineticEnergy.Player
                 float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
                 float damping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
                 ApplyZeroDampingMatch(chargeFraction, ref force, ref damping);
-                ShowLandingPreview(direction * force / rb.mass + rb.linearVelocity, damping);
+                // The wall-launch momentum carry is part of the flight - shown here so
+                // the cursor stays honest about it.
+                ShowLandingPreview(direction * force / rb.mass + rb.linearVelocity + WallMomentumCarry(direction), damping);
 
                 bool firePressed = groundedLaunchAction != null && groundedLaunchAction.action != null && groundedLaunchAction.action.WasPressedThisFrame();
                 if (firePressed)
@@ -1306,6 +1332,7 @@ namespace KineticEnergy.Player
             // The MOMENTUM option additionally carries the velocity the cube had when the
             // aim opened - included here so the cursor stays honest about it.
             Vector3 momentumCarry = addPreAimVelocityToLaunch ? preAirAimVelocity : Vector3.zero;
+            momentumCarry += WallMomentumCarry(direction); // wall-opened aims carry the synthesized stake
             ShowLandingPreview(rb.linearVelocity + momentumCarry + direction * force / rb.mass, damping);
 
             // Real-time estimate of that flight for the moving platforms' lead arrows: the
@@ -1503,6 +1530,8 @@ namespace KineticEnergy.Player
             poundPendingRefund = 0f;
             poundBoostExtra = 0f;
             poundAimHoldingGravityOff = false;
+            previousLaunchChargeFraction = 0f;
+            wallCarryArmed = false;
 
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
@@ -1618,6 +1647,13 @@ namespace KineticEnergy.Player
             queuedDirection = direction;
             queuedForce = force;
             queuedDamping = damping;
+            // Wall launches under the momentum option: the synthesized carry stands in
+            // for the momentum a midair relaunch would have kept. Queued rather than
+            // applied now - a velocity written while STILL STUCK gets wiped by the
+            // stick's pinning before the physics tick (it "worked only briefly"), so
+            // the carry is delivered together with the impulse instead.
+            queuedExtraVelocity = WallMomentumCarry(direction);
+            wallCarryArmed = false; // consumed by this launch
             launchQueued = true;
             hasLaunched = true;
             launchesSinceGrounded++;
@@ -1690,6 +1726,7 @@ namespace KineticEnergy.Player
             // decided - the free-move component's FixedUpdate can run before ours.
             launchGraceTimer = launchGraceDuration;
 
+            previousLaunchChargeFraction = ChargeFraction(); // the NEXT launch's wall carry reads this
             LaunchFired?.Invoke();
         }
 
@@ -1738,6 +1775,13 @@ namespace KineticEnergy.Player
                 rb.useGravity = true;        // back on, undoing the crash-stick
                 rb.linearDamping = queuedDamping;
                 rb.AddForce(queuedDirection * queuedForce, ForceMode.Impulse);
+                // The wall-launch momentum carry lands in the same tick as the impulse,
+                // AFTER the stuck state released - nothing can wipe it anymore.
+                if (queuedExtraVelocity.sqrMagnitude > 0.0001f)
+                {
+                    rb.linearVelocity += queuedExtraVelocity;
+                    queuedExtraVelocity = Vector3.zero;
+                }
                 launchGraceTimer = launchGraceDuration;
                 launchStartPosition = transform.position;
                 freeMoveController?.FaceLaunchDirection(queuedDirection);
@@ -1773,6 +1817,10 @@ namespace KineticEnergy.Player
                 exactFlightNoNudge = false;
                 flightEnergySpent = 0f; // the flight (and its refund basis) ends on the ground
                 if (!infiniteEnergy) ClampEnergyFloor();
+                // Leaving a wall WITHOUT launching (dropping off a cling onto real
+                // ground) forfeits the armed wall carry. NOT while still stuck - the
+                // ground BoxCast clips a hugged wall, and disarming there was the bug.
+                if (!isStuck) wallCarryArmed = false;
             }
 
             // Plain falls (no launch in flight) shed the last launch's arc-shaping drag -
@@ -1987,6 +2035,9 @@ namespace KineticEnergy.Player
             if (airAiming) CancelAirAim();
 
             stuckSurfaceNormal = contactNormal;
+            // The wall-carry latch: a STEEP-surface crash arms it, a flat landing clears
+            // it - it stays armed through the whole wall aim until the launch consumes it.
+            wallCarryArmed = Vector3.Dot(contactNormal, Vector3.up) < 0.7f;
             freeMoveController?.AlignVisualToSurface(stuckSurfaceNormal);
 
             // Sticky grammar: near-flat ground is always walkable. A wall/ceiling holds

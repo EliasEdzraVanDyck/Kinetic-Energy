@@ -683,11 +683,18 @@ namespace KineticEnergy.EditorSetup
         [MenuItem("Tools/Kinetic Energy/Create Premium Energy Meter Prefab")]
         public static void CreatePremiumEnergyMeterPrefab()
         {
+            BuildPremiumMeterVariant(PrefabFolder + "/PremiumEnergyMeter.prefab", 8);
+        }
+
+        // Shared builder: `normalBlocks` normal-height blocks, the remaining (10 - n)
+        // blocks as the taller premium segment - 8+2 for the standard variant, 4+6 for
+        // Level1Economy's 40% boundary.
+        static void BuildPremiumMeterVariant(string path, int normalBlocks)
+        {
             string sourcePath = PrefabFolder + "/EnergyMeter.prefab";
-            string path = PrefabFolder + "/PremiumEnergyMeter.prefab";
             if (AssetDatabase.LoadAssetAtPath<GameObject>(path) != null)
             {
-                Debug.Log("KineticEnergySetup: PremiumEnergyMeter prefab already exists OK");
+                Debug.Log($"KineticEnergySetup: {path} already exists OK");
                 return;
             }
             if (AssetDatabase.LoadAssetAtPath<GameObject>(sourcePath) == null)
@@ -710,11 +717,11 @@ namespace KineticEnergy.EditorSetup
                 // the freed width becomes the premium segment.
                 const float inset = 3f;
                 const float blockWidth = 31.4f;
-                float oldWidth = bodyRect.sizeDelta.x;                  // 323
-                float newWidth = inset + 8f * blockWidth + inset;       // 257.2
-                float zoneWidth = oldWidth - newWidth;                  // 65.8 = 2 blocks + border
-                float bodyHeight = bodyRect.sizeDelta.y;                // 30
-                float zoneHeight = bodyHeight * 1.3f;                   // 30% taller
+                float oldWidth = bodyRect.sizeDelta.x;                        // 323
+                float newWidth = inset + normalBlocks * blockWidth + inset;   // 8 blocks: 257.2
+                float zoneWidth = oldWidth - newWidth;                        // the premium blocks + border
+                float bodyHeight = bodyRect.sizeDelta.y;                      // 30
+                float zoneHeight = bodyHeight * 1.3f;                         // 30% taller
 
                 // Body pivot is right-side: shrinking keeps the right edge, so the shift
                 // left frees exactly the zone's strip while the total footprint stays.
@@ -722,10 +729,16 @@ namespace KineticEnergy.EditorSetup
                 bodyRect.anchoredPosition -= new Vector2(zoneWidth, 0f);
 
                 Transform dividers = body.Find("MeterDividers");
-                Transform divider8 = dividers != null ? dividers.Find("Divider8") : null;
-                Transform divider9 = dividers != null ? dividers.Find("Divider9") : null;
-                if (divider8 != null) divider8.gameObject.SetActive(false);
-                if (divider9 != null) divider9.gameObject.SetActive(false);
+                if (dividers != null)
+                {
+                    // The main bar keeps its first (normalBlocks - 1) internal lines;
+                    // everything beyond belongs to the zone now.
+                    for (int i = normalBlocks; i <= 9; i++)
+                    {
+                        Transform retired = dividers.Find("Divider" + i);
+                        if (retired != null) retired.gameObject.SetActive(false);
+                    }
+                }
 
                 // Look sampled straight from the source meter's own images.
                 Image outlineImage = body.Find("Outline").GetComponent<Image>();
@@ -747,19 +760,24 @@ namespace KineticEnergy.EditorSetup
                 MakePremiumImage(zone.transform, "PremiumBoostFill", bonusImage.color, bonusImage.sprite, true, new Vector2(-6f, -6f));
                 MakePremiumImage(zone.transform, "PremiumChargeFill", chargeImage.color, chargeImage.sprite, true, new Vector2(-6f, -6f));
 
-                GameObject line = new GameObject("PremiumDivider", typeof(RectTransform));
-                line.transform.SetParent(zone.transform, false);
-                RectTransform lineRect = line.GetComponent<RectTransform>();
-                lineRect.anchorMin = new Vector2(0.5f, 0f);
-                lineRect.anchorMax = new Vector2(0.5f, 1f);
-                lineRect.pivot = new Vector2(0.5f, 0.5f);
-                lineRect.sizeDelta = new Vector2(3f, -6f);
-                line.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.9f);
+                int zoneBlocks = Mathf.Max(10 - normalBlocks, 1);
+                for (int i = 1; i < zoneBlocks; i++)
+                {
+                    GameObject line = new GameObject("PremiumDivider" + i, typeof(RectTransform));
+                    line.transform.SetParent(zone.transform, false);
+                    RectTransform lineRect = line.GetComponent<RectTransform>();
+                    float anchorX = (float)i / zoneBlocks;
+                    lineRect.anchorMin = new Vector2(anchorX, 0f);
+                    lineRect.anchorMax = new Vector2(anchorX, 1f);
+                    lineRect.pivot = new Vector2(0.5f, 0.5f);
+                    lineRect.sizeDelta = new Vector2(3f, -6f);
+                    line.AddComponent<Image>().color = new Color(1f, 1f, 1f, 0.9f);
+                }
 
                 PrefabUtility.SaveAsPrefabAsset(root, path);
             }
             finally { PrefabUtility.UnloadPrefabContents(root); }
-            Debug.Log("KineticEnergySetup: PremiumEnergyMeter prefab created OK (8 + 2 taller blocks)");
+            Debug.Log($"KineticEnergySetup: premium meter prefab created OK ({normalBlocks} + {10 - normalBlocks} taller blocks) - {path}");
         }
 
         static void MakePremiumImage(Transform parent, string name, Color color, Sprite sprite, bool filled, Vector2 sizeDelta)
@@ -921,20 +939,30 @@ namespace KineticEnergy.EditorSetup
             cameraVariants.currentVariant = AimCameraVariant.OtsParallaxPip;
             EditorUtility.SetDirty(cameraVariants);
 
-            if (UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include) == null)
+            // The LOCKED E-only momentum test (direct request): variant E, momentum
+            // launches on, nothing switchable, the boost boundary at 40% with a matching
+            // 4+6 meter, and a missed window reverting to 40% instead of zero.
+            MergedEconomyController merged = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
+            if (merged == null)
             {
-                new GameObject("MergedEconomy").AddComponent<MergedEconomyController>();
+                merged = new GameObject("MergedEconomy").AddComponent<MergedEconomyController>();
             }
+            merged.currentVariant = MergedEconomyVariant.VariantE;
+            merged.lockSettings = true;
+            merged.momentumLaunches = true;
+            merged.premiumBoundaryFraction = 0.4f;
+            merged.totalLossKeepFraction = 0.4f;
+            EditorUtility.SetDirty(merged);
 
             GameObject pauseSystemGo = GameObject.Find("PauseSystem");
             Transform pauseCanvas = pauseSystemGo != null ? pauseSystemGo.transform.Find("PauseCanvas") : null;
             if (pauseCanvas == null) throw new Exception("KineticEnergySetup: Level1Economy has no PauseSystem/PauseCanvas.");
 
-            // The premium 8+2 meter replaces Level 1's embedded meter (which is part of
-            // the PauseSystem prefab instance, so it is DEACTIVATED, never destroyed).
-            CreatePremiumEnergyMeterPrefab();
+            // The 4+6 premium meter (boost boundary at 40%) replaces whatever meter the
+            // scene carries; the embedded prefab meter is DEACTIVATED, never destroyed.
+            BuildPremiumMeterVariant(PrefabFolder + "/PremiumEnergyMeter4.prefab", 4);
             if (playerController.energyMeter == null
-                || playerController.energyMeter.gameObject.name != "PremiumEnergyMeter")
+                || playerController.energyMeter.gameObject.name != "PremiumEnergyMeter4")
             {
                 Transform embeddedUi = pauseCanvas.Find("EnergyMeter");
                 if (embeddedUi != null) embeddedUi.gameObject.SetActive(false);
@@ -943,8 +971,8 @@ namespace KineticEnergy.EditorSetup
                 if (playerController.energyMeter != null) playerController.energyMeter.gameObject.SetActive(false);
 
                 GameObject premium = (GameObject)PrefabUtility.InstantiatePrefab(
-                    AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PremiumEnergyMeter.prefab"));
-                premium.name = "PremiumEnergyMeter";
+                    AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PremiumEnergyMeter4.prefab"));
+                premium.name = "PremiumEnergyMeter4";
                 premium.transform.SetParent(pauseCanvas, false);
                 playerController.energyMeter = premium.GetComponent<EnergyMeterController>();
             }
@@ -958,11 +986,10 @@ namespace KineticEnergy.EditorSetup
             }
             EditorUtility.SetDirty(playerController);
 
-            // The momentum-launch experiment (1-key toggle) lives in THIS scene only.
-            if (UnityEngine.Object.FindAnyObjectByType<MomentumLaunchToggle>(FindObjectsInactive.Include) == null)
-            {
-                new GameObject("MomentumLaunchToggle").AddComponent<MomentumLaunchToggle>();
-            }
+            // The 1-key momentum toggle is RETIRED - momentum is locked ON through the
+            // harness now, so the toggle object leaves the scene.
+            var momentumToggle = UnityEngine.Object.FindAnyObjectByType<MomentumLaunchToggle>(FindObjectsInactive.Include);
+            if (momentumToggle != null) UnityEngine.Object.DestroyImmediate(momentumToggle.gameObject);
 
             SaveOpenScene(scenePath);
             Debug.Log("KineticEnergySetup: Level 1 Economy scene setup complete OK (merged economy + OTS/landing-window camera)");
