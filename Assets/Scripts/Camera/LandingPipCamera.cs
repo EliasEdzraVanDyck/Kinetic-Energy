@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
 using KineticEnergy.Player;
@@ -31,6 +33,71 @@ namespace KineticEnergy.Camera
         RawImage pipImage;
         int textureWidth;
         int textureHeight;
+
+        [Tooltip("Fraction of the ACTIVE trail dots - counted from the player's end - left out of the landing window. The near dots only crowd the small view; the ones approaching the landing are what it exists to show.")]
+        [Range(0f, 1f)] public float hideNearTrailFraction = 0.7f; // only the last 30% shows
+        readonly List<Renderer> hiddenForPip = new List<Renderer>();
+
+        void OnEnable()
+        {
+            RenderPipelineManager.beginCameraRendering += HideNearTrail;
+            RenderPipelineManager.endCameraRendering += RestoreNearTrail;
+        }
+
+        void OnDisable()
+        {
+            RenderPipelineManager.beginCameraRendering -= HideNearTrail;
+            RenderPipelineManager.endCameraRendering -= RestoreNearTrail;
+            RestoreHiddenTrail();
+        }
+
+        // Runs for the PIP CAMERA ONLY: the near half of the dots is switched off just
+        // for its render pass and switched straight back on afterwards, so the main
+        // screen keeps the complete trail.
+        void HideNearTrail(ScriptableRenderContext context, UnityEngine.Camera renderingCamera)
+        {
+            if (renderingCamera != pipCam || controller == null) return;
+            LandingPreviewController preview = controller.landingPreview;
+            if (preview == null || preview.trailDots == null || hideNearTrailFraction <= 0f) return;
+
+            int activeDots = 0;
+            foreach (Transform dot in preview.trailDots)
+            {
+                if (dot != null && dot.gameObject.activeSelf) activeDots++;
+            }
+            int hideCount = Mathf.FloorToInt(activeDots * Mathf.Clamp01(hideNearTrailFraction));
+            if (hideCount <= 0) return;
+
+            // trailDots run from the PLAYER outward, so the first entries are the near ones.
+            int seen = 0;
+            foreach (Transform dot in preview.trailDots)
+            {
+                if (dot == null || !dot.gameObject.activeSelf) continue;
+                if (seen >= hideCount) break;
+                seen++;
+                Renderer dotRenderer = dot.GetComponent<Renderer>();
+                if (dotRenderer != null && dotRenderer.enabled)
+                {
+                    dotRenderer.enabled = false;
+                    hiddenForPip.Add(dotRenderer);
+                }
+            }
+        }
+
+        void RestoreNearTrail(ScriptableRenderContext context, UnityEngine.Camera renderingCamera)
+        {
+            if (renderingCamera != pipCam) return;
+            RestoreHiddenTrail();
+        }
+
+        void RestoreHiddenTrail()
+        {
+            foreach (Renderer dotRenderer in hiddenForPip)
+            {
+                if (dotRenderer != null) dotRenderer.enabled = true;
+            }
+            hiddenForPip.Clear();
+        }
 
         public static LandingPipCamera Create(KineticCubeController controller)
         {
