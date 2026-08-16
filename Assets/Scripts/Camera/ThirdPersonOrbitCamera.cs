@@ -514,11 +514,11 @@ namespace KineticEnergy.Camera
             }
 
             // Unscaled, not Time.deltaTime - Time.deltaTime already shrinks 1:1 with
-            // Time.timeScale, which would otherwise make the camera merely ride along with
-            // whatever fraction chargeTimeScale happens to be. Instead the camera runs at a
-            // flat HALF speed whenever the game is running slow. Strictly < 1, not != 1 - a
-            // launch in flight speeds the game UP (KineticCubeController.launchFlightTimeScale)
-            // and camera/aiming must be unaffected by that, which unscaled time gives for free.
+            // Time.timeScale. The classic rule, fully restored: the camera runs at a
+            // flat HALF speed whenever the game runs slow (RMB/LT slowdown, bullet
+            // time, the aims' frozen deliberation) - the midair aim INCLUDED, which is
+            // exactly what makes it match the grounded aim's speed (both run the aim
+            // multiplier under the same halving).
             //
             // The frame right after a scene reload (Restart, or the new fall-reset) can have an
             // abnormally large deltaTime - loading everything (Player/Camera/PauseSystem, plus

@@ -848,6 +848,82 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: quarry economy 2 (merged) scene setup complete OK");
         }
 
+        // Level1Economy: an EXACT copy of Level 1 running QuarryEconomy2's merged economy
+        // (variants A-E, the X/D-pad-Down auto-max toggle, the 8+2 premium meter, the
+        // intro) with the aim camera LOCKED to QuarryNew's variant D - over-the-shoulder
+        // plus the landing picture-in-picture window when the cursor is off screen.
+        [MenuItem("Tools/Kinetic Energy/Setup Level 1 Economy Scene")]
+        public static void SetupLevel1Economy()
+        {
+            const string scenePath = "Assets/Scenes/Level1Economy.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(Level1ScenePath) == null)
+                {
+                    throw new Exception("KineticEnergySetup: Level1.unity does not exist.");
+                }
+                if (!AssetDatabase.CopyAsset(Level1ScenePath, scenePath))
+                {
+                    throw new Exception("KineticEnergySetup: copying Level1.unity to Level1Economy.unity failed.");
+                }
+            }
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            KineticCubeController playerController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            if (playerController == null) throw new Exception("KineticEnergySetup: Level1Economy has no Player.");
+
+            // Camera: the Player prefab carries the variant controller and presets in
+            // every scene - lock it to OTS + landing window, switching off.
+            var cameraVariants = UnityEngine.Object.FindAnyObjectByType<AimCameraVariantController>(FindObjectsInactive.Include);
+            if (cameraVariants == null)
+            {
+                throw new Exception("KineticEnergySetup: no AimCameraVariantController on the Player - run Setup Aim Camera Variants first.");
+            }
+            cameraVariants.variantSwitchingEnabled = false;
+            cameraVariants.currentVariant = AimCameraVariant.OtsParallaxPip;
+            EditorUtility.SetDirty(cameraVariants);
+
+            if (UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include) == null)
+            {
+                new GameObject("MergedEconomy").AddComponent<MergedEconomyController>();
+            }
+
+            GameObject pauseSystemGo = GameObject.Find("PauseSystem");
+            Transform pauseCanvas = pauseSystemGo != null ? pauseSystemGo.transform.Find("PauseCanvas") : null;
+            if (pauseCanvas == null) throw new Exception("KineticEnergySetup: Level1Economy has no PauseSystem/PauseCanvas.");
+
+            // The premium 8+2 meter replaces Level 1's embedded meter (which is part of
+            // the PauseSystem prefab instance, so it is DEACTIVATED, never destroyed).
+            CreatePremiumEnergyMeterPrefab();
+            if (playerController.energyMeter == null
+                || playerController.energyMeter.gameObject.name != "PremiumEnergyMeter")
+            {
+                Transform embeddedUi = pauseCanvas.Find("EnergyMeter");
+                if (embeddedUi != null) embeddedUi.gameObject.SetActive(false);
+                Transform embeddedController = pauseSystemGo.transform.Find("EnergyMeter");
+                if (embeddedController != null) embeddedController.gameObject.SetActive(false);
+                if (playerController.energyMeter != null) playerController.energyMeter.gameObject.SetActive(false);
+
+                GameObject premium = (GameObject)PrefabUtility.InstantiatePrefab(
+                    AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PremiumEnergyMeter.prefab"));
+                premium.name = "PremiumEnergyMeter";
+                premium.transform.SetParent(pauseCanvas, false);
+                playerController.energyMeter = premium.GetComponent<EnergyMeterController>();
+            }
+
+            // The combo-window meter (the repurposed slowdown bar) - Level 1 predates it.
+            if (playerController.slowdownMeter == null)
+            {
+                GameObject slowdownMeter = InstantiatePrefab("SlowdownMeter");
+                slowdownMeter.transform.SetParent(pauseCanvas, false);
+                playerController.slowdownMeter = slowdownMeter.GetComponent<EnergyMeterController>();
+            }
+            EditorUtility.SetDirty(playerController);
+
+            SaveOpenScene(scenePath);
+            Debug.Log("KineticEnergySetup: Level 1 Economy scene setup complete OK (merged economy + OTS/landing-window camera)");
+        }
+
         // ADDITIVE: the first-boot aim-variant explainer overlay for QuarryNew - shown once
         // per game process, dismissed by any input, frozen game underneath.
         [MenuItem("Tools/Kinetic Energy/Add Aim Intro To QuarryNew")]
@@ -2555,6 +2631,176 @@ namespace KineticEnergy.EditorSetup
 
             SaveOpenScene(level4Path);
             Debug.Log($"KineticEnergySetup: Level 4 setup complete OK (L={L:F1}m, 3 flying enemies)");
+        }
+
+        // ==================== Level 9 - sized enemies / Level 10 - weak-spot flyers ====================
+
+        static void SpawnSizedEnemy(string name, Vector3 position, EnemySizeClass sizeClass, EnemyWanderMode mode, float radius)
+        {
+            GameObject instance = InstantiatePrefab("SizedEnemy");
+            instance.name = name;
+            instance.transform.position = position;
+            SizedEnemy enemy = instance.GetComponent<SizedEnemy>();
+            enemy.sizeClass = sizeClass;
+            enemy.wanderMode = mode;
+            enemy.wanderRadius = radius;
+            EditorUtility.SetDirty(enemy);
+        }
+
+        static void SpawnWeakSpotFlyer(string name, Vector3 position, float radius, float detection)
+        {
+            GameObject instance = InstantiatePrefab("WeakSpotFlyer");
+            instance.name = name;
+            instance.transform.position = position;
+            FlyingEnemy flyer = instance.GetComponent<FlyingEnemy>();
+            flyer.flyRadius = radius;
+            flyer.detectionRadius = detection;
+            EditorUtility.SetDirty(flyer);
+        }
+
+        // A stepped run of arenas, one SIZE CLASS per step: the small (20% kill, fast)
+        // greets first, the medium (40%) guards the climb, the large (60%, hard-hitting)
+        // holds the last arena - the billboard percentages teach the escalation. Player
+        // tuning copied from Level 7 (the ground-enemy reference).
+        [MenuItem("Tools/Kinetic Energy/Setup Level 9")]
+        public static void SetupLevel9()
+        {
+            const string level9Path = "Assets/Scenes/Level9.unity";
+
+            EditorSceneManager.OpenScene("Assets/Scenes/Level7.unity", OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find Level 7's Player/camera to copy tuning from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            CreateSizedEnemyPrefab();
+            MeasureLaunchDistances(out float L, out float H);
+            NewEmptyScene(level9Path);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("Level9Course");
+            Transform tf = course.transform;
+            Vector3 platformSize = new Vector3(12f, 2f, 12f);
+
+            CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
+            Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
+
+            CreateBlock(tf, "SmallArena", new Vector3(0.35f * L, -1f, 0.05f * L), new Vector3(18f, 2f, 18f), platformMat);
+            SpawnSizedEnemy("SmallEnemy", new Vector3(0.35f * L, 1f, 0.05f * L), EnemySizeClass.Small, EnemyWanderMode.PlatformSurface, 10f);
+
+            CreateBlock(tf, "MediumArena", new Vector3(0.65f * L, 2f, -0.06f * L), new Vector3(18f, 2f, 18f), platformMat);
+            SpawnSizedEnemy("MediumEnemy", new Vector3(0.65f * L, 4f, -0.06f * L), EnemySizeClass.Medium, EnemyWanderMode.PlatformSurface, 10f);
+
+            // The final arena pairs the LARGE with a second small - the player has to
+            // budget a 60% launch while a fast 20% pest is on the same floor.
+            CreateBlock(tf, "LargeArena", new Vector3(0.95f * L, 5f, 0.03f * L), new Vector3(22f, 2f, 22f), platformMat);
+            SpawnSizedEnemy("LargeEnemy", new Vector3(0.95f * L, 7f, 0.03f * L), EnemySizeClass.Large, EnemyWanderMode.PlatformSurface, 11f);
+            SpawnSizedEnemy("PestEnemy", new Vector3(0.92f * L, 7f, -0.02f * L), EnemySizeClass.Small, EnemyWanderMode.WithinRadius, 8f);
+
+            CreateBlock(tf, "EndPlatform", new Vector3(1.25f * L, 5f, 0f), platformSize, platformMat);
+
+            GameObject respawnPoint = new GameObject("RespawnPoint");
+            respawnPoint.transform.position = playerSpawn;
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(0.62f * L, -14f, 0f), new Vector3(1.25f * L + 60f, 2f, L + 60f), damageMat);
+            DamageWalls damage = damageFloor.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(damage);
+
+            GameObject finish = InstantiatePrefab("FinishTrigger");
+            finish.transform.position = new Vector3(1.25f * L, 8f, 0f);
+            FinishLineNextScene finishComp = finish.GetComponent<FinishLineNextScene>();
+            if (finishComp != null) finishComp.nextSceneName = "MainMenu";
+            EditorUtility.SetDirty(finish);
+
+            CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
+            PointCameraAt(rig, new Vector3(0.35f * L, 0f, 0f));
+            OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
+            WireStandaloneMeters(rig);
+
+            SaveOpenScene(level9Path);
+            Debug.Log($"KineticEnergySetup: Level 9 setup complete OK (L={L:F1}m, sized enemies small/medium/large+pest)");
+        }
+
+        // A CLIMBING island run: every weak-spot flyer hovers just below the next island,
+        // so the route above them - the back cube is the only kill spot - is always
+        // there, and every crossing passes over a flyer's patrol. Player tuning copied
+        // from Level 4 (the flyer reference).
+        [MenuItem("Tools/Kinetic Energy/Setup Level 10")]
+        public static void SetupLevel10()
+        {
+            const string level10Path = "Assets/Scenes/Level10.unity";
+
+            EditorSceneManager.OpenScene("Assets/Scenes/Level4.unity", OpenSceneMode.Single);
+            KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
+            ThirdPersonOrbitCamera sourceCamera = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (sourceController == null || sourceMove == null || sourceCamera == null)
+            {
+                throw new Exception("KineticEnergySetup: could not find Level 4's Player/camera to copy tuning from.");
+            }
+            string controllerJson = EditorJsonUtility.ToJson(sourceController);
+            string moveJson = EditorJsonUtility.ToJson(sourceMove);
+            string cameraJson = EditorJsonUtility.ToJson(sourceCamera);
+
+            CreateWeakSpotFlyerPrefab();
+            MeasureLaunchDistances(out float L, out float H);
+            NewEmptyScene(level10Path);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("Level10Course");
+            Transform tf = course.transform;
+            Vector3 platformSize = new Vector3(12f, 2f, 12f);
+
+            CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
+            Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
+
+            CreateBlock(tf, "IslandA", new Vector3(0.4f * L, 4f, 0.06f * L), new Vector3(16f, 2f, 16f), platformMat);
+            SpawnWeakSpotFlyer("LowFlyer", new Vector3(0.2f * L, 6f, 0.02f * L), 7f, 20f);
+
+            CreateBlock(tf, "IslandB", new Vector3(0.8f * L, 10f, -0.06f * L), new Vector3(16f, 2f, 16f), platformMat);
+            SpawnWeakSpotFlyer("MidFlyer", new Vector3(0.6f * L, 12f, -0.02f * L), 8f, 22f);
+
+            CreateBlock(tf, "IslandC", new Vector3(1.15f * L, 16f, 0.02f * L), new Vector3(18f, 2f, 18f), platformMat);
+            SpawnWeakSpotFlyer("HighFlyer", new Vector3(0.98f * L, 18f, 0f), 8f, 22f);
+
+            CreateBlock(tf, "EndPlatform", new Vector3(1.45f * L, 16f, 0f), platformSize, platformMat);
+
+            GameObject respawnPoint = new GameObject("RespawnPoint");
+            respawnPoint.transform.position = playerSpawn;
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(0.72f * L, -12f, 0f), new Vector3(1.45f * L + 60f, 2f, L + 60f), damageMat);
+            DamageWalls damage = damageFloor.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint.transform;
+            EditorUtility.SetDirty(damage);
+
+            GameObject finish = InstantiatePrefab("FinishTrigger");
+            finish.transform.position = new Vector3(1.45f * L, 19f, 0f);
+            FinishLineNextScene finishComp = finish.GetComponent<FinishLineNextScene>();
+            if (finishComp != null) finishComp.nextSceneName = "MainMenu";
+            EditorUtility.SetDirty(finish);
+
+            CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
+            PointCameraAt(rig, new Vector3(0.4f * L, 4f, 0f));
+            OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
+            OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
+            WireStandaloneMeters(rig);
+
+            SaveOpenScene(level10Path);
+            Debug.Log($"KineticEnergySetup: Level 10 setup complete OK (L={L:F1}m, 3 weak-spot flyers)");
         }
 
         // ==================== Level 7 - hunter enemies ====================
