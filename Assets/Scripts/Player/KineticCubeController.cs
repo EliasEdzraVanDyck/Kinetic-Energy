@@ -438,6 +438,9 @@ namespace KineticEnergy.Player
         Vector3[] trajectoryBuffer;
         Vector3 lastPredictedLanding;
         bool hasValidPredictedLanding;
+        // Flat heading of the last launch - the midair aim opens facing it.
+        float lastLaunchHeadingYaw;
+        bool hasLaunchHeading;
         int lastTrajectoryStepCount;
         Vector3 lastPredictedLandingNormal = Vector3.up;
         // The real scene collider the predicted flight ends on (mapped back from its
@@ -1255,6 +1258,9 @@ namespace KineticEnergy.Player
                 dialRampSeconds = 0f;
                 dialRampDirection = 0;
                 cameraOrbit?.SetFirstPersonMode(true);
+                // Open facing the LAUNCH heading, not the camera's leftover orbit angle -
+                // horizontal only, so the player still owns the pitch.
+                if (hasLaunchHeading) cameraOrbit?.SetAimYaw(lastLaunchHeadingYaw);
                 landingPreview?.SetVisible(true);
                 landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
                 MidairAimOpened?.Invoke();
@@ -1564,6 +1570,7 @@ namespace KineticEnergy.Player
             poundAimHoldingGravityOff = false;
             previousLaunchChargeFraction = 0f;
             wallCarryArmed = false;
+            hasLaunchHeading = false; // a respawned run has no launch to inherit a heading from
 
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
@@ -1762,6 +1769,17 @@ namespace KineticEnergy.Player
             // AllowGroundedMovement/AllowAirborneNudge are correct the instant firing is
             // decided - the free-move component's FixedUpdate can run before ours.
             launchGraceTimer = launchGraceDuration;
+
+            // The heading this launch flew along, flattened. The next midair aim OPENS
+            // facing it, so the aim starts pointed where you were actually going rather
+            // than wherever the camera happened to be left. Near-vertical shots have no
+            // meaningful heading, so they keep the previous one.
+            Vector3 flatLaunch = Vector3.ProjectOnPlane(direction, Vector3.up);
+            if (flatLaunch.sqrMagnitude > 0.0001f)
+            {
+                lastLaunchHeadingYaw = Mathf.Atan2(flatLaunch.x, flatLaunch.z) * Mathf.Rad2Deg;
+                hasLaunchHeading = true;
+            }
 
             previousLaunchChargeFraction = ChargeFraction(); // the NEXT launch's wall carry reads this
             LaunchFired?.Invoke();

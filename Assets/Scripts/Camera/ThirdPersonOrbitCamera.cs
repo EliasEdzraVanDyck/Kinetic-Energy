@@ -359,6 +359,20 @@ namespace KineticEnergy.Camera
             SnapToThirdPersonOrbit();
         }
 
+        // Points the aim at a caller-chosen heading: the midair aim opens facing the
+        // direction the launch was actually travelling instead of the camera's leftover
+        // orbit angle. YAW ONLY - pitch stays the player's.
+        public void SetAimYaw(float yawDegrees)
+        {
+            yaw = yawDegrees;
+            yawInitialized = true;
+            recentering = false;
+            freeLookYaw = 0f;
+            // Drop the eased view angles too, or the framing block would glide the render
+            // yaw over from the old heading instead of opening on the new one.
+            viewAnglesSeeded = false;
+        }
+
         public void SnapToThirdPersonOrbit()
         {
             firstPerson = false;
