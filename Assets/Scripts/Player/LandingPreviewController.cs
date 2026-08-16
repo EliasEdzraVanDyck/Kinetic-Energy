@@ -198,41 +198,19 @@ namespace KineticEnergy.Player
         // ---------- Landing outcome (colour) ----------
 
         // A landing SUCCEEDS unless it respawns you (hazard surfaces, or no landing at
-        // all) or it's the SIDE of non-floating geometry. Floating objects' sides are
-        // genuine landings - you stick and relaunch with the wall stake.
-        bool LandingIsSuccessful(Collider landing, Vector3 point, Vector3 normal)
+        // all) or it's the SIDE of an object that won't hold you. StickySurface is the
+        // authority on holding: carrying the component makes EVERY face of that object
+        // safe, whatever its sticky value - the same GetComponentInParent lookup the
+        // controller's own crash-stick uses, so the colours can't disagree with it.
+        bool LandingIsSuccessful(Collider landing, Vector3 normal)
         {
             if (landing == null) return false;
             if (landing.GetComponentInParent<DamageWalls>() != null) return false;
             if (landing.GetComponentInParent<DeathWall>() != null) return false;
-            if (Vector3.Dot(normal, Vector3.up) >= SteepSurfaceDot) return true;
-            return ObjectIsFloating(landing, point, normal);
-        }
-
-        // Floating = there is AIR under the object, not support. Probed just off the hit
-        // face: if the first thing straight below is the same collider, its own geometry
-        // continues down (terrain walls, ramps) - grounded. Otherwise the object floats
-        // when its underside sits clearly above whatever is beneath it.
-        bool ObjectIsFloating(Collider landing, Vector3 point, Vector3 normal)
-        {
-            Vector3 probe = point + normal * 0.5f;
-            RaycastHit[] hits = Physics.RaycastAll(probe, Vector3.down, 500f, ~0, QueryTriggerInteraction.Ignore);
-            bool found = false;
-            RaycastHit closest = default;
-            foreach (RaycastHit hit in hits)
-            {
-                if (hit.collider == null) continue;
-                if (hit.collider.GetComponentInParent<KineticCubeController>() != null) continue;
-                if (hit.collider.GetComponentInParent<AimPreviewIgnored>() != null) continue;
-                if (!found || hit.distance < closest.distance)
-                {
-                    closest = hit;
-                    found = true;
-                }
-            }
-            if (!found) return true; // nothing below at all - hanging over the void
-            if (closest.collider == landing) return false;
-            return landing.bounds.min.y > closest.point.y + 0.35f;
+            if (landing.GetComponentInParent<StickySurface>() != null) return true;
+            // No sticky component: only the up-facing side is a landing - the one where
+            // you end up grounded. Any true side face drops you.
+            return Vector3.Dot(normal, Vector3.up) >= SteepSurfaceDot;
         }
 
         // Tints dots + cursor with the outcome colour and the arrow with its darker
@@ -319,7 +297,7 @@ namespace KineticEnergy.Player
             if (didLand)
             {
                 Vector3 judgedNormal = landingNormal.sqrMagnitude > 0.0001f ? landingNormal.normalized : lastValidNormal;
-                bool success = LandingIsSuccessful(landingCollider, landingPoint, judgedNormal);
+                bool success = LandingIsSuccessful(landingCollider, judgedNormal);
                 if (success != outcomeSuccess)
                 {
                     outcomeSuccess = success;
