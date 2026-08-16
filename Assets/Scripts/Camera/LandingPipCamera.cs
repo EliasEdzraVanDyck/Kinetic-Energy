@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
 using KineticEnergy.Player;
 
@@ -18,6 +19,19 @@ namespace KineticEnergy.Camera
         GameObject borderRoot;
         RectTransform borderFrame;
 
+        // The window renders into its OWN render texture rather than straight into a
+        // screen viewport rect: that texture is supersampled and MSAA'd, so the small
+        // view is sharper than the main screen instead of softer (direct request).
+        // Rendering into a viewport rect gave no control over either.
+        [Tooltip("Render-texture size multiplier over the window's on-screen pixel size (2 = double resolution, downsampled on display).")]
+        public float supersample = 2f;
+        [Tooltip("MSAA samples for the window's render texture (1, 2, 4 or 8).")]
+        public int msaaSamples = 8;
+        RenderTexture pipTexture;
+        RawImage pipImage;
+        int textureWidth;
+        int textureHeight;
+
         public static LandingPipCamera Create(KineticCubeController controller)
         {
             GameObject go = new GameObject("LandingPipCamera");
@@ -28,6 +42,15 @@ namespace KineticEnergy.Camera
             UnityEngine.Camera main = UnityEngine.Camera.main;
             pip.pipCam.depth = main != null ? main.depth + 1 : 1;
             pip.pipCam.enabled = false;
+            // SMAA on the window's own camera: a render-texture camera skips the main
+            // camera's post AA entirely, which is why the window looked pixelated even
+            // supersampled - it needs its own pass.
+            var extraData = pip.pipCam.GetUniversalAdditionalCameraData();
+            if (extraData != null)
+            {
+                extraData.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
+                extraData.antialiasingQuality = AntialiasingQuality.High;
+            }
             pip.BuildBorder();
             return pip;
         }
@@ -72,8 +95,8 @@ namespace KineticEnergy.Camera
 
             transform.position = vantage;
             transform.rotation = Quaternion.LookRotation(landing - vantage, Vector3.up);
-            pipCam.rect = preset.pipViewport;
             pipCam.fieldOfView = preset.pipFieldOfView;
+            EnsureTexture(preset.pipViewport);
             if (!pipCam.enabled) pipCam.enabled = true;
 
             // Border frame anchored to the same normalized rect as the viewport.
@@ -115,10 +138,49 @@ namespace KineticEnergy.Camera
             return true;
         }
 
+        // (Re)builds the render texture whenever the window's pixel size changes - screen
+        // resize, viewport retune, or the first show.
+        void EnsureTexture(Rect viewport)
+        {
+            int wantWidth = Mathf.Max(Mathf.RoundToInt(Screen.width * viewport.width * Mathf.Max(supersample, 1f)), 64);
+            int wantHeight = Mathf.Max(Mathf.RoundToInt(Screen.height * viewport.height * Mathf.Max(supersample, 1f)), 64);
+            if (pipTexture != null && wantWidth == textureWidth && wantHeight == textureHeight) return;
+
+            if (pipTexture != null)
+            {
+                pipCam.targetTexture = null;
+                if (pipImage != null) pipImage.texture = null;
+                pipTexture.Release();
+                Destroy(pipTexture);
+            }
+
+            pipTexture = new RenderTexture(wantWidth, wantHeight, 24, RenderTextureFormat.DefaultHDR)
+            {
+                name = "LandingPipTexture",
+                antiAliasing = Mathf.Clamp(Mathf.ClosestPowerOfTwo(Mathf.Max(msaaSamples, 1)), 1, 8),
+                filterMode = FilterMode.Bilinear,
+                useMipMap = false,
+            };
+            pipTexture.Create();
+            textureWidth = wantWidth;
+            textureHeight = wantHeight;
+
+            pipCam.targetTexture = pipTexture;
+            if (pipImage != null) pipImage.texture = pipTexture;
+        }
+
         void Hide()
         {
             if (pipCam != null && pipCam.enabled) pipCam.enabled = false;
             if (borderRoot != null && borderRoot.activeSelf) borderRoot.SetActive(false);
+        }
+
+        void OnDestroy()
+        {
+            if (pipTexture == null) return;
+            if (pipCam != null) pipCam.targetTexture = null;
+            pipTexture.Release();
+            Destroy(pipTexture);
         }
 
         // Grey-white outline matching the meters' styling: an anchored frame of four thin
@@ -136,6 +198,18 @@ namespace KineticEnergy.Camera
             borderFrame = frameGo.GetComponent<RectTransform>();
             borderFrame.offsetMin = Vector2.zero;
             borderFrame.offsetMax = Vector2.zero;
+
+            // The camera's render texture fills the frame; the border strips are added
+            // AFTER it, so they draw on top of the view.
+            GameObject viewGo = new GameObject("PipView", typeof(RectTransform));
+            viewGo.transform.SetParent(borderFrame, false);
+            RectTransform viewRect = viewGo.GetComponent<RectTransform>();
+            viewRect.anchorMin = Vector2.zero;
+            viewRect.anchorMax = Vector2.one;
+            viewRect.offsetMin = Vector2.zero;
+            viewRect.offsetMax = Vector2.zero;
+            pipImage = viewGo.AddComponent<RawImage>();
+            pipImage.texture = pipTexture;
 
             Color borderColor = new Color(1f, 1f, 1f, 0.9f); // same as the meter outlines
             const float thickness = 3f;

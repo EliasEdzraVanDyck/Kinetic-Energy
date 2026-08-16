@@ -511,7 +511,9 @@ namespace KineticEnergy.Player
         {
             point = Vector3.zero;
             landing = lastPredictedLanding;
-            if (!airAiming || !hasValidPredictedLanding || lastTrajectoryStepCount < 2) return false;
+            // Both aim types feed the trajectory buffer - the landing window works for
+            // GROUNDED aims too (direct request), not just the midair aim.
+            if ((!airAiming && !isAiming) || !hasValidPredictedLanding || lastTrajectoryStepCount < 2) return false;
             int index = Mathf.Clamp(Mathf.RoundToInt(lastTrajectoryStepCount * fraction), 0, lastTrajectoryStepCount - 1);
             point = trajectoryBuffer[index];
             return true;

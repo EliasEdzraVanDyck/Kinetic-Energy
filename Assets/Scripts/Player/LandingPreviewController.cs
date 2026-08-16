@@ -24,6 +24,10 @@ namespace KineticEnergy.Player
         public float markerGroundOffset = -0.5f;
         [Tooltip("Small extra lift off the landing face so the marker never clips into it.")]
         public float markerSurfaceLift = 0.06f;
+        [Tooltip("Extra nudge of the marker TOWARD the camera - the flat marker would otherwise sink its outer ring into curved or edged landings (target spheres, platform corners).")]
+        public float markerCameraOffset = 0.12f;
+        [Tooltip("Additional camera-ward nudge per metre of viewing distance, covering depth-buffer precision loss on far landings.")]
+        public float markerCameraOffsetPerMetre = 0.004f;
         public Transform[] trailDots;
         [Tooltip("Maximum gap between adjacent trail dots, in meters of real arc length.")]
         public float maxDotSpacing = 1f;
@@ -33,13 +37,13 @@ namespace KineticEnergy.Player
 
         [Header("Anti-jitter (visual smoothing only - the prediction itself is untouched)")]
         [Tooltip("Seconds of positional smoothing on the landing cursor. Short enough to stay under perceptible input latency, long enough to absorb per-frame prediction wobble.")]
-        public float cursorSmoothTime = 0.055f;
+        public float cursorSmoothTime = 0.09f;
         [Tooltip("A cursor whose target jumps farther than this snaps instantly instead of gliding - a landing teleporting across geometry must not sweep the marker through the air.")]
         public float smoothSnapDistance = 3f;
         [Tooltip("The cursor survives losing the landing for this long, holding its last valid spot - single-frame prediction misses no longer blink it out.")]
         public float cursorHideGraceSeconds = 0.12f;
         [Tooltip("Per-frame target movement at or below this gets FULL smoothing; faster (deliberate) sweeps proportionally bypass it - far dots and the cursor track camera turns raw instead of breaking away behind them.")]
-        public float smoothNoiseReference = 0.08f;
+        public float smoothNoiseReference = 0.12f;
 
         PredictionMode currentMode = PredictionMode.Trail;
         bool isVisible;
@@ -52,7 +56,10 @@ namespace KineticEnergy.Player
         Vector3 lastCursorPosition;
         Quaternion lastCursorRotation = Quaternion.identity;
         Vector3 cursorPrevTarget;
+        Vector3 lastValidNormal = Vector3.up;
         float smoothedArcLength;
+        // Guaranteed clearance off the landing face, whatever the serialized lift says.
+        const float MinSurfaceLift = 0.15f;
 
         float SmoothDt => Mathf.Min(Time.unscaledDeltaTime, 1f / 30f);
 
@@ -105,9 +112,39 @@ namespace KineticEnergy.Player
             if (didLand)
             {
                 noLandingTimer = 0f;
-                Vector3 normal = landingNormal.sqrMagnitude > 0.0001f ? landingNormal.normalized : Vector3.up;
-                lastCursorPosition = landingPoint + normal * (markerGroundOffset + markerSurfaceLift);
+                // A degenerate normal keeps the LAST valid one instead of snapping to
+                // world-up: the marker lies flat on the surface, so a one-frame flip
+                // turned it edge-on to the camera - invisible for exactly a frame or two.
+                if (landingNormal.sqrMagnitude > 0.0001f) lastValidNormal = landingNormal.normalized;
+                Vector3 normal = lastValidNormal;
+                // The marker sits markerGroundOffset below the landing point (the cube's
+                // RESTING CENTRE) plus a lift off the face. With the serialized 0.06 lift
+                // that margin is ~6cm - small enough that ordinary prediction variance
+                // buried the marker inside the surface, which is the other way it
+                // vanished for a frame. A code-side minimum keeps real clearance.
+                float lift = Mathf.Max(markerSurfaceLift, MinSurfaceLift);
+                lastCursorPosition = landingPoint + normal * (markerGroundOffset + lift);
                 lastCursorRotation = Quaternion.FromToRotation(Vector3.up, normal);
+
+                // ...and a nudge toward the CAMERA on top of that. The marker is FLAT,
+                // so on anything non-planar - a target sphere, a platform edge or corner
+                // - its outer ring is inside the geometry however the normal lift is
+                // tuned, which is the clipping (direct diagnosis). A view-direction
+                // offset makes it win the depth test at its own pixels whatever the
+                // surface curves like; the distance term also keeps far landings clear
+                // of depth-buffer precision loss. Far too small to shift where the
+                // marker reads on screen.
+                UnityEngine.Camera view = UnityEngine.Camera.main;
+                if (view != null)
+                {
+                    Vector3 toCamera = view.transform.position - lastCursorPosition;
+                    float camDistance = toCamera.magnitude;
+                    if (camDistance > 0.01f)
+                    {
+                        float nudge = markerCameraOffset + camDistance * markerCameraOffsetPerMetre;
+                        lastCursorPosition += toCamera / camDistance * nudge;
+                    }
+                }
             }
             else
             {
