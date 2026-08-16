@@ -133,11 +133,16 @@ namespace KineticEnergy.Level
         bool chainInFlight;
         Transform launchSurface;
 
-        // E/F flight bookkeeping: the opening launch's spend and the summed midair
+        // C/D/E flight bookkeeping: the opening launch's spend and the summed midair
         // relaunch spends of the CURRENT flight - the landing pays from both.
         bool flightOpen;
         float flightFirstSpend;
         float flightMidairSpend;
+        float flightStartEnergy;   // the tank BEFORE the first launch - the payout base's hard cap
+        float groundedSettleTimer; // grounded time with an open ledger - closes it unpaid
+
+        [Tooltip("A flight resting on the ground this long WITHOUT a registered crash closes its ledger unpaid - shallow swallowed landings can then never defer their spends onto a later (wall) crash, so walls pay exactly like platforms.")]
+        public float flightSettleSeconds = 0.25f;
 
         // Safety recharge state.
         bool safetyActive;
@@ -289,9 +294,23 @@ namespace KineticEnergy.Level
             if (controller.IsGrounded && !controller.HasLaunched)
             {
                 // However the flight ended, standing still means it is over: the chain
-                // freeze thaws and E/F's flight bookkeeping closes unpaid.
+                // freeze thaws and the flight bookkeeping closes unpaid.
                 chainInFlight = false;
                 flightOpen = false;
+            }
+
+            // Shallow landings the crash pipeline SWALLOWS leave hasLaunched set, dodging
+            // the thaw above - their ledgers used to stay open, deferring several
+            // launches' spends onto the next wall crash (which then paid a huge backlog
+            // where a platform paid nothing). Resting on the ground with an open ledger
+            // for a settle moment closes it unpaid: every registered crash - wall or
+            // platform alike - can only ever pay its OWN flight.
+            if (flightOpen && controller.IsGrounded) groundedSettleTimer += Time.unscaledDeltaTime;
+            else groundedSettleTimer = 0f;
+            if (groundedSettleTimer >= Mathf.Max(flightSettleSeconds, 0.05f))
+            {
+                flightOpen = false;
+                groundedSettleTimer = 0f;
             }
 
             if (windowRemaining > 0f && !chainInFlight)
@@ -371,6 +390,20 @@ namespace KineticEnergy.Level
                 flightOpen = true;
                 flightFirstSpend = controller.LastLaunchEnergySpent;
                 flightMidairSpend = 0f;
+                // The tank as it stood BEFORE this launch's spend came out - mid-flight
+                // income (pound boost, refunds re-spent on relaunches) can push the
+                // summed spends past it, and the payout must never reward more than the
+                // energy the flight actually started with (direct diagnosis).
+                flightStartEnergy = Mathf.Min(controller.EnergyFraction + controller.LastLaunchEnergySpent, 1f);
+
+                // A flight opened while NOT grounded (stuck on a wall or another object,
+                // or genuinely midair) treats the recharge baseline as its minimum stake:
+                // the payout cap is floored at the variant's regen ceiling, while a
+                // grounded launch with a fuller tank keeps its real (higher) value.
+                if (!controller.IsGrounded)
+                {
+                    flightStartEnergy = Mathf.Max(flightStartEnergy, ActiveSafetyCeiling);
+                }
 
                 // The no-self-hop rule keys on the FLIGHT'S takeoff object, captured only
                 // when the flight opens FROM a surface. Midair relaunches must never
@@ -408,35 +441,54 @@ namespace KineticEnergy.Level
                 return;
             }
 
-            // E/F: the landing's WHOLE payout is computed here, from both of the
-            // flight's launch types. The base parts respect the 80% ordinary ceiling
-            // exactly like the pipeline would; the combo-driven parts on top are boost
-            // (they may pass the ceiling) and follow the variant's extra rules.
-            if (DualRefundMode)
+            // C/D and E are the SOLE payers of landing refunds. The zeroed multipliers
+            // silence the ordinary pipeline, but the POUND WASH pays through its own
+            // branch regardless - so whatever the pipeline actually paid for this crash
+            // is taken back first, or pound-ending flights double-paid (wash + flight
+            // sum) on every surface.
+            if ((DualRefundMode || TotalLossMode) && controller.LastCrashRefund > 0f)
+            {
+                controller.AddEnergy(-controller.LastCrashRefund);
+            }
+
+            // C/D: the landing's WHOLE payout is computed here, from both of the
+            // flight's launch types - only for a genuinely OPEN flight ledger (a crash
+            // arriving after the ledger settled closed pays nothing). The base parts
+            // respect the 80% ordinary ceiling exactly like the pipeline would; the
+            // combo-driven parts on top are boost and follow the variant's extra rules.
+            if (DualRefundMode && flightOpen)
             {
                 float m1 = Mathf.Min(firstLaunchBaseRefund + firstLaunchStepPerLevel * comboCount, comboMaxMultiplier);
                 float m2 = Mathf.Min(midairLaunchBaseRefund + midairLaunchStepPerLevel * comboCount, comboMaxMultiplier);
 
-                float baseGain = flightFirstSpend * firstLaunchBaseRefund + flightMidairSpend * midairLaunchBaseRefund;
+                // The payout base caps at the tank the flight STARTED with - spends
+                // funded by mid-flight income scale both parts down proportionally.
+                float rawTotal = flightFirstSpend + flightMidairSpend;
+                float spendScale = rawTotal > flightStartEnergy && rawTotal > 0.0001f ? flightStartEnergy / rawTotal : 1f;
+                float firstSpend = flightFirstSpend * spendScale;
+                float midairSpend = flightMidairSpend * spendScale;
+
+                float baseGain = firstSpend * firstLaunchBaseRefund + midairSpend * midairLaunchBaseRefund;
                 float baseHeadroom = Mathf.Max(PremiumBoundary - controller.EnergyFraction, 0f);
                 controller.AddEnergy(Mathf.Min(baseGain, baseHeadroom));
 
-                float extraGain = flightFirstSpend * (m1 - firstLaunchBaseRefund)
-                    + flightMidairSpend * (m2 - midairLaunchBaseRefund);
+                float extraGain = firstSpend * (m1 - firstLaunchBaseRefund)
+                    + midairSpend * (m2 - midairLaunchBaseRefund);
                 if (extraGain > 0f)
                 {
                     controller.AddEnergy(extraGain);
                     comboExtra = BankedMode ? 0f : Mathf.Min(extraGain, controller.EnergyFraction);
                 }
             }
-            else if (TotalLossMode)
+            else if (TotalLossMode && flightOpen)
             {
                 // E: the WHOLE flight pays as one sum - (first launch + midair
                 // relaunches) times E's combo multiplier (direct request). Base part
                 // ceiling-capped exactly like the pipeline; the combo-driven part on
                 // top is boost and may pass the ceiling.
                 float m = NextMultiplier;
-                float totalSpend = flightFirstSpend + flightMidairSpend;
+                // Capped at the tank the flight started with, same rule as C/D.
+                float totalSpend = Mathf.Min(flightFirstSpend + flightMidairSpend, flightStartEnergy);
                 float baseGain = totalSpend * totalLossBaseRefund;
                 float baseHeadroom = Mathf.Max(PremiumBoundary - controller.EnergyFraction, 0f);
                 controller.AddEnergy(Mathf.Min(baseGain, baseHeadroom));
