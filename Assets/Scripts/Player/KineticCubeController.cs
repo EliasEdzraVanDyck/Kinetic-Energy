@@ -227,6 +227,10 @@ namespace KineticEnergy.Player
         public float dialStickRate = 0.5f;
         [Tooltip("Charge added/removed per mouse-wheel notch during the midair aim.")]
         public float dialWheelStep = 0.05f;
+        [Tooltip("Multiplies the GAMEPAD dial rate (stick and bumpers) during the MIDAIR aim only - the wheel and the grounded dial are untouched. 1.2 = 20% faster charging on a controller.")]
+        public float gamepadMidairDialRateMultiplier = 1.2f;
+        [Tooltip("How quickly the GAMEPAD midair dial accelerates while held in one direction (1 = rate doubles after one second, 0 = flat rate). Flipping direction drops straight back to the base speed. Replaces the shared Charge Acceleration for this input only.")]
+        public float gamepadMidairDialAcceleration = 1f;
 
         [Header("Landing Preview")]
         public int maxPredictionSteps = 3000;
@@ -1274,6 +1278,10 @@ namespace KineticEnergy.Player
             // the longer it keeps moving in one direction, and FLIPPING between adding and
             // removing resets the ramp - so lowering energy also lowers faster over time.
             float dialDelta = 0f;
+            // The gamepad dial charges faster than the wheel here (direct request) - the
+            // stick/bumper rate only, midair only - and accelerates on its OWN curve.
+            float padDialRate = dialStickRate * gamepadMidairDialRateMultiplier;
+            bool dialIsGamepad = false;
             if (FreeLookAimActive || bumperEnergyDial)
             {
                 // E/F (or the control lab's bumper scheme): RB adds energy, LB removes it.
@@ -1281,7 +1289,11 @@ namespace KineticEnergy.Player
                 {
                     float bumpers = (Gamepad.current.rightShoulder.isPressed ? 1f : 0f)
                         - (Gamepad.current.leftShoulder.isPressed ? 1f : 0f);
-                    if (bumpers != 0f) dialDelta += bumpers * dialStickRate * maxChargeTime * Time.unscaledDeltaTime;
+                    if (bumpers != 0f)
+                    {
+                        dialDelta += bumpers * padDialRate * maxChargeTime * Time.unscaledDeltaTime;
+                        dialIsGamepad = true;
+                    }
                 }
             }
             else
@@ -1289,7 +1301,8 @@ namespace KineticEnergy.Player
                 float stickY = GamepadLookValue().y;
                 if (Mathf.Abs(stickY) > 0.5f)
                 {
-                    dialDelta += Mathf.Sign(stickY) * dialStickRate * maxChargeTime * Time.unscaledDeltaTime;
+                    dialDelta += Mathf.Sign(stickY) * padDialRate * maxChargeTime * Time.unscaledDeltaTime;
+                    dialIsGamepad = true;
                 }
             }
             if (Mouse.current != null)
@@ -1306,7 +1319,13 @@ namespace KineticEnergy.Player
                     dialRampDirection = dialDirection;
                 }
                 dialRampSeconds += Time.unscaledDeltaTime;
-                chargeTime = Mathf.Clamp(chargeTime + dialDelta * ChargeRateRamp(dialRampSeconds),
+                // The gamepad dial rides its own acceleration curve; the wheel keeps the
+                // shared one. Either way the ramp clock was reset above on a direction
+                // flip, so reversing always restarts at the base speed.
+                float dialRamp = dialIsGamepad
+                    ? 1f + dialRampSeconds * Mathf.Max(gamepadMidairDialAcceleration, 0f)
+                    : ChargeRateRamp(dialRampSeconds);
+                chargeTime = Mathf.Clamp(chargeTime + dialDelta * dialRamp,
                     0f, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
             }
 
