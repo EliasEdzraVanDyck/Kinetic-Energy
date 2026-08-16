@@ -899,6 +899,46 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: ComboMeter prefab created OK (width 503.6, circle aligns with the energy meter's left edge)");
         }
 
+        // Level1Aim1.1: the fully-free midair aim camera (cursor framing OFF - the view
+        // follows the raw aim 1:1) plus the grounded 60-65 degree edge-follow with its
+        // hard aim clamp. Additive; nothing else in the scene is touched.
+        [MenuItem("Tools/Kinetic Energy/Configure Level1Aim1.1 Camera")]
+        public static void ConfigureLevel1Aim11Camera()
+        {
+            const string aimScenePath = "Assets/Scenes/Level1Aim1.1.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(aimScenePath) == null)
+            {
+                throw new Exception("KineticEnergySetup: Level1Aim1.1.unity does not exist.");
+            }
+            EditorSceneManager.OpenScene(aimScenePath, OpenSceneMode.Single);
+
+            ThirdPersonOrbitCamera orbit = UnityEngine.Object.FindAnyObjectByType<ThirdPersonOrbitCamera>(FindObjectsInactive.Include);
+            if (orbit == null) throw new Exception("KineticEnergySetup: Level1Aim1.1 has no ThirdPersonOrbitCamera.");
+            orbit.trajectoryFramingEnabled = false;
+            EditorUtility.SetDirty(orbit);
+
+            KineticCubeController aimPlayer = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            if (aimPlayer == null) throw new Exception("KineticEnergySetup: Level1Aim1.1 has no Player.");
+            aimPlayer.groundedAimCameraFollow = true;
+            aimPlayer.groundedAimFollowThreshold = 60f;
+            aimPlayer.groundedAimFollowBand = 5f;
+            aimPlayer.groundedAimFollowSpeed = 45f;
+            EditorUtility.SetDirty(aimPlayer);
+
+            // MOMENTUM stays ON (direct request) - the carry now REDIRECTS the brought
+            // speed along the aim (KineticCubeController), so the reach is uniform in
+            // all 360 degrees while the momentum is kept.
+            var aimMerged = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
+            if (aimMerged != null)
+            {
+                aimMerged.momentumLaunches = true;
+                EditorUtility.SetDirty(aimMerged);
+            }
+
+            SaveOpenScene(aimScenePath);
+            Debug.Log("KineticEnergySetup: Level1Aim1.1 camera configured OK (framing off, grounded 60-65 follow on)");
+        }
+
         // The two Level-1-derived merged-economy test scenes (Level1Economy and the
         // user-made Level1Challenge copy): tag hidden, combo meter raised to sit ~5px
         // under the premium meter's tall blocks. Also restores Level8's challenge tag,

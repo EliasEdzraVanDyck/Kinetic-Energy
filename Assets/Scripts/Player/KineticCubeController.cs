@@ -1331,7 +1331,13 @@ namespace KineticEnergy.Player
             // falling through the aim and the preview accounts for that live velocity.
             // The MOMENTUM option additionally carries the velocity the cube had when the
             // aim opened - included here so the cursor stays honest about it.
-            Vector3 momentumCarry = addPreAimVelocityToLaunch ? preAirAimVelocity : Vector3.zero;
+            // The momentum carry keeps the SPEED brought into the aim but follows the
+            // AIM direction - vector-adding the old heading made the reach direction-
+            // dependent (far with the carry, near-dead against it), so a redirected
+            // carry gives the same boost in all 360 degrees.
+            Vector3 momentumCarry = addPreAimVelocityToLaunch
+                ? direction.normalized * preAirAimVelocity.magnitude
+                : Vector3.zero;
             momentumCarry += WallMomentumCarry(direction); // wall-opened aims carry the synthesized stake
             ShowLandingPreview(rb.linearVelocity + momentumCarry + direction * force / rb.mass, damping);
 
@@ -1346,10 +1352,12 @@ namespace KineticEnergy.Player
             {
                 chargeTime = fireFraction * maxChargeTime; // pay exactly for what fires
                 QueueLaunch(direction, force, damping);
-                // Momentum option: the flight resumes the velocity carried INTO the aim,
-                // with the impulse stacking on top at the physics tick - exactly the sum
-                // the preview above showed.
-                if (addPreAimVelocityToLaunch) rb.linearVelocity += preAirAimVelocity;
+                // Momentum option: the SPEED carried into the aim, REDIRECTED along the
+                // fire direction (see the preview above - the same sum it showed).
+                if (addPreAimVelocityToLaunch)
+                {
+                    rb.linearVelocity += direction.normalized * preAirAimVelocity.magnitude;
+                }
                 exactFlightNoNudge = true; // the shot follows the predicted line exactly
                 MidairAimFired?.Invoke(fireFraction, lastPredictedLanding);
                 suppressAimReleasedEvent = true;

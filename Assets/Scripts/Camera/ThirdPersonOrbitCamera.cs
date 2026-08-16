@@ -161,6 +161,8 @@ namespace KineticEnergy.Camera
         // arcs over and lands far BELOW you, can't drag the view down and read as an
         // upward pitch cap (direct report, twice).
         public float framingMaxDeviation = 45f;
+        [Tooltip("Cursor framing during midair aims: the view centres the landing cursor when it's near the aim. OFF = the view follows the raw aim 1:1, fully free (the aim-lab scenes) - the aim can then never outrun the view.")]
+        public bool trajectoryFramingEnabled = true;
         [Tooltip("Fully cursor-framed while the cursor is within this many degrees of the aim; from here to Framing Max Deviation the view BLENDS gradually back to the raw aim instead of switching at the edge (the hard edge made steep low-energy up-aims rotate abruptly - direct report).")]
         public float framingBlendStartDegrees = 25f;
         [Tooltip("How fast the framing blend weight may change per second (1 = a full handover takes a second). The TIME smoothing is what keeps the blend jitter-free: landing-prediction wobble can no longer whip the blend within a frame.")]
@@ -842,6 +844,19 @@ namespace KineticEnergy.Camera
         // frame, BEFORE the position solve, so position and rotation always agree.
         void UpdateFirstPersonViewAngles()
         {
+            // Framing disabled: the view IS the raw aim, every frame, no chase - the
+            // fully-free midair camera (the aim visuals can never appear to stop while
+            // the view keeps moving, because the two are the same angles).
+            if (!trajectoryFramingEnabled)
+            {
+                viewYaw = yaw;
+                viewPitch = pitch;
+                viewAnglesSeeded = true;
+                framingJustStarted = false;
+                framedWeightCurrent = 0f;
+                return;
+            }
+
             float targetYaw = yaw;
             float targetPitch = pitch;
             // Framed from the PLAYER's position, never the camera's own: the camera
