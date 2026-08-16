@@ -19,9 +19,11 @@ namespace KineticEnergy.UI
         public GameObject pausePanel;
         public GameObject controlsPanel;
         public GameObject scenesPanel;
+        public GameObject cameraSettingsPanel;
         public GameObject firstPauseButton;
         public GameObject firstControlsButton;
         public GameObject firstScenesButton;
+        public GameObject firstCameraSettingsButton;
 
         [Header("Corner Hint (wired by setup)")]
         // The top-left "Open the pause menu ..." label - pointless while the menu is
@@ -82,6 +84,7 @@ namespace KineticEnergy.UI
             pausePanel?.SetActive(false);
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
+            cameraSettingsPanel?.SetActive(false);
             winLabel?.gameObject.SetActive(false);
 
             // Everything that should vanish while the menu is open: the prefab's wired
@@ -161,6 +164,7 @@ namespace KineticEnergy.UI
             isPaused = true;
             Time.timeScale = 0f;
             controlsPanel?.SetActive(false);
+            cameraSettingsPanel?.SetActive(false);
             pausePanel?.SetActive(true);
             SetHintsVisible(false);
             RefreshCameraVariantLabel();
@@ -175,6 +179,7 @@ namespace KineticEnergy.UI
             pausePanel?.SetActive(false);
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
+            cameraSettingsPanel?.SetActive(false);
             SetHintsVisible(true);
             // Un-pausing after winning keeps playing in the finished level, which is fine - but
             // the win label shouldn't stick around on the NEXT pause after that.
@@ -254,6 +259,22 @@ namespace KineticEnergy.UI
             {
                 cameraVariantEnergyNote.text = variants.EnergyControlsNote;
             }
+        }
+
+        // The camera-settings sub-screen (the speed sliders), same in/out pattern as the
+        // Controls and Scenes panels.
+        public void OnCameraSettingsClicked()
+        {
+            pausePanel?.SetActive(false);
+            cameraSettingsPanel?.SetActive(true);
+            Select(firstCameraSettingsButton);
+        }
+
+        public void OnCameraSettingsBackClicked()
+        {
+            cameraSettingsPanel?.SetActive(false);
+            pausePanel?.SetActive(true);
+            Select(firstPauseButton);
         }
 
         public void OnScenesClicked()

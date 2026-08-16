@@ -617,10 +617,24 @@ namespace KineticEnergy.Camera
 
             // Keyboard & mouse speed scaling (direct feedback: mouse camera too fast outside
             // aiming, slightly too fast while aiming) - gamepad sticks pass through at 1.
+            // The pause menu's per-device speed sliders multiply EVERY form of camera
+            // speed that device drives, so the whole camera scales as one.
             float deviceSpeedScale = 1f;
-            if (lookIsMouseDriven) deviceSpeedScale = firstPerson ? mouseAimSpeedMultiplier : mouseOrbitSpeedMultiplier;
-            else if (aimStickOverrideActive && aimStickOverrideKeyboard) deviceSpeedScale = wasdAimCameraSpeedMultiplier;
-            else deviceSpeedScale = playerGrounded ? gamepadGroundedSpeedMultiplier : gamepadAirborneSpeedMultiplier;
+            if (lookIsMouseDriven)
+            {
+                deviceSpeedScale = (firstPerson ? mouseAimSpeedMultiplier : mouseOrbitSpeedMultiplier)
+                    * KineticEnergy.UI.CameraSpeedSettings.MouseScale;
+            }
+            else if (aimStickOverrideActive && aimStickOverrideKeyboard)
+            {
+                // Keyboard WASD belongs to the mouse-and-keyboard slider.
+                deviceSpeedScale = wasdAimCameraSpeedMultiplier * KineticEnergy.UI.CameraSpeedSettings.MouseScale;
+            }
+            else
+            {
+                deviceSpeedScale = (playerGrounded ? gamepadGroundedSpeedMultiplier : gamepadAirborneSpeedMultiplier)
+                    * KineticEnergy.UI.CameraSpeedSettings.GamepadScale;
+            }
 
             // Manual input always wins outright, the instant there is any - recentering only
             // ever happens while the player isn't already telling the camera what to do.

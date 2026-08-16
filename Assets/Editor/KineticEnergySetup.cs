@@ -899,6 +899,185 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: ComboMeter prefab created OK (width 503.6, circle aligns with the energy meter's left edge)");
         }
 
+        // ADDITIVE: a CAMERA SETTINGS sub-screen (title, the two speed sliders, a Back
+        // button) reached from a new pause-menu button - the same panel pattern the
+        // Controls and Scenes screens use. Sliders run 50-150% in 5% steps, draggable
+        // with the mouse or adjustable with the left stick while selected.
+        [MenuItem("Tools/Kinetic Energy/Add Camera Settings Screen To Pause Menu")]
+        public static void AddCameraSpeedSlidersToPauseMenu()
+        {
+            string pausePath = PrefabFolder + "/PauseSystem.prefab";
+            GameObject pauseRoot = PrefabUtility.LoadPrefabContents(pausePath);
+            try
+            {
+                Transform pauseCanvas = pauseRoot.transform.Find("PauseCanvas");
+                Transform pausePanel = pauseCanvas != null ? pauseCanvas.Find("PausePanel") : null;
+                PauseController pauseController = pauseRoot.GetComponentInChildren<PauseController>(true);
+                if (pauseCanvas == null || pausePanel == null || pauseController == null)
+                {
+                    throw new Exception("KineticEnergySetup: PauseSystem.prefab is missing PauseCanvas/PausePanel or PauseController.");
+                }
+
+                // Clear the earlier inline block and any previous run's screen.
+                DestroyDirectChildIfExists(pausePanel, "CameraSpeedSliders");
+                DestroyDirectChildIfExists(pausePanel, "CameraSettingsButton");
+                DestroyDirectChildIfExists(pauseCanvas, "CameraSettingsPanel");
+
+                Font font = FindBestFont();
+                Color accent = new Color(1f, 0.82f, 0.2f);
+
+                // The sub-screen itself - same full-panel backdrop as the other screens.
+                GameObject panel = CreatePanel("CameraSettingsPanel", pauseCanvas, new Color(0.05f, 0.06f, 0.08f, 0.96f));
+
+                Text title = CreateText("CameraSettingsTitle", panel.transform, "CAMERA SETTINGS",
+                    font, 48, new Vector2(0f, 260f), new Vector2(900f, 70f));
+                title.alignment = TextAnchor.MiddleCenter;
+
+                Text subtitle = CreateText("CameraSettingsSubtitle", panel.transform,
+                    "Speed multipliers applied to every camera movement, per device.",
+                    font, 20, new Vector2(0f, 205f), new Vector2(900f, 32f));
+                subtitle.alignment = TextAnchor.MiddleCenter;
+                subtitle.color = new Color(1f, 1f, 1f, 0.7f);
+
+                BuildCameraSpeedSlider(panel.transform, "MouseCameraSpeedSlider", "Mouse & keyboard",
+                    false, new Vector2(0f, 90f), font);
+                BuildCameraSpeedSlider(panel.transform, "GamepadCameraSpeedSlider", "Controller",
+                    true, new Vector2(0f, 0f), font);
+
+                Text hint = CreateText("CameraSettingsHint", panel.transform,
+                    "Drag with the mouse, or select a bar and push the left stick left/right.\n50% - 150%, in 5% steps. The selected bar is highlighted.",
+                    font, 19, new Vector2(0f, -90f), new Vector2(900f, 60f));
+                hint.alignment = TextAnchor.MiddleCenter;
+                hint.color = new Color(1f, 1f, 1f, 0.6f);
+
+                GameObject backButton = CreateButton("CameraSettingsBackButton", panel.transform, "Back",
+                    font, accent, new Vector2(0f, -200f), new Vector2(300f, 70f));
+                WireButton(backButton, pauseController.OnCameraSettingsBackClicked);
+
+                panel.SetActive(false);
+                pauseController.cameraSettingsPanel = panel;
+                pauseController.firstCameraSettingsButton = backButton;
+
+                // ...and the way in, on the pause panel itself.
+                GameObject openButton = CreateButton("CameraSettingsButton", pausePanel, "Camera Settings",
+                    font, accent, new Vector2(0f, -190f), new Vector2(300f, 70f));
+                WireButton(openButton, pauseController.OnCameraSettingsClicked);
+                LayOutPausePanelButtons(pausePanel);
+                EditorUtility.SetDirty(pauseController);
+
+                PrefabUtility.SaveAsPrefabAsset(pauseRoot, pausePath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(pauseRoot); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: camera settings screen added to the pause menu OK");
+        }
+
+        // The pause panel's button column, top to bottom, on an even 90px rhythm centred
+        // where the old six-button stack sat (midpoint y = -40). Camera Settings goes
+        // directly ABOVE Controls.
+        static void LayOutPausePanelButtons(Transform pausePanel)
+        {
+            string[] order =
+            {
+                "ResumeButton", "RestartButton", "FeedbackButton",
+                "CameraSettingsButton", "ControlsButton", "QuitButton", "MainMenuButton",
+            };
+            const float spacing = 90f;
+            float top = -40f + (order.Length - 1) * spacing * 0.5f; // 230 for 7 buttons
+            for (int i = 0; i < order.Length; i++)
+            {
+                Transform button = pausePanel.Find(order[i]);
+                if (button == null) continue;
+                RectTransform rect = button.GetComponent<RectTransform>();
+                rect.anchoredPosition = new Vector2(0f, top - i * spacing);
+            }
+        }
+
+        // One labelled slider row: name on the left, bar beneath it, percentage on the
+        // right. Whole-number 10..30 range (5% per step) is configured by the component.
+        static void BuildCameraSpeedSlider(Transform parent, string name, string label, bool gamepadSlider, Vector2 anchoredPosition, Font font)
+        {
+            GameObject row = new GameObject(name + "Row", typeof(RectTransform));
+            row.transform.SetParent(parent, false);
+            RectTransform rowRect = row.GetComponent<RectTransform>();
+            rowRect.anchorMin = new Vector2(0.5f, 0.5f);
+            rowRect.anchorMax = new Vector2(0.5f, 0.5f);
+            rowRect.pivot = new Vector2(0.5f, 0.5f);
+            rowRect.anchoredPosition = anchoredPosition;
+            rowRect.sizeDelta = new Vector2(460f, 60f);
+
+            Text nameLabel = CreateText(name + "Name", row.transform, label, font, 20,
+                new Vector2(-60f, 18f), new Vector2(340f, 26f));
+            nameLabel.alignment = TextAnchor.MiddleLeft;
+
+            Text valueLabel = CreateText(name + "Value", row.transform, "100%", font, 20,
+                new Vector2(190f, 18f), new Vector2(80f, 26f));
+            valueLabel.alignment = TextAnchor.MiddleRight;
+
+            // The slider itself: background, fill, handle - the standard Unity layout.
+            GameObject sliderGo = new GameObject(name, typeof(RectTransform));
+            sliderGo.transform.SetParent(row.transform, false);
+            RectTransform sliderRect = sliderGo.GetComponent<RectTransform>();
+            sliderRect.anchorMin = new Vector2(0.5f, 0.5f);
+            sliderRect.anchorMax = new Vector2(0.5f, 0.5f);
+            sliderRect.pivot = new Vector2(0.5f, 0.5f);
+            sliderRect.anchoredPosition = new Vector2(0f, -12f);
+            sliderRect.sizeDelta = new Vector2(440f, 22f);
+
+            GameObject background = CreateSliderImage("Background", sliderGo.transform, new Color(0f, 0f, 0f, 0.55f));
+            RectTransform backgroundRect = background.GetComponent<RectTransform>();
+            backgroundRect.anchorMin = new Vector2(0f, 0.25f);
+            backgroundRect.anchorMax = new Vector2(1f, 0.75f);
+            backgroundRect.offsetMin = Vector2.zero;
+            backgroundRect.offsetMax = Vector2.zero;
+
+            GameObject fillArea = new GameObject("Fill Area", typeof(RectTransform));
+            fillArea.transform.SetParent(sliderGo.transform, false);
+            RectTransform fillAreaRect = fillArea.GetComponent<RectTransform>();
+            fillAreaRect.anchorMin = new Vector2(0f, 0.25f);
+            fillAreaRect.anchorMax = new Vector2(1f, 0.75f);
+            fillAreaRect.offsetMin = new Vector2(10f, 0f);
+            fillAreaRect.offsetMax = new Vector2(-10f, 0f);
+            GameObject fill = CreateSliderImage("Fill", fillArea.transform, new Color(1f, 1f, 1f, 0.75f));
+            RectTransform fillRect = fill.GetComponent<RectTransform>();
+            fillRect.anchorMin = Vector2.zero;
+            fillRect.anchorMax = new Vector2(0f, 1f);
+            fillRect.sizeDelta = new Vector2(20f, 0f);
+
+            GameObject handleArea = new GameObject("Handle Slide Area", typeof(RectTransform));
+            handleArea.transform.SetParent(sliderGo.transform, false);
+            RectTransform handleAreaRect = handleArea.GetComponent<RectTransform>();
+            handleAreaRect.anchorMin = new Vector2(0f, 0f);
+            handleAreaRect.anchorMax = new Vector2(1f, 1f);
+            handleAreaRect.offsetMin = new Vector2(10f, 0f);
+            handleAreaRect.offsetMax = new Vector2(-10f, 0f);
+            GameObject handle = CreateSliderImage("Handle", handleArea.transform, new Color(1f, 1f, 1f, 0.9f));
+            RectTransform handleRect = handle.GetComponent<RectTransform>();
+            handleRect.sizeDelta = new Vector2(22f, 30f);
+
+            Slider slider = sliderGo.AddComponent<Slider>();
+            slider.fillRect = fillRect;
+            slider.handleRect = handleRect;
+            slider.targetGraphic = handle.GetComponent<Image>();
+            slider.direction = Slider.Direction.LeftToRight;
+            slider.transition = Selectable.Transition.None; // the tint script owns the colours
+
+            CameraSpeedSlider speedSlider = sliderGo.AddComponent<CameraSpeedSlider>();
+            speedSlider.gamepadSlider = gamepadSlider;
+            speedSlider.valueLabel = valueLabel;
+            speedSlider.nameLabel = nameLabel;
+            speedSlider.fillImage = fill.GetComponent<Image>();
+            speedSlider.handleImage = handle.GetComponent<Image>();
+        }
+
+        static GameObject CreateSliderImage(string name, Transform parent, Color color)
+        {
+            GameObject go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            go.AddComponent<Image>().color = color;
+            return go;
+        }
+
         // Grows the aim trail's dot POOL to 100 (long arcs were running out of dots and
         // ending short) and widens the spacing by 20%. The pool is a fixed array of
         // Transforms on the Player prefab, so both are prefab edits; extra dots are
