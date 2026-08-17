@@ -2365,6 +2365,12 @@ namespace KineticEnergy.Player
         // economy harness leaves those to the pound pipeline (wash + windowed boost).
         public bool LastCrashWasPound { get; private set; }
 
+        // The velocity the player carried INTO the collision being resolved right now -
+        // captured before the physics step, so it is the honest approach vector. Read by
+        // anything that has to judge HOW the player arrived rather than merely that they
+        // did (the checkpoint button's steepness test).
+        public Vector3 PreCollisionVelocity => velocityBeforePhysicsStep;
+
         void RegisterCrash(Vector3 contactNormal, float crashSpeed, Collider surface)
         {
             // A NonStickSurface never registers as a crash at all - no freeze, no refund;

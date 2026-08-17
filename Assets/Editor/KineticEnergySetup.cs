@@ -2219,25 +2219,102 @@ namespace KineticEnergy.EditorSetup
         // The checkpoint pad: a blue see-through slab that hovers over a section's platform.
         // Sized per instance (90% of its platform in x/z, 0.5 tall), so the prefab is a
         // plain unit cube trigger.
+        // Converts the checkpoint from a pass-through trigger into a physical BUTTON, and
+        // does it by editing the existing prefab IN PLACE. That matters: recreating the
+        // asset gives every object inside it new ids, and each placed checkpoint's
+        // overrides - its name, position, scale and respawn target - are bound to those
+        // ids. Rebuilding the prefab silently reset all fourteen placed checkpoints to
+        // defaults. Keeping the ROOT (and its Checkpoint component) untouched keeps every
+        // override bound; only children are added around it.
         [MenuItem("Tools/Kinetic Energy/Create Checkpoint Prefab")]
         public static void CreateCheckpointPrefab()
         {
             string path = PrefabFolder + "/Checkpoint.prefab";
-            Material checkpointMat = MakeTransparentMaterial("CheckpointMaterial", new Color(0.25f, 0.55f, 1f, 0.35f));
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) == null)
+            {
+                GameObject seed = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                seed.name = "Checkpoint";
+                seed.AddComponent<Checkpoint>();
+                PrefabUtility.SaveAsPrefabAsset(seed, path);
+                UnityEngine.Object.DestroyImmediate(seed);
+            }
 
-            GameObject pad = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            pad.name = "Checkpoint";
-            pad.GetComponent<Renderer>().sharedMaterial = checkpointMat;
-            pad.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            BoxCollider trigger = pad.GetComponent<BoxCollider>();
-            trigger.isTrigger = true; // a pad you pass THROUGH, never something you land on
-            pad.AddComponent<Checkpoint>();
+            Material frameMat = MakeMaterial("CheckpointFrameMaterial", new Color(0.30f, 0.32f, 0.38f));
+            Material buttonMat = MakeMaterial("CheckpointButtonMaterial", new Color(0.25f, 0.55f, 1f));
 
-            PrefabUtility.SaveAsPrefabAsset(pad, path);
-            UnityEngine.Object.DestroyImmediate(pad);
+            GameObject root = PrefabUtility.LoadPrefabContents(path);
+            try
+            {
+                // The ROOT becomes the frame: the surround the button is set into. Solid
+                // now - the assembly is landed on rather than passed through.
+                Collider rootCollider = root.GetComponent<Collider>();
+                if (rootCollider != null) rootCollider.isTrigger = false;
+                Renderer rootRenderer = root.GetComponent<Renderer>();
+                if (rootRenderer != null) rootRenderer.sharedMaterial = frameMat;
+
+                // Child collisions report through the body on the root, which is how the
+                // component hears the button being struck.
+                Rigidbody body = root.GetComponent<Rigidbody>();
+                if (body == null) body = root.AddComponent<Rigidbody>();
+                body.isKinematic = true;
+                body.useGravity = false;
+
+                Transform existingButton = root.transform.Find("Button");
+                if (existingButton != null) UnityEngine.Object.DestroyImmediate(existingButton.gameObject);
+
+                // The pressable face, standing proud of the frame so its travel reads.
+                GameObject button = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                button.name = "Button";
+                button.transform.SetParent(root.transform, false);
+                button.transform.localPosition = new Vector3(0f, 0.6f, 0f);
+                button.transform.localScale = new Vector3(0.6f, 1.2f, 0.6f);
+                button.GetComponent<Renderer>().sharedMaterial = buttonMat;
+
+                Checkpoint checkpoint = root.GetComponent<Checkpoint>();
+                if (checkpoint == null) checkpoint = root.AddComponent<Checkpoint>();
+                checkpoint.buttonVisual = button.transform;
+                checkpoint.buttonRenderer = button.GetComponent<Renderer>();
+                checkpoint.buttonCollider = button.GetComponent<Collider>();
+                checkpoint.pressDepth = 0.9f; // local units - the button sinks flush into the frame
+
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+
             AssetDatabase.SaveAssets();
-            Debug.Log("KineticEnergySetup: Checkpoint prefab created OK");
+            Debug.Log("KineticEnergySetup: Checkpoint button prefab updated in place OK");
         }
+
+        // Diagnostic: reports every checkpoint's wiring in both element scenes. Changes nothing.
+        [MenuItem("Tools/Kinetic Energy/Validate Checkpoints")]
+        public static void ValidateCheckpoints()
+        {
+            foreach (string scenePath in new[]
+            {
+                "Assets/Scenes/LevelElementsTest.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                foreach (Checkpoint cp in UnityEngine.Object.FindObjectsByType<Checkpoint>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    Transform root = cp.transform.parent != null ? cp.transform.parent : cp.transform;
+                    Debug.Log("CPCHECK " + System.IO.Path.GetFileNameWithoutExtension(scenePath)
+                        + " root=" + root.name
+                        + " onObject=" + cp.name
+                        + " respawn=" + (cp.respawnPoint != null ? cp.respawnPoint.name : "NULL")
+                        + " buttonVisual=" + (cp.buttonVisual != null ? cp.buttonVisual.name : "NULL")
+                        + " renderer=" + (cp.buttonRenderer != null ? "OK" : "NULL")
+                        + " collider=" + (cp.GetComponent<Collider>() != null ? "OK" : "NULL")
+                        + " frameSibling=" + (root.Find("Frame") != null ? "OK" : "NULL")
+                        + " worldScale=" + root.lossyScale);
+                }
+            }
+        }
+
+        // No instance swap is needed: the prefab is edited in place, so every placed
+        // checkpoint inherits the button automatically and keeps its own placement.
 
         const float DamageShellThickness = 0.5f;
 

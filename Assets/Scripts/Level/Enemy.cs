@@ -260,6 +260,15 @@ namespace KineticEnergy.Level
             {
                 case EnemyState.Wandering:
                     if (dodgePlayerLaunches && ShouldDodge()) { BeginDodge(); break; }
+                    // The punish window is a genuine opening: while vulnerable the enemy
+                    // STANDS STILL - no wandering, no attacking (dodges are already blocked
+                    // elsewhere). Recovery (1s) is shorter than the window (up to the full
+                    // attack cooldown), so without this it strolled off mid-punish-window.
+                    if (vulnerableTimer > 0f)
+                    {
+                        MoveGrounded(body.position, dt); // gravity settle only, no travel
+                        break;
+                    }
                     if (MoveGrounded(WanderStep(dt), dt)) break;
                     if (cooldownRemaining <= 0f && PlayerIsAttackable()) BeginWindUp();
                     break;
