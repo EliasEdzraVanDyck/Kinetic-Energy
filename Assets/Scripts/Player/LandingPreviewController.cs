@@ -205,6 +205,12 @@ namespace KineticEnergy.Player
         bool LandingIsSuccessful(Collider landing, Vector3 normal)
         {
             if (landing == null) return false;
+            // An ENEMY is a TARGET, not a surface. Hitting one is the whole point, so it
+            // reads valid from any angle and on any face - the up-facing rule below would
+            // otherwise call a side-on hit a failed landing.
+            if (landing.GetComponentInParent<Enemy>() != null) return true;
+            if (landing.GetComponentInParent<FlyingEnemy>() != null) return true;
+            if (landing.GetComponentInParent<TurretEnemy>() != null) return true;
             if (landing.GetComponentInParent<DamageWalls>() != null) return false;
             if (landing.GetComponentInParent<DeathWall>() != null) return false;
             if (landing.GetComponentInParent<StickySurface>() != null) return true;

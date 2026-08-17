@@ -2051,7 +2051,10 @@ namespace KineticEnergy.Player
             Vector3 halfExtents = boxCollider != null
                 ? new Vector3(boxCollider.bounds.extents.x * 0.9f, 0.05f, boxCollider.bounds.extents.z * 0.9f)
                 : new Vector3(0.4f, 0.05f, 0.4f);
-            isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out RaycastHit groundHit, transform.rotation, groundCheckDistance);
+            // Triggers are never ground either - finish volumes and checkpoint pads sit
+            // right where the player stands, and standing ON one would be nonsense.
+            isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out RaycastHit groundHit,
+                transform.rotation, groundCheckDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
 
             // Standing on the ground with no flight in progress restores the per-flight
             // launch budget and the energy floor.

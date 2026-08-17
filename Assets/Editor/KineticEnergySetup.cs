@@ -1215,6 +1215,59 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: grounded charge ramp stamped OK (" + ramp + " in both aim scenes)");
         }
 
+        // SURGICAL: adds the damage edges to LevelElementsTest's turret and rotating walls
+        // and touches NOTHING else. The full setup rebuilds the whole course, which throws
+        // away hand-placed checkpoints and edited text - this is the safe way to add the
+        // shells to a scene that has since been worked on by hand.
+        [MenuItem("Tools/Kinetic Energy/Add Damage Edges To LevelElementsTest")]
+        public static void AddElementsDamageEdges()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest.unity", OpenSceneMode.Single);
+
+            // The existing damage material, loaded - never re-created, never restyled.
+            Material damageMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/DamageWallMaterial.mat");
+            if (damageMat == null) throw new Exception("KineticEnergySetup: DamageWallMaterial is missing.");
+
+            LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
+            Transform fallbackSpawn = sections != null && sections.sections.Length > 0 ? sections.sections[0].spawnPoint : null;
+
+            int shelled = 0;
+            // Rotating walls: the RIM only - both broad faces must stay landable, since the
+            // wall turns each of them round to meet you in turn.
+            foreach (RotatingWall wall in UnityEngine.Object.FindObjectsByType<RotatingWall>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                AddEdgeDamageShell(wall.transform, fallbackSpawn, damageMat);
+                shelled++;
+            }
+
+            // Turret walls: edges AND the back - only the mounted face stays landable.
+            foreach (string wallName in new[] { "TurretWallLeft", "TurretWallRight" })
+            {
+                GameObject wallGo = GameObject.Find(wallName);
+                if (wallGo == null) continue;
+                AddDamageShell(wallGo.transform, fallbackSpawn, damageMat);
+                shelled++;
+            }
+
+            // The new shells respawn the player, so the section index must know about them
+            // or a death on one would ignore the active checkpoint.
+            if (sections != null)
+            {
+                var hazards = new List<DamageWalls>(sections.hazards);
+                foreach (DamageWalls shell in UnityEngine.Object.FindObjectsByType<DamageWalls>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (!shell.name.StartsWith("DamageShell")) continue;
+                    if (!hazards.Contains(shell)) hazards.Add(shell);
+                }
+                sections.hazards = hazards.ToArray();
+                EditorUtility.SetDirty(sections);
+            }
+
+            EditorSceneManager.SaveOpenScenes();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: damage edges added OK (" + shelled + " walls shelled, nothing else touched)");
+        }
+
         // Diagnostic: opens LevelElementsTest and reports whether a working pause menu is
         // actually present and wired (object active, panels/buttons assigned, an
         // EventSystem to drive it). Changes nothing.
@@ -1418,10 +1471,14 @@ namespace KineticEnergy.EditorSetup
 
             // ---- 3. Rotating walls: sticky faces that keep turning away ----
             x = e2 + gap;
-            OpenSection("3 - Rotating walls", new Vector3(x, 8f, 0f));
+            Transform spinSpawn = OpenSection("3 - Rotating walls", new Vector3(x, 8f, 0f));
             e1 = x + lead; e2 = e1 + gap;
-            SpawnRotatingWall(tf, "SpinWall1", new Vector3(e1, 10f, -10f), 28f, 0f, wallMat);
-            SpawnRotatingWall(tf, "SpinWall2", new Vector3(e2, 12f, 8f), -36f, 90f, wallMat);
+            GameObject spinWall1 = SpawnRotatingWall(tf, "SpinWall1", new Vector3(e1, 10f, -10f), 28f, 0f, wallMat);
+            GameObject spinWall2 = SpawnRotatingWall(tf, "SpinWall2", new Vector3(e2, 12f, 8f), -36f, 90f, wallMat);
+            // Rim only - a spinning wall presents BOTH broad faces in turn, so both stay
+            // landable and it is the thin edges that punish a miss.
+            AddEdgeDamageShell(spinWall1.transform, spinSpawn, damageMat);
+            AddEdgeDamageShell(spinWall2.transform, spinSpawn, damageMat);
 
             // ---- 4. Lasers: timed gates over a straight runway ----
             x = e2 + gap;
@@ -1453,14 +1510,18 @@ namespace KineticEnergy.EditorSetup
 
             // ---- 7. Turrets: fixed guns covering the final corridor ----
             x = e2 + gap;
-            OpenSection("7 - Turrets", new Vector3(x, 10f, 0f));
+            Transform turretSpawn = OpenSection("7 - Turrets", new Vector3(x, 10f, 0f));
             e1 = x + lead; e2 = e1 + gap;
             CreateBlock(tf, "TurretRun1", new Vector3(e1, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
-            CreateBlock(tf, "TurretWallLeft", new Vector3(e1, 12f, -16f), new Vector3(20f, 16f, 2f), wallMat);
+            GameObject turretWallLeft = CreateBlock(tf, "TurretWallLeft", new Vector3(e1, 12f, -16f), new Vector3(20f, 16f, 2f), wallMat);
             SpawnTurret("ElementsTurret1", new Vector3(e1, 13f, -14.8f), new Vector3(-90f, 0f, 0f));
             CreateBlock(tf, "TurretRun2", new Vector3(e2, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
-            CreateBlock(tf, "TurretWallRight", new Vector3(e2, 12f, 16f), new Vector3(20f, 16f, 2f), wallMat);
+            GameObject turretWallRight = CreateBlock(tf, "TurretWallRight", new Vector3(e2, 12f, 16f), new Vector3(20f, 16f, 2f), wallMat);
             SpawnTurret("ElementsTurret2", new Vector3(e2, 13f, 14.8f), new Vector3(90f, 0f, 0f));
+            // Edges AND the back: only the face the turret is mounted on stays landable -
+            // the shell picks that face automatically as the one turned toward the course.
+            AddDamageShell(turretWallLeft.transform, turretSpawn, damageMat);
+            AddDamageShell(turretWallRight.transform, turretSpawn, damageMat);
 
             // ---- Finish ----
             x = e2 + gap;
@@ -1524,6 +1585,8 @@ namespace KineticEnergy.EditorSetup
 
             // The scene's own rule: a combo window that runs dry in the air drops you.
             economy.dropPlayerWhenWindowExpires = true;
+            // NOTE: introText / introKey are deliberately NOT written here. They are edited
+            // by hand in the scene, and stamping them on every re-run threw that work away.
             // Standing still below the 40% baseline ALWAYS refills you (while no combo
             // window is running). The recharge latches on below its trigger and fills to
             // its ceiling, so trigger == ceiling == the baseline turns it into a plain
@@ -1532,11 +1595,6 @@ namespace KineticEnergy.EditorSetup
             economy.safetyTriggerFraction = economy.safetyCeilingFraction;
             economy.dualSafetyTriggerFraction = economy.dualSafetyCeilingFraction;
             economy.totalLossSafetyTriggerFraction = economy.totalLossSafetyCeilingFraction;
-            economy.introText = LevelElementsInfoText;
-            // Its OWN intro key. The scene inherited "level1economy" from the copy, and the
-            // shown-once set is static and keyed by this string - so whichever of those
-            // scenes you entered first swallowed the other's explainer for the session.
-            economy.introKey = "levelelements";
             EditorUtility.SetDirty(economy);
 
             BuildSectionsScreen(pause, sectionController, sections);
@@ -1618,7 +1676,7 @@ namespace KineticEnergy.EditorSetup
 
         // A floating wall on a turntable: sticky, so its face holds you and carries you
         // round once you land on it.
-        static void SpawnRotatingWall(Transform parent, string name, Vector3 position, float degreesPerSecond, float startAngle, Material material)
+        static GameObject SpawnRotatingWall(Transform parent, string name, Vector3 position, float degreesPerSecond, float startAngle, Material material)
         {
             GameObject wall = CreateBlock(parent, name, position, new Vector3(14f, 12f, 2f), material);
             wall.AddComponent<StickySurface>();
@@ -1627,6 +1685,7 @@ namespace KineticEnergy.EditorSetup
             spin.startAngleOffset = startAngle;
             spin.spinAxis = Vector3.up;
             EditorUtility.SetDirty(spin);
+            return wall;
         }
 
         const string LevelElementsInfoText =
@@ -1767,6 +1826,51 @@ namespace KineticEnergy.EditorSetup
                     size[landingAxis] = 1f + outwardThickness;
                     size[otherAxis] = 1f + 2f * t[otherAxis];
                     CreateDamageSlab(platform, "DamageShell_" + axis + (sign > 0 ? "P" : "N"),
+                        position, size, respawnPoint, material);
+                }
+            }
+        }
+
+        // ONLY the narrow rim gets shells - both broad faces stay clear. A rotating wall
+        // turns either face round to meet you, so neither may be lethal; it is the thin
+        // edges that should punish a miss.
+        static void AddEdgeDamageShell(Transform platform, Transform respawnPoint, Material material)
+        {
+            for (int i = platform.childCount - 1; i >= 0; i--)
+            {
+                if (platform.GetChild(i).name.StartsWith("DamageShell"))
+                {
+                    UnityEngine.Object.DestroyImmediate(platform.GetChild(i).gameObject);
+                }
+            }
+
+            Vector3 scale = platform.localScale;
+            Vector3 t = new Vector3(
+                DamageShellThickness / Mathf.Max(Mathf.Abs(scale.x), 0.0001f),
+                DamageShellThickness / Mathf.Max(Mathf.Abs(scale.y), 0.0001f),
+                DamageShellThickness / Mathf.Max(Mathf.Abs(scale.z), 0.0001f));
+
+            // The THINNEST axis carries the two broad faces - those stay open.
+            int openAxis = 0;
+            if (Mathf.Abs(scale.y) < Mathf.Abs(scale[openAxis])) openAxis = 1;
+            if (Mathf.Abs(scale.z) < Mathf.Abs(scale[openAxis])) openAxis = 2;
+
+            for (int axis = 0; axis < 3; axis++)
+            {
+                if (axis == openAxis) continue;
+                int otherAxis = 3 - openAxis - axis;
+                for (int sign = -1; sign <= 1; sign += 2)
+                {
+                    Vector3 position = Vector3.zero;
+                    position[axis] = sign * (0.5f + t[axis] * 0.5f);
+                    Vector3 size = Vector3.one;
+                    size[axis] = t[axis];
+                    // Flush with the broad faces (never past them, or the shell would
+                    // overhang the landing face), and widened on the third axis to close
+                    // the corners between the two edge pairs.
+                    size[openAxis] = 1f;
+                    size[otherAxis] = 1f + 2f * t[otherAxis];
+                    CreateDamageSlab(platform, "DamageShell_Edge" + axis + (sign > 0 ? "P" : "N"),
                         position, size, respawnPoint, material);
                 }
             }

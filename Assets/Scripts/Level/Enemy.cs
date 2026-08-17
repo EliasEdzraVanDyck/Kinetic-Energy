@@ -297,7 +297,12 @@ namespace KineticEnergy.Level
         {
             lastMoveUnsupported = false;
             float bodyRadius = transform.localScale.x * 0.5f;
-            if (Physics.Raycast(next + Vector3.up * 0.05f, Vector3.down, out RaycastHit hit, bodyRadius + 8f)
+            // TRIGGERS ARE NOT GROUND. Raycasts hit trigger volumes by default, so a
+            // checkpoint pad (or any trigger hovering over a platform) was being treated as
+            // the surface below - the enemy came to rest on top of THAT and hung in the air
+            // above the platform instead of falling to it.
+            if (Physics.Raycast(next + Vector3.up * 0.05f, Vector3.down, out RaycastHit hit, bodyRadius + 8f,
+                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
                 && hit.collider.GetComponent<KineticCubeController>() == null)
             {
                 float restY = hit.point.y + bodyRadius;
