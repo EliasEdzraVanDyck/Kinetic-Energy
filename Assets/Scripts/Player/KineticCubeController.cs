@@ -863,6 +863,14 @@ namespace KineticEnergy.Player
                 }
             }
 
+            // Arriving somewhere clears a combo-drop aim lock. This MUST live out here in
+            // the dispatch, not inside UpdateAirAim - that method is only reached from the
+            // not-grounded branch, so a clear placed inside it could never run and the lock
+            // survived every landing: grounded aiming kept working while midair aiming was
+            // dead for the rest of the run. A crash-stick counts as arriving too, or a
+            // locked player stuck to a sticky wall would have no way off it at all.
+            if (isGrounded || isStuck) airAimLockedUntilGrounded = false;
+
             if (isGrounded && !groundedLastFrame)
             {
                 isScreenshakeCrash = true;
@@ -938,7 +946,12 @@ namespace KineticEnergy.Player
             // the aim can't open, so the hold must not slow time either.
             // Mirrors the FULL aim-open gate (energy AND launch availability) - if the aim
             // can never open, the bridging hold must not buy slow-mo either.
-            bool rawAimHeld = AimButtonHeld() && !aimButtonSpent && energyFraction > 0f && CanStartNewLaunch();
+            // Mirrors the FULL aim-open gate, the combo-drop lock included. Without that
+            // last term a locked aim still bought slow-mo: time crawled and the combo
+            // window drained while the aim refused to open, so there were no visuals and
+            // no launch - the "I can't aim but everything slows down" state.
+            bool rawAimHeld = AimButtonHeld() && !aimButtonSpent && energyFraction > 0f
+                && CanStartNewLaunch() && !airAimLockedUntilGrounded;
             bool airAimSlow = !isGrounded && (airAiming || rawAimHeld) && SlowdownAvailable();
             // The post-ground-pound window holds the slow-mo for its duration - part of the
             // pound itself, so never metered by the slowdown resource.
@@ -1390,9 +1403,6 @@ namespace KineticEnergy.Player
 
         void UpdateAirAim()
         {
-            // Landing clears a combo-drop lock - the ONLY thing that does.
-            if (isGrounded) airAimLockedUntilGrounded = false;
-
             bool aimHeld = airAimAction != null && airAimAction.action != null && airAimAction.action.IsPressed();
 
             if (!aimHeld)
@@ -1549,11 +1559,8 @@ namespace KineticEnergy.Player
             momentumCarry += WallMomentumCarry(direction); // wall-opened aims carry the synthesized stake
             ShowLandingPreview(rb.linearVelocity + momentumCarry + direction * force / rb.mass, damping);
 
-            // Real-time estimate of that flight for the moving platforms' lead arrows: the
-            // flight runs sped up (base + energy bonus, plus the descent ramp on average).
-            float estimatedFlightScale = (launchFlightTimeScale + fireFraction * flightTimeScaleEnergyBonus)
-                * (1f + (fallSpeedUpStart + fallSpeedUpEnd) * 0.25f);
-            lastPredictedFlightRealSeconds = lastPredictedFlightSeconds / Mathf.Max(estimatedFlightScale, 0.01f);
+            // (The real-seconds flight estimate the platforms lead by is maintained inside
+            // ShowLandingPreview now, so every aim keeps it fresh - not just this one.)
 
             bool firePressed = airLaunchAction != null && airLaunchAction.action != null && airLaunchAction.action.WasPressedThisFrame();
             if (firePressed && energyFraction > 0f && CanStartNewLaunch())
@@ -2513,14 +2520,53 @@ namespace KineticEnergy.Player
 
         // ---------- Landing prediction ----------
 
+        // The flight's duration in REAL seconds - which is what a moving platform's own
+        // clock advances by while the shot is in the air. The flight runs SPED UP (base
+        // scale plus the energy bonus, plus the descent ramp averaged over the arc) while
+        // world movers deliberately keep running in real time, so the two clocks differ and
+        // the lead has to be expressed in the platform's.
+        float EstimatedFlightTimeScale()
+        {
+            float spendable = energyCostPerFullCharge > 0f ? SpendableEnergy() / energyCostPerFullCharge : 1f;
+            float firing = Mathf.Min(ChargeFraction(), spendable); // what would ACTUALLY fire
+            return (launchFlightTimeScale + firing * flightTimeScaleEnergyBonus)
+                * (1f + (fallSpeedUpStart + fallSpeedUpEnd) * 0.25f);
+        }
+
+        float FlightRealSeconds(int steps)
+        {
+            float gameSeconds = Mathf.Max(steps * Time.fixedDeltaTime, 0.1f);
+            return gameSeconds / Mathf.Max(EstimatedFlightTimeScale(), 0.01f);
+        }
+
         void ShowLandingPreview(Vector3 initialVelocity, float damping)
         {
             Vector3 lineStart = transform.position + Vector3.up * previewLineHeight;
+
+            // MOVING PLATFORMS are solved in TWO PASSES. The prediction puts each mover
+            // where it will be when the shot ARRIVES - but that arrival time is the very
+            // thing the prediction measures, so a single pass feeds one frame's answer into
+            // the next and never settles (the cursor promised a landing the flight then
+            // sailed past). Pass one flies against the movers where they are now, purely to
+            // time the flight; pass two re-runs it with every mover advanced by that time,
+            // and that second arc is the one shown and fired.
+            predictionLeadSeconds = 0f;
+            if (predictionHasMovers)
+            {
+                PredictLandingPoint(transform.position, initialVelocity, damping, out int probeSteps, out _);
+                predictionLeadSeconds = FlightRealSeconds(probeSteps);
+                predictionSyncFrame = -1; // force the movers to re-mirror at the lead position
+            }
+
             Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, damping, out int stepCount, out bool didLand);
             lastPredictedLanding = landingPoint;
             hasValidPredictedLanding = didLand;
             lastTrajectoryStepCount = stepCount;
             lastPredictedFlightSeconds = Mathf.Max(stepCount * Time.fixedDeltaTime, 0.1f);
+            // Kept live for EVERY aim - the ghost, the lead arrow and the mover proxies all
+            // read this. It used to be refreshed only by the midair aim, so a grounded aim
+            // at a mover led with a stale figure left over from the previous flight.
+            lastPredictedFlightRealSeconds = FlightRealSeconds(stepCount);
 
             // Aiming INTO the face you are clinging to: the shot cannot go that way - it
             // buries itself in the surface the moment it fires. The prediction happily
@@ -2747,6 +2793,7 @@ namespace KineticEnergy.Player
                     continue;
                 }
 
+                if (entry.mover != null) predictionHasMovers = true;
                 geometryProxies.Add(entry);
                 MirrorGeometryProxy(entry);
             }
@@ -2765,6 +2812,9 @@ namespace KineticEnergy.Player
             public MeshCollider proxyMesh;
         }
         readonly List<PredictionGeometryProxy> geometryProxies = new List<PredictionGeometryProxy>();
+        // How far ahead the mover proxies are placed for the CURRENT prediction pass.
+        float predictionLeadSeconds;
+        bool predictionHasMovers; // skips the second pass entirely in scenes without movers
 
         void SyncPredictionGeometry()
         {
@@ -2789,9 +2839,9 @@ namespace KineticEnergy.Player
             // position, which is exactly what its ghost draws. The lead uses the previous
             // frame's flight estimate (the same figure the ghost and lead arrow use).
             Vector3 leadOffset = Vector3.zero;
-            if (entry.mover != null && lastPredictedFlightRealSeconds > 0f)
+            if (entry.mover != null && predictionLeadSeconds > 0f)
             {
-                leadOffset = entry.mover.LeadOffset(lastPredictedFlightRealSeconds);
+                leadOffset = entry.mover.LeadOffset(predictionLeadSeconds);
             }
             entry.proxy.transform.SetPositionAndRotation(sourceTransform.position + leadOffset, sourceTransform.rotation);
             entry.proxy.transform.localScale = sourceTransform.lossyScale;

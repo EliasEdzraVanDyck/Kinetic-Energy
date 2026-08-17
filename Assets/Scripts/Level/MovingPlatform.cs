@@ -81,6 +81,39 @@ namespace KineticEnergy.Level
             return startPosition + moveOffset * t01;
         }
 
+        // Draws ONLY the part of the ghost that jubts out past the platform. When the lead
+        // is shorter than the platform is long, a full-size ghost sits inside the original
+        // and the two transparent boxes tear through each other - so the ghost is TRIMMED
+        // along its direction of travel and pushed up against the platform's far face. The
+        // slab you see is exactly the new ground the platform is about to cover. Once the
+        // lead exceeds the platform's own length there is nothing to trim and it becomes a
+        // whole second platform again.
+        void ShapeGhost(Vector3 direction, float length)
+        {
+            // Travel is along one of the platform's own axes - trim that one.
+            Vector3 localDirection = transform.InverseTransformDirection(direction);
+            int axis = 0;
+            if (Mathf.Abs(localDirection.y) > Mathf.Abs(localDirection[axis])) axis = 1;
+            if (Mathf.Abs(localDirection.z) > Mathf.Abs(localDirection[axis])) axis = 2;
+
+            Vector3 fullScale = transform.lossyScale;
+            float fullThickness = Mathf.Abs(fullScale[axis]);
+            float thickness = Mathf.Min(length, fullThickness);
+
+            Vector3 scale = fullScale;
+            scale[axis] = thickness;
+
+            // Far face of the platform, then half the slab - so the ghost begins exactly
+            // where the platform ends. The small nudge keeps those two faces off the same
+            // plane, which would otherwise z-fight.
+            const float seamNudge = 0.02f;
+            Vector3 centre = transform.position
+                + direction * (length + fullThickness * 0.5f - thickness * 0.5f + seamNudge);
+
+            ghost.SetPositionAndRotation(centre, transform.rotation);
+            ghost.localScale = scale;
+        }
+
         // How far this platform will have travelled in `seconds` from now. The landing
         // PREDICTION shifts its stand-in for this platform by exactly this, so the trail and
         // cursor land where the platform will actually be - which is what the ghost draws.
@@ -113,11 +146,7 @@ namespace KineticEnergy.Level
                     shaft.localPosition = new Vector3(0f, 0f, length * 0.5f);
                     head.localPosition = new Vector3(0f, 0f, length);
 
-                    if (ghost != null)
-                    {
-                        ghost.SetPositionAndRotation(future, transform.rotation);
-                        ghost.localScale = transform.lossyScale;
-                    }
+                    if (ghost != null) ShapeGhost(delta / length, length);
                 }
             }
 
