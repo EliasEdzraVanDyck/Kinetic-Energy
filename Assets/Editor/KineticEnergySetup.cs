@@ -1268,6 +1268,43 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
+        // Swaps LevelElementsTest2's grounded enemies from stalkers to HUNTERS - the same
+        // aggressive cousin, but punishable AFTER its attack instead of during the windup.
+        // Placement is preserved exactly; nothing else in the scene is touched.
+        [MenuItem("Tools/Kinetic Energy/Use Hunter Enemies In LevelElementsTest2")]
+        public static void UseHunterEnemiesInLevelElementsTest2()
+        {
+            const string scenePath = "Assets/Scenes/LevelElementsTest2.unity";
+            CreateHunterEnemyPrefab(); // also stamps the dodge + cooldown window onto an older prefab
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            GameObject hunterPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/HunterEnemy.prefab");
+            if (hunterPrefab == null) throw new Exception("KineticEnergySetup: HunterEnemy.prefab is missing.");
+
+            int swapped = 0;
+            foreach (Enemy walker in UnityEngine.Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                // Only the ground enemies that are NOT already hunters.
+                if (walker.killWindow == EnemyKillWindow.WhileCoolingDown) continue;
+
+                GameObject old = walker.gameObject;
+                GameObject replacement = (GameObject)PrefabUtility.InstantiatePrefab(hunterPrefab, old.transform.parent);
+                replacement.name = old.name;
+                replacement.transform.SetPositionAndRotation(old.transform.position, old.transform.rotation);
+                replacement.transform.localScale = old.transform.localScale;
+                UnityEngine.Object.DestroyImmediate(old);
+                swapped++;
+            }
+
+            // Swapping objects alone does not flag the scene as modified, and SaveOpenScenes
+            // silently writes nothing for a clean scene - the first run reported success and
+            // saved absolutely nothing.
+            if (swapped > 0) EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+            EditorSceneManager.SaveOpenScenes();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: LevelElementsTest2 now uses hunters OK (" + swapped + " swapped)");
+        }
+
         // SURGICAL tuning pass over both element scenes: values already serialized on scene
         // instances do not follow a code default, so they are written here. Nothing else in
         // either scene is touched.

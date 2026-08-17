@@ -533,6 +533,10 @@ namespace KineticEnergy.Player
         // time, so the lead must be in the platform's clock).
         public bool IsAirAiming => airAiming;
 
+        // The moving platform currently underfoot, if any - a platform reads this to know
+        // it is the one being ridden (and so should show no lead ghost of itself).
+        public MovingPlatform GroundPlatform => freeMoveController != null ? freeMoveController.GroundPlatform : null;
+
         // Economy-variant harness hooks (EconomyVariantController) - read-only state plus
         // one guarded energy mutator, so the harness never reaches into private fields.
         public float LastLaunchEnergySpent => lastLaunchEnergySpent;
@@ -2520,23 +2524,57 @@ namespace KineticEnergy.Player
 
         // ---------- Landing prediction ----------
 
-        // The flight's duration in REAL seconds - which is what a moving platform's own
-        // clock advances by while the shot is in the air. The flight runs SPED UP (base
-        // scale plus the energy bonus, plus the descent ramp averaged over the arc) while
-        // world movers deliberately keep running in real time, so the two clocks differ and
-        // the lead has to be expressed in the platform's.
-        float EstimatedFlightTimeScale()
+        // The base game speed this shot's flight will run at: the launch scale plus the
+        // bonus for however much energy ACTUALLY fires (the dialled charge, capped by what
+        // the tank can pay) - the exact figure OnLaunchFired will compute.
+        float LaunchFlightScaleForCurrentCharge()
         {
-            float spendable = energyCostPerFullCharge > 0f ? SpendableEnergy() / energyCostPerFullCharge : 1f;
-            float firing = Mathf.Min(ChargeFraction(), spendable); // what would ACTUALLY fire
-            return (launchFlightTimeScale + firing * flightTimeScaleEnergyBonus)
-                * (1f + (fallSpeedUpStart + fallSpeedUpEnd) * 0.25f);
+            float spend = energyCostPerFullCharge > 0f
+                ? Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge)
+                : 0f;
+            return launchFlightTimeScale + spend * flightTimeScaleEnergyBonus;
         }
 
-        float FlightRealSeconds(int steps)
+        // The previewed flight's duration measured on a WORLD MOVER'S clock - what a moving
+        // platform actually advances by while the shot is in the air, and therefore exactly
+        // how far ahead its ghost belongs.
+        //
+        // This is INTEGRATED over the predicted trajectory rather than divided by an average,
+        // because none of the terms are constant: the flight's game speed starts at the
+        // launch scale and then ramps up through the descent (Lerp between fallSpeedUpStart
+        // and fallSpeedUpEnd by how far down the fall has come), while a mover's clock
+        // advances by WorldMotionTime - min(fixed, fixed/timeScale) - every tick. Summing
+        // that per-step reproduces the platform's clock step for step, mirroring
+        // ApplyChargeTimeScale's rules including the pound exemption.
+        float PredictedFlightRealSeconds(int steps, bool downwardLaunch)
         {
-            float gameSeconds = Mathf.Max(steps * Time.fixedDeltaTime, 0.1f);
-            return gameSeconds / Mathf.Max(EstimatedFlightTimeScale(), 0.01f);
+            if (steps <= 0) return 0f;
+            steps = Mathf.Min(steps, trajectoryBuffer.Length);
+
+            float dt = Time.fixedDeltaTime;
+            float baseScale = LaunchFlightScaleForCurrentCharge();
+            float landingY = trajectoryBuffer[steps - 1].y;
+            float apexY = trajectoryBuffer[0].y;
+            float realSeconds = 0f;
+
+            for (int i = 0; i < steps; i++)
+            {
+                float y = trajectoryBuffer[i].y;
+                if (y > apexY) apexY = y;                      // the apex is tracked as it flies, as in flight
+                bool falling = i > 0 && y < trajectoryBuffer[i - 1].y;
+
+                float scale = baseScale;
+                if (falling && !downwardLaunch)
+                {
+                    float descentSpan = Mathf.Max(apexY - landingY, 0.01f);
+                    float descentProgress = Mathf.Clamp01((apexY - y) / descentSpan);
+                    scale *= 1f + Mathf.Lerp(fallSpeedUpStart, fallSpeedUpEnd, descentProgress);
+                }
+                // WorldMotionTime: a mover never runs FASTER than real time, and slows with
+                // the bullet-time - the same clamp, so the sum matches tick for tick.
+                realSeconds += Mathf.Min(dt, dt / Mathf.Max(scale, 0.01f));
+            }
+            return realSeconds;
         }
 
         void ShowLandingPreview(Vector3 initialVelocity, float damping)
@@ -2550,11 +2588,16 @@ namespace KineticEnergy.Player
             // sailed past). Pass one flies against the movers where they are now, purely to
             // time the flight; pass two re-runs it with every mover advanced by that time,
             // and that second arc is the one shown and fired.
+            // A pound (steeply downward) shot is exempt from the descent ramp, exactly as
+            // the live flight is - read from the shot itself so the two always agree.
+            bool downwardLaunch = initialVelocity.sqrMagnitude > 0.0001f
+                && Vector3.Dot(initialVelocity.normalized, Vector3.down) >= slamDownwardThreshold;
+
             predictionLeadSeconds = 0f;
             if (predictionHasMovers)
             {
                 PredictLandingPoint(transform.position, initialVelocity, damping, out int probeSteps, out _);
-                predictionLeadSeconds = FlightRealSeconds(probeSteps);
+                predictionLeadSeconds = PredictedFlightRealSeconds(probeSteps, downwardLaunch);
                 predictionSyncFrame = -1; // force the movers to re-mirror at the lead position
             }
 
@@ -2566,7 +2609,7 @@ namespace KineticEnergy.Player
             // Kept live for EVERY aim - the ghost, the lead arrow and the mover proxies all
             // read this. It used to be refreshed only by the midair aim, so a grounded aim
             // at a mover led with a stale figure left over from the previous flight.
-            lastPredictedFlightRealSeconds = FlightRealSeconds(stepCount);
+            lastPredictedFlightRealSeconds = PredictedFlightRealSeconds(stepCount, downwardLaunch);
 
             // Aiming INTO the face you are clinging to: the shot cannot go that way - it
             // buries itself in the surface the moment it fires. The prediction happily
@@ -2838,8 +2881,12 @@ namespace KineticEnergy.Player
             // where it is now - so the trail and cursor settle on the platform's future
             // position, which is exactly what its ghost draws. The lead uses the previous
             // frame's flight estimate (the same figure the ghost and lead arrow use).
+            // ...but NOT the platform being stood on. That one carries the player with it,
+            // so it is never an obstacle ahead - leading it planted a phantom copy of the
+            // floor above (or through) the player and every shot crashed straight into it
+            // instead of reaching the target.
             Vector3 leadOffset = Vector3.zero;
-            if (entry.mover != null && predictionLeadSeconds > 0f)
+            if (entry.mover != null && predictionLeadSeconds > 0f && entry.mover != GroundPlatform)
             {
                 leadOffset = entry.mover.LeadOffset(predictionLeadSeconds);
             }

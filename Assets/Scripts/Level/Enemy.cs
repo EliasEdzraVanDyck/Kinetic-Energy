@@ -68,8 +68,16 @@ namespace KineticEnergy.Level
         [Range(0f, 1f)] public float attackEnergyDrain = 0.15f;
         [Tooltip("Seconds the player is blocked from launching after being hit.")]
         public float postHitLaunchLockSeconds = 0.5f;
-        [Tooltip("Colour flashed during the windup.")]
-        public Color windUpColor = new Color(1f, 0.35f, 0.1f);
+        [Header("Telegraphing")]
+        // The body colour answers ONE question at a glance: can a launch kill this RIGHT
+        // NOW? Red says no, purple says yes. Which moments count as "yes" depends on the
+        // kill window, so the same two colours read correctly for every variant.
+        [Tooltip("Body colour while the enemy CANNOT be killed - red reads as 'not now'.")]
+        public Color baseColor = new Color(0.78f, 0.11f, 0.09f);
+        [Tooltip("Body colour while a launch WOULD kill it - the original purple.")]
+        public Color vulnerableColor = new Color(0.72f, 0.15f, 0.6f);
+        [Tooltip("Colour flashed during the windup. Bright and warm so it separates clearly from BOTH the red and the purple.")]
+        public Color windUpColor = new Color(1f, 0.93f, 0.32f);
 
         [Header("Hunter variant")]
         [Tooltip("ON: the attack also triggers on AIRBORNE players (no grounded/height requirement) - the ballistic solve leads to wherever they were at windup.")]
@@ -102,7 +110,18 @@ namespace KineticEnergy.Level
         Collider bodyCollider;
         Collider playerCollider;
         Renderer bodyRenderer;
-        Color restColor;
+
+        // Is a player launch lethal to this enemy at this instant? Each kill window makes
+        // a different moment the punishable one, and the colour follows whichever it is.
+        bool KillableNow => killWindow switch
+        {
+            EnemyKillWindow.WhileCoolingDown => vulnerableTimer > 0f,
+            EnemyKillWindow.WhileWindingUp => state == EnemyState.WindingUp,
+            _ => true, // Always - a plain enemy is punishable whenever you can reach it
+        };
+
+        // What the body sits at when it is not mid-flash.
+        Color IdleColor => KillableNow ? vulnerableColor : baseColor;
 
         Vector3 spawnPoint;    // wander centre - re-centres wherever an attack lands
         Vector3 originalSpawn; // the scene position, immutable - respawns always come back here
@@ -141,7 +160,10 @@ namespace KineticEnergy.Level
             bodyCollider = GetComponent<Collider>();
             if (player != null) playerCollider = player.GetComponent<Collider>();
             bodyRenderer = GetComponentInChildren<Renderer>();
-            if (bodyRenderer != null) restColor = bodyRenderer.material.color;
+            // Opens on its state colour instead of whatever the shared material happens to
+            // be. Assigning through .material instances a per-renderer copy, so the
+            // material ASSET is never written to.
+            if (bodyRenderer != null) bodyRenderer.material.color = IdleColor;
 
             body = GetComponent<Rigidbody>();
             if (body == null) body = gameObject.AddComponent<Rigidbody>();
@@ -194,17 +216,21 @@ namespace KineticEnergy.Level
 
             // The cooldown kill-window has a TELL: a soft white pulse for as long as the
             // enemy is punishable (the windup window's tell is the existing orange flash).
-            if (bodyRenderer != null && state != EnemyState.WindingUp)
+            // Held every tick (the windup and launch states paint themselves): red while
+            // untouchable, the old purple the moment a launch would land the kill. A
+            // punishable enemy also pulses brighter, so the opening reads instantly even
+            // against a busy background.
+            if (bodyRenderer != null && state != EnemyState.WindingUp && state != EnemyState.Launching)
             {
-                if (killWindow == EnemyKillWindow.WhileCoolingDown && vulnerableTimer > 0f)
+                if (KillableNow && killWindow != EnemyKillWindow.Always)
                 {
                     float pulse = Mathf.PingPong(Time.unscaledTime * 2.5f, 0.4f);
-                    bodyRenderer.material.color = Color.Lerp(restColor, Color.white, pulse);
+                    bodyRenderer.material.color = Color.Lerp(vulnerableColor, Color.white, pulse);
                     vulnerablePulseActive = true;
                 }
-                else if (vulnerablePulseActive)
+                else
                 {
-                    bodyRenderer.material.color = restColor;
+                    bodyRenderer.material.color = IdleColor;
                     vulnerablePulseActive = false;
                 }
             }
@@ -272,7 +298,8 @@ namespace KineticEnergy.Level
             // ground at spawn: a stalker placed even slightly above its platform used to
             // read that first fall as the void and launch itself into the air on boot and
             // after every respawn. It has to have stood somewhere first.
-            if (returnLaunchToPlatform && groundedSinceSpawn && lastMoveUnsupported && fallVelocity < -4f)
+            if (returnLaunchToPlatform && groundedSinceSpawn && lastMoveUnsupported
+                && fallVelocity < -4f && OverGenuineVoid())
             {
                 return TryReturnLaunch();
             }
@@ -296,6 +323,27 @@ namespace KineticEnergy.Level
         float scheduledDodgeTimer; // real seconds until that hop (impact time minus lead)
         bool vulnerablePulseActive;
 
+        [Tooltip("How far below itself the enemy looks for ground. Must comfortably exceed the biggest drop in the level: anything further down is invisible to it, and a drop it cannot see reads as empty void.")]
+        public float groundProbeDistance = 60f;
+
+        // Is there genuinely NOTHING to land on below? The return launch is for being
+        // stranded over emptiness, not for stepping off a ledge onto lower ground - and the
+        // hazard floor does not count as somewhere to land.
+        bool OverGenuineVoid()
+        {
+            foreach (RaycastHit hit in Physics.RaycastAll(body.position + Vector3.up * 0.05f, Vector3.down,
+                         groundProbeDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.collider == null) continue;
+                if (hit.collider.GetComponentInParent<KineticCubeController>() != null) continue;
+                if (hit.collider.GetComponentInParent<Enemy>() != null) continue;
+                if (hit.collider.GetComponentInParent<FlyingEnemy>() != null) continue;
+                if (hit.collider.GetComponentInParent<DamageWalls>() != null) continue;
+                return false; // real ground somewhere below - it is only falling, not stranded
+            }
+            return true;
+        }
+
         // Kinematic bodies ignore gravity, so ground contact is enforced by hand: the enemy
         // rests exactly on the surface below and falls under real gravity when unsupported.
         Vector3 WithGroundedY(Vector3 next, float dt)
@@ -311,13 +359,37 @@ namespace KineticEnergy.Level
             // collider does not report it, so an enemy that ended up level with (or inside)
             // a platform saw no ground at all and sank straight through it before catching
             // itself. Starting clear of its own body finds the surface and lifts it out.
+            // The reach was a fixed 8 units, which is SHORTER than the drops in these
+            // levels: an enemy on a raised ledge saw nothing beneath it, called itself
+            // unsupported and hurled itself at a platform - with the arena sitting quietly
+            // 15 units below. A reach that spans the level's real drops also stops a fast
+            // fall from tunnelling through a thin platform, since the clamp below can only
+            // apply while the surface is actually visible to the probe.
+            // ...which puts the ray ABOVE THE ENEMY'S OWN HEAD, so pointing down its first
+            // hit is its own sphere - and "resting on" your own top means teleporting up by
+            // your own diameter, every tick: the self-powered ascent on boot and respawn.
+            // The original inside-the-collider origin skipped self implicitly; an origin
+            // above the body must skip it EXPLICITLY. RaycastAll, nearest hit that is not
+            // itself, the player, or the hazard floor.
             float probeLift = bodyRadius + 0.5f;
-            if (Physics.Raycast(next + Vector3.up * probeLift, Vector3.down, out RaycastHit hit, probeLift + 8f,
-                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
-                && hit.collider.GetComponent<KineticCubeController>() == null
-                // The hazard floor is not a place to stand or aim for - falling onto it
-                // must read as falling into the void, which resets the enemy.
-                && hit.collider.GetComponentInParent<DamageWalls>() == null)
+            RaycastHit hit = default;
+            bool foundGround = false;
+            foreach (RaycastHit candidate in Physics.RaycastAll(next + Vector3.up * probeLift, Vector3.down,
+                         probeLift + groundProbeDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                if (candidate.collider == null) continue;
+                if (candidate.collider.transform == transform || candidate.collider.transform.IsChildOf(transform)) continue;
+                if (candidate.collider.GetComponent<KineticCubeController>() != null) continue;
+                // The hazard floor is not a place to stand - falling onto it must read as
+                // falling into the void, which resets the enemy.
+                if (candidate.collider.GetComponentInParent<DamageWalls>() != null) continue;
+                if (!foundGround || candidate.distance < hit.distance)
+                {
+                    hit = candidate;
+                    foundGround = true;
+                }
+            }
+            if (foundGround)
             {
                 float restY = hit.point.y + bodyRadius;
                 if (next.y > restY + 0.02f)
@@ -495,7 +567,7 @@ namespace KineticEnergy.Level
             state = EnemyState.Launching;
             lastFlightWasAttack = false;
             dodgeCooldownRemaining = dodgeCooldownSeconds;
-            if (bodyRenderer != null) bodyRenderer.material.color = restColor;
+            if (bodyRenderer != null) bodyRenderer.material.color = IdleColor;
             attackTarget = target;
             fallVelocity = 0f;
 
@@ -515,8 +587,11 @@ namespace KineticEnergy.Level
         void FlashWarning()
         {
             if (bodyRenderer == null) return;
+            // Blinks between the flash and the CURRENT state colour, so the windup carries
+            // both messages at once: an attack is coming, and (for a stalker, whose only
+            // kill window IS the windup) this is your moment to hit it.
             float blink = Mathf.PingPong(Time.unscaledTime * 6f, 1f);
-            bodyRenderer.material.color = Color.Lerp(restColor, windUpColor, blink);
+            bodyRenderer.material.color = Color.Lerp(IdleColor, windUpColor, blink);
         }
 
         void BeginLaunch()
@@ -692,7 +767,7 @@ namespace KineticEnergy.Level
             // Same exact time-solved arc as the attack, with enough apex to clear the ledge.
             state = EnemyState.Launching;
             returnLaunching = true; // one attempt per fall - the -40 reset is the backstop
-            if (bodyRenderer != null) bodyRenderer.material.color = restColor;
+            if (bodyRenderer != null) bodyRenderer.material.color = IdleColor;
             attackTarget = best;
             fallVelocity = 0f;
 
@@ -724,7 +799,7 @@ namespace KineticEnergy.Level
             if (lastFlightWasAttack) vulnerableTimer = Mathf.Max(vulnerableAfterAttackSeconds, attackCooldown);
             lastFlightWasAttack = false;
             platformBelow = landedOn; // the walkable area follows the enemy to its new platform
-            if (bodyRenderer != null) bodyRenderer.material.color = restColor;
+            if (bodyRenderer != null) bodyRenderer.material.color = IdleColor;
         }
 
         void BeginWander()
@@ -830,7 +905,7 @@ namespace KineticEnergy.Level
             vulnerableTimer = 0f;
             dodgeScheduled = false;
             SetPlayerCollisionIgnored(false);
-            if (bodyRenderer != null) bodyRenderer.material.color = restColor;
+            if (bodyRenderer != null) bodyRenderer.material.color = IdleColor;
             if (Physics.Raycast(spawnPoint, Vector3.down, out RaycastHit hit, 5f)) platformBelow = hit.collider;
             PickNewTarget();
             gameObject.SetActive(true);

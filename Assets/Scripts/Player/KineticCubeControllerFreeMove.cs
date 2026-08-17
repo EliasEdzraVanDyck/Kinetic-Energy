@@ -84,6 +84,9 @@ namespace KineticEnergy.Player
         // True while a mover is genuinely underfoot - distinct from a zero velocity, which
         // a platform also has for an instant at each end of its trip.
         public bool OnMovingPlatform { get; private set; }
+        // WHICH mover is underfoot - the landing prediction must not lead the platform the
+        // player is standing on (see KineticCubeController.MirrorGeometryProxy).
+        public MovingPlatform GroundPlatform { get; private set; }
         Quaternion visualTargetRotation = Quaternion.identity;
         float launchFacingYaw;
 
@@ -300,6 +303,7 @@ namespace KineticEnergy.Player
                 ? hit.collider.attachedRigidbody.GetComponent<MovingPlatform>()
                 : null;
             OnMovingPlatform = platform != null;
+            GroundPlatform = platform;
             GroundPlatformVelocity = platform != null ? platform.CurrentVelocity : Vector3.zero;
         }
 

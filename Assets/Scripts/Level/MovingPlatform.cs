@@ -126,14 +126,23 @@ namespace KineticEnergy.Level
         {
             if (arrowRoot == null) return;
 
-            bool show = player != null && player.IsAirAiming;
+            // Nothing to show for the platform being RIDDEN: it carries the player along,
+            // so its future position is not somewhere to aim at - and the prediction
+            // deliberately leaves this one where it is for the same reason.
+            bool show = player != null && player.IsAirAiming && player.GroundPlatform != this;
             if (show)
             {
                 // Endpoint = this centre's position at the moment the previewed shot lands.
                 // The platform runs on REAL time, so the lead uses the flight's estimated
                 // real-world duration (the prediction itself is in game-time).
+                // Measured as a DISPLACEMENT from where the platform is drawn, not as an
+                // absolute position on the physics clock: the body renders interpolated
+                // between fixed steps, so an absolute centre would sit a fraction of a tick
+                // away from the platform you can actually see. This is also the exact
+                // expression the landing prediction offsets its stand-in by, so the ghost
+                // and the cursor can never drift apart.
                 Vector3 current = transform.position;
-                Vector3 future = CentreAt(clock + player.PredictedFlightRealSecondsLive);
+                Vector3 future = current + LeadOffset(player.PredictedFlightRealSecondsLive);
                 Vector3 delta = future - current;
                 float length = delta.magnitude;
                 if (length < 0.05f) show = false; // effectively stationary over the lead time
