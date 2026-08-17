@@ -1082,7 +1082,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 3b7c397d902e3994081dee9d4cf9cf2e, type: 2}
+  - {fileID: 2100000, guid: 1ecfea6f294f0fb4297b7295d80a18de, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -3194,7 +3194,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 3b7c397d902e3994081dee9d4cf9cf2e, type: 2}
+  - {fileID: 2100000, guid: 1ecfea6f294f0fb4297b7295d80a18de, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -3727,42 +3727,18 @@ MonoBehaviour:
   totalLossSafetyTriggerFraction: 0.4
   totalLossSafetyCeilingFraction: 0.4
   introKey: levelelements
-  introText: 'LEVEL ELEMENTS TEST
-
-
-    A straight run along one axis, introducing
-    one element at a time. Pause > Sections jumps straight to any of them - you respawn
-    there while you keep testing it.
-
-
-    1 - BASICS: plain platforms.
-
-    2 -
-    MOVING PLATFORMS: one slides sideways, one rides up and down. While you aim,
-    a blue arrow shows where the platform will BE when your shot lands - aim at the
-    tip.
-
-    3 - ROTATING WALLS: sticky faces that keep turning. Time the shot as
-    well as aiming it.
-
-    4 - LASERS: gates that blink on and off. Cross while
-    they are dark.
-
-    5 - GROUND ENEMIES: they wander their platform and leap at
-    you when you land nearby.
-
-    6 - FLYING ENEMIES: they drift over the gaps and
-    shoot on sight.
-
-    7 - TURRETS: fixed wall guns that flash before firing.
-
-
-    FALLING:
-    if the combo window runs out while you are in the air, the aim is cut and you
-    DROP. Keep landing before the meter empties.
-
-
-    Press any button to start.'
+  introText: "LEVEL ELEMENTS TEST\n\nA straight run along one axis, introducing one
+    element at a time. Pause > Sections jumps straight to any of them - you respawn
+    there while you keep testing it.\n\n1 - BASICS: plain platforms.\n\n2 - MOVING
+    PLATFORMS: one slides sideways, one rides up and down. While you aim, a blue
+    arrow shows where the platform will be when your shot lands.\n\n3 - ROTATING
+    WALLS: sticky faces that keep turning. \n\n4 - LASERS: gates that blink on and
+    off. Cross while they are turned off.\n\n5 - GROUND ENEMIES: they wander their
+    platform and leap at you when you are nearby.\n\n6 - FLYING ENEMIES: they drift
+    over the gaps and shoot on sight.\n\n7 - TURRETS: fixed wall enemies that also
+    shoot on sight.\n\nFALLING: if the combo window runs out while you are in the
+    air, the aim is cut short and you fall down. Keep landing before the meter empties.\n\nPress
+    any button to start."
   safetyTriggerFraction: 0.4
   safetyCeilingFraction: 0.4
   regenPerSecond: 0.12

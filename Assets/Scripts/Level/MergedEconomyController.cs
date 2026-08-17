@@ -378,8 +378,11 @@ namespace KineticEnergy.Level
                 {
                     ResetCombo(revoke: true);
                     // Missing the window in the AIR costs the flight as well as the combo:
-                    // the aim is cut and the cube drops from where it hung.
-                    if (dropPlayerWhenWindowExpires && !controller.IsGrounded)
+                    // the aim is cut and the cube drops from where it hung. Clinging to a
+                    // surface is NOT "in the air" though - a stick is a resting place like
+                    // the ground, so you keep your perch and start regenerating there
+                    // instead of being dropped off it.
+                    if (dropPlayerWhenWindowExpires && !controller.IsGrounded && !controller.IsStuck)
                     {
                         controller.ForceEndAirAimAndFall();
                     }

@@ -908,12 +908,19 @@ namespace KineticEnergy.Player
                     flightScale *= 1f + Mathf.Lerp(fallSpeedUpStart, fallSpeedUpEnd, descentProgress);
                 }
             }
-            // An enemy hit TAKES the flight away from you, so the launch speed-up ends with
-            // it: the rest of the tumble plays at normal speed, right through to landing.
-            // At 1.5-2x the knockback threw the player across the level far faster than it
-            // could be read, on top of the shove itself.
-            if (isGrounded) flightSpeedUpSuppressed = false;
-            if (flightSpeedUpSuppressed) flightScale = 1f;
+            // An enemy hit (or a laser) TAKES the flight away from you, so the launch
+            // speed-up ends with it: the rest of the tumble plays at normal speed, right
+            // through to landing. At 1.5-2x the knockback threw the player across the level
+            // far faster than it could be read, on top of the shove itself.
+            //
+            // Cleared only once the player is settled back on the ground AND the hit's own
+            // timers have run out. Clearing it on ANY grounded frame wiped the flag in the
+            // very frame the hit landed - which is exactly what happens clipping a laser
+            // while running a gate on foot - so the speed-up came straight back.
+            if (isGrounded && knockbackTimer <= 0f && launchLockTimer <= 0f) flightSpeedUpSuppressed = false;
+            // The hit's own windows force normal speed outright, so the rule holds even if
+            // something clears the flag early.
+            if (flightSpeedUpSuppressed || knockbackTimer > 0f || launchLockTimer > 0f) flightScale = 1f;
 
             // The enemy-hit launch lock vetoes ALL slow-mo sources for its duration - if the
             // player can't aim or launch, they must not be able to buy time either.
@@ -1950,6 +1957,11 @@ namespace KineticEnergy.Player
             }
 
             previousLaunchChargeFraction = ChargeFraction(); // the NEXT launch's wall carry reads this
+
+            // Launching again takes the flight BACK: a fresh launch is yours, so it runs at
+            // the launch speed-up again even if the last thing that happened was being
+            // knocked about by an enemy, a projectile or a laser.
+            flightSpeedUpSuppressed = false;
 
             // While in the air, loop this audio
             if (playerSounds != null && enableAudio)
