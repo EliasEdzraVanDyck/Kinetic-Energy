@@ -51,15 +51,32 @@ namespace KineticEnergy.Level
             if (player == null) return;
             nextHitTime = Time.unscaledTime + Mathf.Max(retriggerDelay, 0.05f);
 
-            // Shoved OUT of the beam: away from the beam's own axis, plus a lift so the
-            // player clears it instead of being scraped along its length.
-            Collider ownCollider = GetComponentInChildren<Collider>();
-            Vector3 away = ownCollider != null
-                ? other.bounds.center - ownCollider.ClosestPoint(other.bounds.center)
-                : other.bounds.center - transform.position;
-            away.y = 0f;
-            if (away.sqrMagnitude < 0.0001f) away = -player.transform.forward;
-            Vector3 shove = Vector3.Lerp(away.normalized, Vector3.up, Mathf.Clamp01(upwardBias)).normalized;
+            // Thrown BACK the way you came. Pushing "away from the beam" looked right on
+            // paper but a fast launch is already past the beam's centre by the time the
+            // hit registers, so that vector pointed forwards and the laser flung the
+            // player THROUGH the gate. Reversing their travel always reads as being
+            // stopped. Read before ApplyEnemyHit, which wipes the velocity.
+            Rigidbody body = other.attachedRigidbody;
+            Vector3 travel = body != null ? body.linearVelocity : Vector3.zero;
+            travel.y = 0f;
+
+            Vector3 back;
+            if (travel.sqrMagnitude > 0.01f)
+            {
+                back = -travel.normalized;
+            }
+            else
+            {
+                // Standing in the beam: no travel to reverse, so fall back to the geometry.
+                Collider ownCollider = GetComponentInChildren<Collider>();
+                Vector3 away = ownCollider != null
+                    ? other.bounds.center - ownCollider.ClosestPoint(other.bounds.center)
+                    : other.bounds.center - transform.position;
+                away.y = 0f;
+                back = away.sqrMagnitude > 0.0001f ? away.normalized : -transform.forward;
+            }
+
+            Vector3 shove = Vector3.Lerp(back, Vector3.up, Mathf.Clamp01(upwardBias)).normalized;
 
             player.ApplyEnemyHit(shove * knockbackForce, energyDrain, launchLockSeconds);
         }

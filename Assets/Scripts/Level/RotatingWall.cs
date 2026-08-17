@@ -1,4 +1,5 @@
 using UnityEngine;
+using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
@@ -20,6 +21,7 @@ namespace KineticEnergy.Level
         Rigidbody body;
         Quaternion startRotation;
         float angle;
+        KineticCubeController player;
 
         void Awake()
         {
@@ -39,8 +41,30 @@ namespace KineticEnergy.Level
 
         void FixedUpdate()
         {
-            angle += degreesPerSecond * WorldMotionTime.FixedDeltaTime;
+            float step = degreesPerSecond * WorldMotionTime.FixedDeltaTime;
+            angle += step;
             ApplyRotation();
+            CarryStuckRider(step);
+        }
+
+        // Anything crash-stuck to this wall RIDES it round. Without this the player stays
+        // pinned at the world position they hit, and the face simply turns away from
+        // underneath them.
+        void CarryStuckRider(float stepDegrees)
+        {
+            if (Mathf.Abs(stepDegrees) < 0.0001f) return;
+            if (player == null) player = FindAnyObjectByType<KineticCubeController>();
+            if (player == null || !player.IsStuck) return;
+
+            // Only the rider on THIS wall - the crash surface records what they hit.
+            Collider stuckTo = player.LastCrashSurface;
+            if (stuckTo == null) return;
+            if (stuckTo.transform != transform && !stuckTo.transform.IsChildOf(transform)) return;
+
+            Vector3 axis = spinAxis.sqrMagnitude > 0.0001f ? spinAxis.normalized : Vector3.up;
+            Quaternion spinDelta = Quaternion.AngleAxis(stepDegrees, transform.TransformDirection(axis));
+            Vector3 offset = player.transform.position - transform.position;
+            player.CarryStuckRider(transform.position + spinDelta * offset, spinDelta);
         }
 
         void ApplyRotation()

@@ -483,6 +483,22 @@ namespace KineticEnergy.Player
         // The surface normal of the current crash-stick - lets outside systems tell a
         // WALL stick from a flat landing (the ground BoxCast can clip a hugged wall).
         public Vector3 StuckSurfaceNormal => stuckSurfaceNormal;
+
+        // A TURNING surface carries whatever is stuck to it. The stick pins velocity to
+        // zero every tick, so a rider would otherwise hang in world space while the face
+        // rotates out from under them. The surface calls this each physics tick with where
+        // the rider should now be; the stuck normal turns with it, so the launch that
+        // follows still fires away from the face rather than into it.
+        public void CarryStuckRider(Vector3 newPosition, Quaternion rotationDelta)
+        {
+            if (!isStuck) return;
+            transform.position = newPosition;
+            if (rb != null) rb.position = newPosition;
+            if (stuckSurfaceNormal.sqrMagnitude > 0.0001f)
+            {
+                stuckSurfaceNormal = (rotationDelta * stuckSurfaceNormal).normalized;
+            }
+        }
         public bool IsAimingOrCharging => isAiming || airAiming || holdChargeDirection != HoldChargeDirection.None;
         public bool HasLaunched => hasLaunched;
         public int LaunchesSinceGrounded => launchesSinceGrounded;
