@@ -90,7 +90,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 252bec8795f7e0842b06240a9643ddd5, type: 2}
+  - {fileID: 2100000, guid: dad1894cda8824343a39c66741379789, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -131,14 +131,17 @@ MonoBehaviour:
   flySpeed: 5
   pauseRange: {x: 0.2, y: 1}
   detectionRadius: 25
-  windUpSeconds: 0.4
-  attackCooldown: 0.8
+  windUpSeconds: 0.8
+  attackCooldown: 1.5
   windUpColor: {r: 1, g: 0.25, b: 0.15, a: 1}
-  projectileSpeed: 30
+  hunchPitchDegrees: 18
+  turnSpeed: 4.8
+  postFireHoldSeconds: 1
+  projectileSpeed: 26
   projectileLifetimeSeconds: 10
-  projectileKnockback: 22
+  projectileKnockback: 16
   projectileEnergyDrain: 0.1
-  projectileLaunchLock: 0.5
+  projectileLaunchLock: 0.4
   projectileScale: {x: 0.35, y: 0.6, z: 0.35}
   projectileColor: {r: 0.9, g: 0.1, b: 0.08, a: 1}
   weakSpot: {fileID: 2158824410075985085}
@@ -230,7 +233,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 7fc40d79f6a952d49b5b79c29bd7bfc6, type: 2}
+  - {fileID: 2100000, guid: 35b5007c079582c419986c577228aa6c, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0

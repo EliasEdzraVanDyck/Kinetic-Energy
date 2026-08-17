@@ -2288,6 +2288,35 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Checkpoint button prefab updated in place OK");
         }
 
+        // Tunes the weak-spot flyer's posture and turning. COMPONENT VALUES ONLY - the
+        // model (the body, and the hand-placed weak spot on it) is not touched: the hunch
+        // is a rotation the flyer holds while flying, not a change to how it is built.
+        [MenuItem("Tools/Kinetic Energy/Tune WeakSpot Flyer Posture")]
+        public static void TuneWeakSpotFlyerPosture()
+        {
+            string path = PrefabFolder + "/WeakSpotFlyer.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(path);
+            try
+            {
+                FlyingEnemy flyer = root.GetComponent<FlyingEnemy>();
+                if (flyer == null) throw new Exception("KineticEnergySetup: WeakSpotFlyer has no FlyingEnemy component.");
+
+                // Nose-down, so the back-mounted weak spot rides tilted upward and can be
+                // reached from above.
+                flyer.hunchPitchDegrees = 22f;
+                // 20% off the standard 6 - heavier, slower to bring its aim round.
+                flyer.turnSpeed = 4.8f;
+                // A full second sitting still after the shot: the committed, readable beat.
+                flyer.postFireHoldSeconds = 1f;
+                EditorUtility.SetDirty(flyer);
+
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: WeakSpotFlyer posture tuned OK (hunch 22, turn 4.8, hold 1s)");
+        }
+
         // The flying rotated slabs - turret walls, the flyer-section side walls and the
         // arena ledges - are LANDING TARGETS, so the aim must read them green on every face
         // rather than only where they happen to point upward. The rule for that already

@@ -121,6 +121,13 @@ namespace KineticEnergy.Level
                 Button.localPosition = raisedLocalPosition + (claimed ? Vector3.down * pressDepth : Vector3.zero);
             }
             if (buttonRenderer != null) buttonRenderer.material.color = claimed ? pressedColor : idleColor;
+
+            // A pressed button stops being an obstacle: its collider switches off, so
+            // launches and the aim prediction pass straight through where it stood (the
+            // prediction mirrors disabled colliders as absent, so the cursor agrees). The
+            // FRAME stays solid, so the player still rests over the top of it rather than
+            // dropping through the checkpoint.
+            if (buttonCollider != null) buttonCollider.enabled = !claimed;
         }
     }
 }

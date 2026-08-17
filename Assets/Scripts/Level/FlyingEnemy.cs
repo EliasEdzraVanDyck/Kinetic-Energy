@@ -36,6 +36,14 @@ namespace KineticEnergy.Level
         public float attackCooldown = 2.5f;
         public Color windUpColor = new Color(1f, 0.25f, 0.15f);
 
+        [Header("Posture and turning")]
+        [Tooltip("Degrees the body is pitched NOSE-DOWN while flying. A hunched flyer carries anything mounted on its back tilted upward - which is what makes a back weak spot reachable from above.")]
+        public float hunchPitchDegrees = 0f;
+        [Tooltip("Degrees per second the body turns (as a slerp rate). Lower = heavier, slower to bring its aim round.")]
+        public float turnSpeed = 6f;
+        [Tooltip("Seconds after firing during which it neither moves nor turns - a committed, readable pause the player can punish.")]
+        public float postFireHoldSeconds = 0f;
+
         [Header("Projectile")]
         public float projectileSpeed = 26f;
         public float projectileLifetimeSeconds = 6f;
@@ -58,6 +66,7 @@ namespace KineticEnergy.Level
 
         Vector3 spawnPoint;
         Vector3 currentTarget;
+        float postFireHoldRemaining;
         float pauseRemaining;
         FlyerState state = FlyerState.Patrol;
         float stateTimer;
@@ -88,6 +97,13 @@ namespace KineticEnergy.Level
             switch (state)
             {
                 case FlyerState.Patrol:
+                    // The post-shot hold: frozen outright - no drift, no turning, no fresh
+                    // windup. It has committed to the shot and has to sit in it.
+                    if (postFireHoldRemaining > 0f)
+                    {
+                        postFireHoldRemaining -= dt;
+                        break;
+                    }
                     UpdatePatrol(dt);
                     if (cooldownRemaining <= 0f && PlayerInRange()) BeginWindUp();
                     break;
@@ -138,12 +154,17 @@ namespace KineticEnergy.Level
                 offset.z * flyRadius);
         }
 
+        // Turning is only ever toward where it is GOING (while patrolling) or toward the
+        // player (while winding up to shoot) - it never swings round to track an incoming
+        // player on its own. The hunch rides on top of whichever it is, so the body keeps
+        // its nose-down posture through every turn.
         void FaceTowards(Vector3 point, float dt)
         {
             Vector3 look = point - body.position;
             if (look.sqrMagnitude < 0.001f) return;
-            Quaternion target = Quaternion.LookRotation(look.normalized, Vector3.up);
-            body.MoveRotation(Quaternion.Slerp(body.rotation, target, 6f * dt));
+            Quaternion target = Quaternion.LookRotation(look.normalized, Vector3.up)
+                * Quaternion.Euler(hunchPitchDegrees, 0f, 0f);
+            body.MoveRotation(Quaternion.Slerp(body.rotation, target, turnSpeed * dt));
         }
 
         // ---------- Attack ----------
@@ -171,6 +192,7 @@ namespace KineticEnergy.Level
         {
             state = FlyerState.Patrol;
             cooldownRemaining = attackCooldown;
+            postFireHoldRemaining = postFireHoldSeconds;
             if (bodyRenderer != null) bodyRenderer.material.color = restColor;
             if (player == null) return;
 
@@ -227,6 +249,7 @@ namespace KineticEnergy.Level
             state = FlyerState.Patrol;
             pauseRemaining = 0f;
             cooldownRemaining = 0f;
+            postFireHoldRemaining = 0f;
             if (bodyRenderer != null) bodyRenderer.material.color = restColor;
             PickNewTarget();
             gameObject.SetActive(true);
