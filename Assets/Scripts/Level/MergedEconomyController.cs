@@ -145,6 +145,8 @@ namespace KineticEnergy.Level
         [Range(0f, 1f)] public float totalLossKeepFraction = 0f;
         [Tooltip("A combo window that runs dry while you are AIRBORNE cuts the midair aim and drops you - the held flight is forfeited and you fall. Off where the window is purely an economy timer.")]
         public bool dropPlayerWhenWindowExpires = false;
+        [Tooltip("Standing still refills you below the baseline even while a combo window is still running. Off, the recharge waits for the chain to lapse so the chain stays the only income.")]
+        public bool regenWhileComboRunning = false;
         [Tooltip("Show the bottom-right variant tag (off in the locked test scenes).")]
         public bool showHudTag = true;
 
@@ -419,7 +421,7 @@ namespace KineticEnergy.Level
                 // recharge must run on every platform type alike). It also WAITS for the
                 // combo meter to go idle: while a chain window is live (or a chained
                 // launch is in the air), the chain is the income - no double-dipping.
-                bool comboIdle = windowRemaining <= 0f;
+                bool comboIdle = regenWhileComboRunning || windowRemaining <= 0f;
                 bool restingOnSurface = controller.IsGrounded || controller.IsStuck;
                 if (comboIdle && restingOnSurface && energyNow < ActiveSafetyCeiling)
                 {

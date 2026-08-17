@@ -268,7 +268,11 @@ namespace KineticEnergy.Level
 
             // Hunter: genuinely falling (not a step-down) - launch back to a platform
             // instead of dropping into the void.
-            if (returnLaunchToPlatform && lastMoveUnsupported && fallVelocity < -4f)
+            // The return launch is for being stranded MID-RUN, never for the drop onto the
+            // ground at spawn: a stalker placed even slightly above its platform used to
+            // read that first fall as the void and launch itself into the air on boot and
+            // after every respawn. It has to have stood somewhere first.
+            if (returnLaunchToPlatform && groundedSinceSpawn && lastMoveUnsupported && fallVelocity < -4f)
             {
                 return TryReturnLaunch();
             }
@@ -282,6 +286,7 @@ namespace KineticEnergy.Level
         }
 
         bool lastMoveUnsupported; // set by WithGroundedY - drives the hunter's return launch
+        bool groundedSinceSpawn;  // gates that launch until the enemy has actually landed
         bool returnLaunching;     // a return hop is in flight - no re-trigger until it lands
         bool lastFlightWasAttack; // Land() opens the punish window only after real attacks
         float dodgeCooldownRemaining;
@@ -301,9 +306,18 @@ namespace KineticEnergy.Level
             // checkpoint pad (or any trigger hovering over a platform) was being treated as
             // the surface below - the enemy came to rest on top of THAT and hung in the air
             // above the platform instead of falling to it.
-            if (Physics.Raycast(next + Vector3.up * 0.05f, Vector3.down, out RaycastHit hit, bodyRadius + 8f,
+            //
+            // The ray starts ABOVE the body, not just inside it: a ray beginning inside a
+            // collider does not report it, so an enemy that ended up level with (or inside)
+            // a platform saw no ground at all and sank straight through it before catching
+            // itself. Starting clear of its own body finds the surface and lifts it out.
+            float probeLift = bodyRadius + 0.5f;
+            if (Physics.Raycast(next + Vector3.up * probeLift, Vector3.down, out RaycastHit hit, probeLift + 8f,
                     Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
-                && hit.collider.GetComponent<KineticCubeController>() == null)
+                && hit.collider.GetComponent<KineticCubeController>() == null
+                // The hazard floor is not a place to stand or aim for - falling onto it
+                // must read as falling into the void, which resets the enemy.
+                && hit.collider.GetComponentInParent<DamageWalls>() == null)
             {
                 float restY = hit.point.y + bodyRadius;
                 if (next.y > restY + 0.02f)
@@ -315,7 +329,11 @@ namespace KineticEnergy.Level
                 {
                     next.y = restY;
                 }
-                if (next.y <= restY + 0.001f) fallVelocity = 0f;
+                if (next.y <= restY + 0.001f)
+                {
+                    fallVelocity = 0f;
+                    groundedSinceSpawn = true; // it has stood on something now
+                }
             }
             else
             {
@@ -804,6 +822,9 @@ namespace KineticEnergy.Level
             cooldownRemaining = 0f;
             fallVelocity = 0f;
             returnLaunching = false;
+            // A fresh spawn has not touched down yet, so it must not read its opening
+            // descent as "stranded over the void" and hurl itself at a platform.
+            groundedSinceSpawn = false;
             lastFlightWasAttack = false;
             dodgeCooldownRemaining = 0f;
             vulnerableTimer = 0f;

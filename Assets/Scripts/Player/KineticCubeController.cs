@@ -503,20 +503,20 @@ namespace KineticEnergy.Player
         // rotates out from under them. The surface calls this each physics tick with where
         // the rider should now be; the stuck normal turns with it, so the launch that
         // follows still fires away from the face rather than into it.
-        public void CarryStuckRider(Vector3 newPosition, Quaternion rotationDelta)
+        // A turning surface carries its rider by VELOCITY, never by writing a position.
+        // Moving the body directly - however it was queued or smoothed - fights the stick's
+        // per-tick velocity pin and resets interpolation every frame, which is what made
+        // the ride vibrate. Handing the pin a velocity instead means the rider is moved by
+        // the physics step itself, exactly the way a moving platform carries you.
+        public void CarryStuckRider(Vector3 riderVelocity, Quaternion rotationDelta)
         {
             if (!isStuck) return;
-            // QUEUED, not applied here. The surface's FixedUpdate and this component's run
-            // in an undefined order, so writing the position here fought the stick's own
-            // per-tick velocity pin - one would land after the other on alternating frames
-            // and the ride visibly vibrated. It is applied in FixedUpdate instead, directly
-            // after the pin, so the two can never disagree.
-            pendingCarryPosition = newPosition;
+            stuckCarryVelocity = riderVelocity;
             pendingCarryRotation = rotationDelta;
             hasPendingCarry = true;
         }
 
-        Vector3 pendingCarryPosition;
+        Vector3 stuckCarryVelocity;
         Quaternion pendingCarryRotation = Quaternion.identity;
         bool hasPendingCarry;
         public bool IsAimingOrCharging => isAiming || airAiming || holdChargeDirection != HoldChargeDirection.None;
@@ -1253,7 +1253,13 @@ namespace KineticEnergy.Player
                 ApplyZeroDampingMatch(chargeFraction, ref force, ref damping);
                 // The wall-launch momentum carry is part of the flight - shown here so
                 // the cursor stays honest about it.
-                ShowLandingPreview(direction * force / rb.mass + rb.linearVelocity + WallMomentumCarry(direction), damping);
+                // The MOVER's carry is excluded, exactly as the launch itself excludes it.
+                // Standing on a platform makes rb.linearVelocity the platform's motion, so
+                // the previewed arc leaned with the ride while the real shot flew straight
+                // down the arrow - the two disagreed the whole time you were on a mover.
+                Vector3 previewBase = rb.linearVelocity;
+                if (freeMoveController != null && isGrounded) previewBase -= freeMoveController.GroundPlatformVelocity;
+                ShowLandingPreview(direction * force / rb.mass + previewBase + WallMomentumCarry(direction), damping);
 
                 bool firePressed = groundedLaunchAction != null && groundedLaunchAction.action != null && groundedLaunchAction.action.WasPressedThisFrame();
                 if (firePressed)
@@ -2052,22 +2058,21 @@ namespace KineticEnergy.Player
                 // On a moving platform, "frozen" means frozen RELATIVE TO THE PLATFORM -
                 // the ride continues through a grounded aim instead of the platform
                 // sliding out from under it.
-                rb.linearVelocity = isGrounded && freeMoveController != null
-                    ? freeMoveController.GroundPlatformVelocity
-                    : Vector3.zero;
+                // Frozen means frozen RELATIVE TO WHATEVER CARRIES YOU: a moving platform
+                // underfoot, or a rotating surface you are stuck to. Both are expressed as
+                // the velocity the pin holds, so the physics step does the moving and the
+                // ride stays as smooth as the platform's.
+                Vector3 carryVelocity = Vector3.zero;
+                if (hasPendingCarry && isStuck) carryVelocity = stuckCarryVelocity;
+                else if (isGrounded && freeMoveController != null) carryVelocity = freeMoveController.GroundPlatformVelocity;
+                rb.linearVelocity = carryVelocity;
                 rb.angularVelocity = Vector3.zero;
 
-                // A TURNING surface carries its rider - applied right after the pin, in the
-                // one place that owns the stuck body, and through MovePosition so the move
-                // is interpolated rather than teleported (a direct position write resets
-                // interpolation every tick, which is the other half of the stutter).
-                if (hasPendingCarry && isStuck)
+                // The face turns under you, so the stuck normal turns with it - the launch
+                // that follows still fires away from the surface rather than into it.
+                if (hasPendingCarry && isStuck && stuckSurfaceNormal.sqrMagnitude > 0.0001f)
                 {
-                    rb.MovePosition(pendingCarryPosition);
-                    if (stuckSurfaceNormal.sqrMagnitude > 0.0001f)
-                    {
-                        stuckSurfaceNormal = (pendingCarryRotation * stuckSurfaceNormal).normalized;
-                    }
+                    stuckSurfaceNormal = (pendingCarryRotation * stuckSurfaceNormal).normalized;
                 }
                 hasPendingCarry = false;
             }
@@ -2135,8 +2140,18 @@ namespace KineticEnergy.Player
                 : new Vector3(0.4f, 0.05f, 0.4f);
             // Triggers are never ground either - finish volumes and checkpoint pads sit
             // right where the player stands, and standing ON one would be nonsense.
+            // The probe also follows a DESCENDING platform down (see the free-move
+            // controller's matching reach): losing contact tick by tick on a lift dropped
+            // the frozen aim's platform carry too, which is why aiming on a mover drifted.
+            float descentReach = 0f;
+            if (freeMoveController != null && freeMoveController.OnMovingPlatform
+                && freeMoveController.GroundPlatformVelocity.y < 0f)
+            {
+                descentReach = -freeMoveController.GroundPlatformVelocity.y * Time.fixedDeltaTime + 0.05f;
+            }
             isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out RaycastHit groundHit,
-                transform.rotation, groundCheckDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+                transform.rotation, groundCheckDistance + descentReach,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
 
             // Standing on the ground with no flight in progress restores the per-flight
             // launch budget and the energy floor.
@@ -2701,7 +2716,12 @@ namespace KineticEnergy.Player
                 GameObject proxy = new GameObject("PredictionGeometryProxy");
                 SceneManager.MoveGameObjectToScene(proxy, predictionScene);
 
-                PredictionGeometryProxy entry = new PredictionGeometryProxy { source = col, proxy = proxy };
+                PredictionGeometryProxy entry = new PredictionGeometryProxy
+                {
+                    source = col,
+                    proxy = proxy,
+                    mover = col.GetComponentInParent<MovingPlatform>(),
+                };
                 if (col is BoxCollider)
                 {
                     entry.proxyBox = proxy.AddComponent<BoxCollider>();
@@ -2736,6 +2756,9 @@ namespace KineticEnergy.Player
         {
             public Collider source;
             public GameObject proxy;
+            // Set when the mirrored collider belongs to a moving platform - the proxy is
+            // then offset by that platform's travel over the previewed flight.
+            public MovingPlatform mover;
             public BoxCollider proxyBox;
             public SphereCollider proxySphere;
             public CapsuleCollider proxyCapsule;
@@ -2761,7 +2784,16 @@ namespace KineticEnergy.Player
         void MirrorGeometryProxy(PredictionGeometryProxy entry)
         {
             Transform sourceTransform = entry.source.transform;
-            entry.proxy.transform.SetPositionAndRotation(sourceTransform.position, sourceTransform.rotation);
+            // A MOVING platform is mirrored where it WILL BE when this shot arrives, not
+            // where it is now - so the trail and cursor settle on the platform's future
+            // position, which is exactly what its ghost draws. The lead uses the previous
+            // frame's flight estimate (the same figure the ghost and lead arrow use).
+            Vector3 leadOffset = Vector3.zero;
+            if (entry.mover != null && lastPredictedFlightRealSeconds > 0f)
+            {
+                leadOffset = entry.mover.LeadOffset(lastPredictedFlightRealSeconds);
+            }
+            entry.proxy.transform.SetPositionAndRotation(sourceTransform.position + leadOffset, sourceTransform.rotation);
             entry.proxy.transform.localScale = sourceTransform.lossyScale;
 
             if (entry.proxyBox != null && entry.source is BoxCollider sourceBox)

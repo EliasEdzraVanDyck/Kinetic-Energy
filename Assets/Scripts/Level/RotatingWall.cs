@@ -62,9 +62,17 @@ namespace KineticEnergy.Level
             if (stuckTo.transform != transform && !stuckTo.transform.IsChildOf(transform)) return;
 
             Vector3 axis = spinAxis.sqrMagnitude > 0.0001f ? spinAxis.normalized : Vector3.up;
-            Quaternion spinDelta = Quaternion.AngleAxis(stepDegrees, transform.TransformDirection(axis));
+            Vector3 worldAxis = transform.TransformDirection(axis);
+            Quaternion spinDelta = Quaternion.AngleAxis(stepDegrees, worldAxis);
+
+            // The rider's TANGENTIAL VELOCITY (omega x r) rather than a target position -
+            // the controller hands this straight to the stick's velocity pin, so the
+            // physics step moves the player and nothing teleports. Converted to real
+            // seconds, since the wall itself advances on world-motion time.
+            float realDegreesPerSecond = stepDegrees / Mathf.Max(Time.fixedDeltaTime, 0.0001f);
+            Vector3 omega = worldAxis * (realDegreesPerSecond * Mathf.Deg2Rad);
             Vector3 offset = player.transform.position - transform.position;
-            player.CarryStuckRider(transform.position + spinDelta * offset, spinDelta);
+            player.CarryStuckRider(Vector3.Cross(omega, offset), spinDelta);
         }
 
         void ApplyRotation()

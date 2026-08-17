@@ -1215,6 +1215,193 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: grounded charge ramp stamped OK (" + ramp + " in both aim scenes)");
         }
 
+        // Drops every ground enemy straight DOWN onto the surface beneath it - x and z are
+        // untouched, only the resting height is corrected. An enemy left hanging above (or
+        // sunk into) its platform is what made them clip through and hurl themselves at a
+        // platform on spawn.
+        [MenuItem("Tools/Kinetic Energy/Snap Ground Enemies To Their Platforms")]
+        public static void SnapGroundEnemiesToPlatforms()
+        {
+            foreach (string scenePath in new[]
+            {
+                "Assets/Scenes/LevelElementsTest.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                int moved = 0;
+                foreach (Enemy walker in UnityEngine.Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    Transform body = walker.transform;
+                    float bodyRadius = body.localScale.x * 0.5f;
+                    // Probe from well ABOVE, so a body that currently sits inside the deck
+                    // still finds the top face rather than missing it from within.
+                    Vector3 origin = body.position + Vector3.up * 30f;
+                    RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, 200f,
+                        Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+
+                    float bestY = float.NegativeInfinity;
+                    foreach (RaycastHit hit in hits)
+                    {
+                        if (hit.collider == null) continue;
+                        if (hit.collider.GetComponentInParent<Enemy>() != null) continue;        // itself or a neighbour
+                        if (hit.collider.GetComponentInParent<FlyingEnemy>() != null) continue;
+                        if (hit.collider.GetComponentInParent<KineticCubeController>() != null) continue;
+                        if (hit.collider.GetComponentInParent<DamageWalls>() != null) continue;  // never the hazard floor
+                        if (hit.point.y > body.position.y + 1f) continue;                        // ceilings above it
+                        if (hit.point.y > bestY) bestY = hit.point.y;
+                    }
+                    if (float.IsNegativeInfinity(bestY)) continue; // nothing below - leave it alone
+
+                    Vector3 settled = new Vector3(body.position.x, bestY + bodyRadius, body.position.z);
+                    if ((settled - body.position).sqrMagnitude < 0.0001f) continue;
+                    body.position = settled;
+                    EditorUtility.SetDirty(body);
+                    moved++;
+                }
+
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: settled " + moved + " ground enemies in " + scenePath);
+            }
+            AssetDatabase.SaveAssets();
+        }
+
+        // SURGICAL tuning pass over both element scenes: values already serialized on scene
+        // instances do not follow a code default, so they are written here. Nothing else in
+        // either scene is touched.
+        [MenuItem("Tools/Kinetic Energy/Tune Element Scenes")]
+        public static void TuneElementScenes()
+        {
+            const float laserKnockback = 16.5f; // 25% under the enemy-projectile 22
+
+            foreach (string scenePath in new[]
+            {
+                "Assets/Scenes/LevelElementsTest.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                int beams = 0;
+                foreach (LaserHazard beam in UnityEngine.Object.FindObjectsByType<LaserHazard>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    beam.knockbackForce = laserKnockback;
+                    EditorUtility.SetDirty(beam);
+                    beams++;
+                }
+
+                MergedEconomyController economy = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
+                if (economy != null)
+                {
+                    // Standing still pays below the baseline even mid-chain.
+                    economy.regenWhileComboRunning = true;
+                    EditorUtility.SetDirty(economy);
+                }
+
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: tuned " + scenePath + " OK (" + beams + " laser beams at "
+                    + laserKnockback + ", regen-during-combo on)");
+            }
+            AssetDatabase.SaveAssets();
+        }
+
+        // Copies the turret section from LevelElementsTest into LevelElementsTest2 at the
+        // SAME placement it has in the source scene, so the two courses stay aligned even
+        // after the source has been moved around by hand. Additive - nothing else is touched.
+        [MenuItem("Tools/Kinetic Energy/Restore Turret Section In LevelElementsTest2")]
+        public static void RestoreTurretSectionInTest2()
+        {
+            string[] copyNames = { "TurretRun1", "TurretRun2", "TurretWallLeft", "TurretWallRight" };
+
+            // ---- Read the placement out of the source scene ----
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest.unity", OpenSceneMode.Single);
+            var placements = new List<(string name, Vector3 pos, Quaternion rot, Vector3 scale)>();
+            foreach (string name in copyNames)
+            {
+                GameObject go = GameObject.Find(name);
+                if (go == null) continue;
+                placements.Add((name, go.transform.position, go.transform.rotation, go.transform.localScale));
+            }
+            var turretPlacements = new List<(string name, Vector3 pos, Quaternion rot)>();
+            foreach (TurretEnemy turret in UnityEngine.Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                turretPlacements.Add((turret.name, turret.transform.position, turret.transform.rotation));
+            }
+            GameObject sourcePad = GameObject.Find("7 - TurretsPad");
+            GameObject sourceSpawn = GameObject.Find("7 - TurretsSpawn");
+            GameObject sourceCheckpoint = GameObject.Find("7 - TurretsCheckpoint");
+            if (sourcePad == null || sourceSpawn == null)
+            {
+                throw new Exception("KineticEnergySetup: LevelElementsTest has no turret section to copy.");
+            }
+            Vector3 padPos = sourcePad.transform.position, padScale = sourcePad.transform.localScale;
+            Vector3 spawnPos = sourceSpawn.transform.position;
+            Vector3 cpPos = sourceCheckpoint != null ? sourceCheckpoint.transform.position : spawnPos;
+            Vector3 cpScale = sourceCheckpoint != null ? sourceCheckpoint.transform.localScale : Vector3.one;
+
+            // ---- Rebuild it in the variant ----
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest2.unity", OpenSceneMode.Single);
+            Material platformMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/QuarryPlatformMaterial.mat");
+            Material wallMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/ElementsWallMaterial.mat");
+            Material damageMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/DamageWallMaterial.mat");
+            GameObject course = GameObject.Find("ElementsCourse");
+            Transform tf = course != null ? course.transform : null;
+
+            foreach (string stale in new[] { "7 - TurretsPad", "7 - TurretsSpawn", "7 - TurretsCheckpoint" })
+            {
+                GameObject old = GameObject.Find(stale);
+                if (old != null) UnityEngine.Object.DestroyImmediate(old);
+            }
+
+            GameObject pad = CreateBlock(tf, "7 - TurretsPad", padPos, padScale, platformMat);
+            pad.AddComponent<StickySurface>();
+            GameObject spawn = new GameObject("7 - TurretsSpawn");
+            spawn.transform.SetParent(tf, false);
+            spawn.transform.position = spawnPos;
+
+            GameObject checkpoint = InstantiatePrefab("Checkpoint");
+            checkpoint.name = "7 - TurretsCheckpoint";
+            checkpoint.transform.SetParent(tf, false);
+            checkpoint.transform.position = cpPos;
+            checkpoint.transform.localScale = cpScale;
+            checkpoint.GetComponent<Checkpoint>().respawnPoint = spawn.transform;
+
+            foreach (var placement in placements)
+            {
+                GameObject old = GameObject.Find(placement.name);
+                if (old != null) UnityEngine.Object.DestroyImmediate(old);
+                bool isWall = placement.name.Contains("Wall");
+                GameObject block = CreateBlock(tf, placement.name, placement.pos, placement.scale,
+                    isWall ? wallMat : platformMat);
+                block.transform.rotation = placement.rot;
+                if (isWall && damageMat != null) AddDamageShell(block.transform, spawn.transform, damageMat);
+            }
+            foreach (var placement in turretPlacements)
+            {
+                GameObject turretGo = InstantiatePrefab("TurretEnemy");
+                turretGo.name = placement.name;
+                turretGo.transform.SetPositionAndRotation(placement.pos, placement.rot);
+            }
+
+            LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
+            if (sections != null)
+            {
+                var list = new List<LevelSectionController.Section>(sections.sections);
+                list.Add(new LevelSectionController.Section { label = "7 - Turrets", spawnPoint = spawn.transform });
+                sections.sections = list.ToArray();
+                RefreshSectionHazards(sections);
+                RebuildSectionsScreenButtons(sections);
+            }
+
+            EditorSceneManager.SaveOpenScenes();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: turret section restored in LevelElementsTest2 OK ("
+                + turretPlacements.Count + " turrets)");
+        }
+
         // LevelElementsTest2: the same course, harder cast. Flyers become weak-spot flyers
         // (one extra, with angled side walls), ground enemies become stalkers on a bigger
         // arena flanked by tilted non-sticky ledges, and the turret section is gone.

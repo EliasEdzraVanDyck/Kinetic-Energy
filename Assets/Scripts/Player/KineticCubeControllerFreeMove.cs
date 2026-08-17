@@ -283,7 +283,17 @@ namespace KineticEnergy.Player
             Vector3 halfExtents = boxCollider != null
                 ? new Vector3(boxCollider.bounds.extents.x * 0.9f, 0.05f, boxCollider.bounds.extents.z * 0.9f)
                 : new Vector3(0.4f, 0.05f, 0.4f);
-            isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out RaycastHit hit, transform.rotation, groundCheckDistance);
+            // A DESCENDING platform outruns a fixed ground probe: it drops further in one
+            // physics tick than the probe reaches, so contact was lost and regained over and
+            // over - the player fell after it under gravity each time, which is the hop felt
+            // when a lift turns over at the top. The probe is lengthened by exactly how far
+            // the platform underfoot will fall this tick.
+            float descentReach = OnMovingPlatform && GroundPlatformVelocity.y < 0f
+                ? -GroundPlatformVelocity.y * Time.fixedDeltaTime + 0.05f
+                : 0f;
+            isGrounded = Physics.BoxCast(transform.position, halfExtents, Vector3.down, out RaycastHit hit,
+                transform.rotation, groundCheckDistance + descentReach,
+                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
 
             // Moving platform underfoot? Its velocity becomes the rider's base velocity.
             MovingPlatform platform = isGrounded && hit.collider != null && hit.collider.attachedRigidbody != null

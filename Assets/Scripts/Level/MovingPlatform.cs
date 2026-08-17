@@ -22,8 +22,8 @@ namespace KineticEnergy.Level
         public Color arrowColor = new Color(0.2f, 0.5f, 1f);
         [Tooltip("Thickness of the lead arrow's shaft.")]
         public float arrowThickness = 0.35f;
-        [Tooltip("How far above the platform's centre the arrow floats.")]
-        public float arrowHeightOffset = 1.2f;
+        [Tooltip("Colour of the ghost showing where the platform will be when the shot lands.")]
+        public Color ghostColor = new Color(0.35f, 0.65f, 1f, 0.3f);
 
         Vector3 startPosition;
         KineticCubeController player;
@@ -36,6 +36,8 @@ namespace KineticEnergy.Level
         Transform shaft;
         Transform head;
         Material arrowMaterial;
+        Transform ghost;
+        Material ghostMaterial;
 
         void Start()
         {
@@ -79,6 +81,14 @@ namespace KineticEnergy.Level
             return startPosition + moveOffset * t01;
         }
 
+        // How far this platform will have travelled in `seconds` from now. The landing
+        // PREDICTION shifts its stand-in for this platform by exactly this, so the trail and
+        // cursor land where the platform will actually be - which is what the ghost draws.
+        public Vector3 LeadOffset(float seconds)
+        {
+            return CentreAt(clock + seconds) - CentreAt(clock);
+        }
+
         void Update()
         {
             if (arrowRoot == null) return;
@@ -96,16 +106,23 @@ namespace KineticEnergy.Level
                 if (length < 0.05f) show = false; // effectively stationary over the lead time
                 else
                 {
-                    arrowRoot.SetPositionAndRotation(
-                        current + Vector3.up * arrowHeightOffset,
-                        Quaternion.LookRotation(delta / length, Vector3.up));
+                    // CENTRE to CENTRE: the arrow starts inside the platform and ends inside
+                    // the ghost, so it reads as one object pointing at the other.
+                    arrowRoot.SetPositionAndRotation(current, Quaternion.LookRotation(delta / length, Vector3.up));
                     shaft.localScale = new Vector3(arrowThickness, arrowThickness, length);
                     shaft.localPosition = new Vector3(0f, 0f, length * 0.5f);
                     head.localPosition = new Vector3(0f, 0f, length);
+
+                    if (ghost != null)
+                    {
+                        ghost.SetPositionAndRotation(future, transform.rotation);
+                        ghost.localScale = transform.lossyScale;
+                    }
                 }
             }
 
             if (arrowRoot.gameObject.activeSelf != show) arrowRoot.gameObject.SetActive(show);
+            if (ghost != null && ghost.gameObject.activeSelf != show) ghost.gameObject.SetActive(show);
         }
 
         // Built in code so the prefab stays a single self-contained piece. No colliders on
@@ -132,6 +149,37 @@ namespace KineticEnergy.Level
             ConfigureArrowPart(head);
 
             arrowRoot.gameObject.SetActive(false);
+            BuildGhost();
+        }
+
+        // A see-through copy of the platform, parked where it will be when the previewed
+        // shot arrives. NO COLLIDER: the flight must pass straight through it, and the
+        // landing prediction already accounts for the platform's travel by moving its own
+        // stand-in (see MovingPlatform.LeadOffset), so the cursor settles on the ghost
+        // without the ghost itself being solid.
+        void BuildGhost()
+        {
+            GameObject ghostGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            ghostGo.name = "MoveLeadGhost";
+            Destroy(ghostGo.GetComponent<Collider>());
+            ghost = ghostGo.transform;
+
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (shader == null) shader = Shader.Find("Standard");
+            ghostMaterial = new Material(shader);
+            ghostMaterial.color = ghostColor;
+            if (ghostMaterial.HasProperty("_BaseColor")) ghostMaterial.SetColor("_BaseColor", ghostColor);
+            if (ghostMaterial.HasProperty("_Surface")) ghostMaterial.SetFloat("_Surface", 1f);
+            if (ghostMaterial.HasProperty("_SrcBlend")) ghostMaterial.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            if (ghostMaterial.HasProperty("_DstBlend")) ghostMaterial.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            if (ghostMaterial.HasProperty("_ZWrite")) ghostMaterial.SetFloat("_ZWrite", 0f);
+            ghostMaterial.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            ghostMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+
+            Renderer ghostRenderer = ghostGo.GetComponent<Renderer>();
+            ghostRenderer.sharedMaterial = ghostMaterial;
+            ghostRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            ghostGo.SetActive(false);
         }
 
         void ConfigureArrowPart(Transform part)
@@ -145,6 +193,8 @@ namespace KineticEnergy.Level
         {
             if (arrowRoot != null) Destroy(arrowRoot.gameObject);
             if (arrowMaterial != null) Destroy(arrowMaterial);
+            if (ghost != null) Destroy(ghost.gameObject);
+            if (ghostMaterial != null) Destroy(ghostMaterial);
         }
     }
 }

@@ -11,8 +11,8 @@ namespace KineticEnergy.Level
     // Works as a solid collider or a trigger volume alike (the beams are kinematic).
     public class LaserHazard : MonoBehaviour
     {
-        [Tooltip("Impulse applied to the player on contact - the enemy-projectile value by default.")]
-        public float knockbackForce = 22f;
+        [Tooltip("Impulse applied to the player on contact. Softer than an enemy projectile's 22 - a beam nudges you off course rather than throwing you.")]
+        public float knockbackForce = 16.5f;
         [Tooltip("Energy fraction the player loses per hit.")]
         [Range(0f, 1f)] public float energyDrain = 0.1f;
         [Tooltip("Seconds the player cannot launch or aim after being hit.")]
