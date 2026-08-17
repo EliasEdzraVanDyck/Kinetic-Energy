@@ -1042,8 +1042,8 @@ namespace KineticEnergy.EditorSetup
             {
                 ChallengeStage.LimitedSlowdown,
                 ChallengeStage.OverchargeScatter,
-                ChallengeStage.ChasingWall,
                 ChallengeStage.SealingWalls,
+                ChallengeStage.ChasingWall,
                 ChallengeStage.ShrinkingPlatforms,
             };
             stages.lockedWinScreen = true; // the scene's self-contained "You win!" screen
@@ -1156,13 +1156,13 @@ namespace KineticEnergy.EditorSetup
 
             string[] variantLabels =
             {
-                "1 - Limited slowdown", "2 - Overcharge scatter", "3 - Chasing wall",
-                "4 - Sealing walls", "5 - Shrinking platforms",
+                "1 - Limited slowdown", "2 - Overcharge scatter", "3 - Sealing walls",
+                "4 - Chasing wall", "5 - Shrinking platforms",
             };
             UnityEngine.Events.UnityAction<string>[] variantCalls =
             {
-                pause.LoadChallengeStage1, pause.LoadChallengeStage2, pause.LoadChallengeStage3,
-                pause.LoadChallengeStage4, pause.LoadChallengeStage5,
+                pause.LoadChallengeStage1, pause.LoadChallengeStage2, pause.LoadChallengeStage4,
+                pause.LoadChallengeStage3, pause.LoadChallengeStage5,
             };
             GameObject firstVariantButton = null;
             float y = 160f;
@@ -1213,6 +1213,36 @@ namespace KineticEnergy.EditorSetup
             }
             AssetDatabase.SaveAssets();
             Debug.Log("KineticEnergySetup: grounded charge ramp stamped OK (" + ramp + " in both aim scenes)");
+        }
+
+        // ORDER-ONLY swap of the sealing and chasing stages in the live scene: the two
+        // sequence entries trade places, the info text renumbers, and the Variants screen
+        // is rebuilt in the new order. No tuning value is touched.
+        [MenuItem("Tools/Kinetic Energy/Swap Sealing And Chasing Order (Level1Challenge)")]
+        public static void SwapSealingChasingOrder()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/Level1Challenge.unity", OpenSceneMode.Single);
+            ChallengeStageController stages = UnityEngine.Object.FindAnyObjectByType<ChallengeStageController>(FindObjectsInactive.Include);
+            MergedEconomyController economy = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
+            if (stages == null || economy == null) throw new Exception("KineticEnergySetup: Level1Challenge is missing ChallengeStages or MergedEconomy.");
+
+            int chasing = System.Array.IndexOf(stages.stageSequence, ChallengeStage.ChasingWall);
+            int sealing = System.Array.IndexOf(stages.stageSequence, ChallengeStage.SealingWalls);
+            if (chasing < 0 || sealing < 0) throw new Exception("KineticEnergySetup: the scene's stage sequence is missing a stage to swap.");
+            if (chasing < sealing)
+            {
+                (stages.stageSequence[chasing], stages.stageSequence[sealing])
+                    = (stages.stageSequence[sealing], stages.stageSequence[chasing]);
+            }
+            EditorUtility.SetDirty(stages);
+
+            economy.introText = Level1ChallengeInfoText; // renumbered 3/4
+            EditorUtility.SetDirty(economy);
+            EditorSceneManager.SaveOpenScenes();
+
+            // The Variants screen rebuild carries the new order/labels (tuning untouched).
+            AddVariantsScreenToLevel1Challenge();
+            Debug.Log("KineticEnergySetup: sealing/chasing order swapped OK");
         }
 
         const float DamageShellThickness = 0.5f;
@@ -1316,8 +1346,8 @@ namespace KineticEnergy.EditorSetup
             "Aim too long and the slow-mo cuts out mid-flight. Every crash refills it.\n" +
             "2 - OVERCHARGE SCATTER: launches drift off target, and the orange ring at your landing spot shows how far. " +
             "The spread follows a square root curve, so the first energy you commit costs the most accuracy.\n" +
-            "3 - CHASING WALL: a purple wall sweeps the level and SPEEDS UP the longer it runs. Touching it respawns you.\n" +
-            "4 - SEALING WALLS: every platform you land on walls off the gap behind you. There is no way back.\n" +
+            "3 - SEALING WALLS: every platform you land on walls off the gap behind you. There is no way back.\n" +
+            "4 - CHASING WALL: a purple wall sweeps the level and SPEEDS UP the longer it runs. Touching it respawns you.\n" +
             "5 - SHRINKING PLATFORMS: each platform is smaller than the last, down to half size at the finish.\n\n" +
             "THE METER: the first 4 blocks (40%) are normal energy. The 6 taller blocks are boosted energy, " +
             "only combo bonuses and the groundpound boost can fill them.\n\n" +
