@@ -506,13 +506,19 @@ namespace KineticEnergy.Player
         public void CarryStuckRider(Vector3 newPosition, Quaternion rotationDelta)
         {
             if (!isStuck) return;
-            transform.position = newPosition;
-            if (rb != null) rb.position = newPosition;
-            if (stuckSurfaceNormal.sqrMagnitude > 0.0001f)
-            {
-                stuckSurfaceNormal = (rotationDelta * stuckSurfaceNormal).normalized;
-            }
+            // QUEUED, not applied here. The surface's FixedUpdate and this component's run
+            // in an undefined order, so writing the position here fought the stick's own
+            // per-tick velocity pin - one would land after the other on alternating frames
+            // and the ride visibly vibrated. It is applied in FixedUpdate instead, directly
+            // after the pin, so the two can never disagree.
+            pendingCarryPosition = newPosition;
+            pendingCarryRotation = rotationDelta;
+            hasPendingCarry = true;
         }
+
+        Vector3 pendingCarryPosition;
+        Quaternion pendingCarryRotation = Quaternion.identity;
+        bool hasPendingCarry;
         public bool IsAimingOrCharging => isAiming || airAiming || holdChargeDirection != HoldChargeDirection.None;
         public bool HasLaunched => hasLaunched;
         public int LaunchesSinceGrounded => launchesSinceGrounded;
@@ -2050,6 +2056,20 @@ namespace KineticEnergy.Player
                     ? freeMoveController.GroundPlatformVelocity
                     : Vector3.zero;
                 rb.angularVelocity = Vector3.zero;
+
+                // A TURNING surface carries its rider - applied right after the pin, in the
+                // one place that owns the stuck body, and through MovePosition so the move
+                // is interpolated rather than teleported (a direct position write resets
+                // interpolation every tick, which is the other half of the stutter).
+                if (hasPendingCarry && isStuck)
+                {
+                    rb.MovePosition(pendingCarryPosition);
+                    if (stuckSurfaceNormal.sqrMagnitude > 0.0001f)
+                    {
+                        stuckSurfaceNormal = (pendingCarryRotation * stuckSurfaceNormal).normalized;
+                    }
+                }
+                hasPendingCarry = false;
             }
 
             // Gradual drain: the launch's cost trickles out of the meter as the flight
@@ -2071,6 +2091,16 @@ namespace KineticEnergy.Player
                 nonStickyReleaseTimer = 0f;  // launching supersedes a pending timed release
                 rb.useGravity = true;        // back on, undoing the crash-stick
                 rb.linearDamping = queuedDamping;
+                // Shed the MOVER's carry first. The impulse is ADDED to current velocity,
+                // and while riding a platform that velocity is the platform's - so the shot
+                // silently gained the platform's speed and flipped with it at each end of
+                // the trip, which read as the platform steering your aim. The preview never
+                // included it either, so shot and cursor disagreed.
+                if (freeMoveController != null && isGrounded)
+                {
+                    Vector3 platformCarry = freeMoveController.GroundPlatformVelocity;
+                    if (platformCarry.sqrMagnitude > 0.0001f) rb.linearVelocity -= platformCarry;
+                }
                 rb.AddForce(queuedDirection * queuedForce, ForceMode.Impulse);
                 // The wall-launch momentum carry lands in the same tick as the impulse,
                 // AFTER the stuck state released - nothing can wipe it anymore.

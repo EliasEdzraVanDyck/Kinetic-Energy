@@ -1215,6 +1215,264 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: grounded charge ramp stamped OK (" + ramp + " in both aim scenes)");
         }
 
+        // LevelElementsTest2: the same course, harder cast. Flyers become weak-spot flyers
+        // (one extra, with angled side walls), ground enemies become stalkers on a bigger
+        // arena flanked by tilted non-sticky ledges, and the turret section is gone.
+        // Built by COPYING the scene, then editing it - the hand-placed checkpoints, intro
+        // text and section wiring all come across untouched.
+        [MenuItem("Tools/Kinetic Energy/Setup LevelElementsTest2")]
+        public static void SetupLevelElementsTest2()
+        {
+            const string sourcePath = "Assets/Scenes/LevelElementsTest.unity";
+            const string targetPath = "Assets/Scenes/LevelElementsTest2.unity";
+
+            AngleWeakSpotFlyerWeakSpot();
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(targetPath) != null) AssetDatabase.DeleteAsset(targetPath);
+            if (!AssetDatabase.CopyAsset(sourcePath, targetPath))
+            {
+                throw new Exception("KineticEnergySetup: could not copy LevelElementsTest to LevelElementsTest2.");
+            }
+            AssetDatabase.Refresh();
+            EditorSceneManager.OpenScene(targetPath, OpenSceneMode.Single);
+
+            ReplaceLooseRotatingWalls(); // the copy inherits the loose wall too
+
+            Material platformMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/QuarryPlatformMaterial.mat");
+            Material wallMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/ElementsWallMaterial.mat");
+            if (platformMat == null || wallMat == null) throw new Exception("KineticEnergySetup: course materials are missing.");
+
+            GameObject course = GameObject.Find("ElementsCourse");
+            Transform tf = course != null ? course.transform : null;
+            LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
+
+            // ---- Ground enemies -> STALKERS, on a bigger arena ----
+            foreach (string arenaName in new[] { "GroundArena1", "GroundArena2" })
+            {
+                GameObject arena = GameObject.Find(arenaName);
+                if (arena == null) continue;
+                Vector3 size = arena.transform.localScale;
+                arena.transform.localScale = new Vector3(size.x * 1.25f, size.y, size.z * 1.25f);
+                EditorUtility.SetDirty(arena);
+
+                // Tilted, NON-STICKY ledges flanking the arena - one on the near side, two
+                // on the far, all above the deck and at different heights, so a stalker
+                // fight has vertical escapes that will not hold you if you cling.
+                float deckY = arena.transform.position.y;
+                float halfZ = arena.transform.localScale.z * 0.5f;
+                SpawnTiltedLedge(tf, arenaName + "LedgeA", arena.transform.position + new Vector3(-4f, deckY + 9f, -halfZ - 7f), new Vector3(0f, 0f, 22f), wallMat);
+                SpawnTiltedLedge(tf, arenaName + "LedgeB", arena.transform.position + new Vector3(3f, deckY + 6f, halfZ + 7f), new Vector3(0f, 0f, -18f), wallMat);
+                SpawnTiltedLedge(tf, arenaName + "LedgeC", arena.transform.position + new Vector3(-6f, deckY + 14f, halfZ + 12f), new Vector3(12f, 0f, -26f), wallMat);
+            }
+            ReplaceEnemies("StalkerEnemy", isFlyer: false);
+
+            // ---- Flyers -> WEAK SPOT flyers, plus one more and flanking walls ----
+            ReplaceEnemies("WeakSpotFlyer", isFlyer: true);
+            GameObject flyStep = GameObject.Find("FlyStep1");
+            if (flyStep != null)
+            {
+                Vector3 centre = flyStep.transform.position;
+                SpawnWeakSpotFlyer("ElementsFlyer3", centre + new Vector3(18f, 9f, 12f), 10f, 25f);
+                SpawnTiltedLedge(tf, "FlySideWallA", centre + new Vector3(6f, 5f, -18f), new Vector3(0f, 0f, 20f), wallMat);
+                SpawnTiltedLedge(tf, "FlySideWallB", centre + new Vector3(20f, 9f, 18f), new Vector3(0f, 0f, -24f), wallMat);
+                SpawnTiltedLedge(tf, "FlySideWallC", centre + new Vector3(30f, 3f, -14f), new Vector3(10f, 0f, 16f), wallMat);
+            }
+
+            // ---- The turret section goes entirely ----
+            foreach (string turretObject in new[]
+            {
+                "ElementsTurret1", "ElementsTurret2", "TurretWallLeft", "TurretWallRight",
+                "TurretRun1", "TurretRun2", "7 - TurretsPad", "7 - TurretsSpawn", "7 - TurretsCheckpoint",
+            })
+            {
+                GameObject stale = GameObject.Find(turretObject);
+                if (stale != null) UnityEngine.Object.DestroyImmediate(stale);
+            }
+            foreach (TurretEnemy stale in UnityEngine.Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                UnityEngine.Object.DestroyImmediate(stale.gameObject);
+            }
+
+            if (sections != null)
+            {
+                // Drop the section whose spawn just went with the turrets.
+                var kept = new List<LevelSectionController.Section>();
+                foreach (LevelSectionController.Section section in sections.sections)
+                {
+                    if (section != null && section.spawnPoint != null) kept.Add(section);
+                }
+                sections.sections = kept.ToArray();
+                RefreshSectionHazards(sections);
+                RebuildSectionsScreenButtons(sections);
+            }
+
+            EnsureSceneInBuildSettings(targetPath);
+            EditorSceneManager.SaveOpenScenes();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: LevelElementsTest2 built OK ("
+                + (sections != null ? sections.sections.Length : 0) + " sections, turrets removed)");
+        }
+
+        // A tilted slab you can bounce off but never cling to - deliberately plain, so it
+        // carries no StickySurface and lets go after the usual brief crash-cling.
+        static void SpawnTiltedLedge(Transform parent, string name, Vector3 position, Vector3 eulerTilt, Material material)
+        {
+            GameObject ledge = CreateBlock(parent, name, position, new Vector3(12f, 1.5f, 9f), material);
+            ledge.transform.rotation = Quaternion.Euler(eulerTilt);
+            EditorUtility.SetDirty(ledge);
+        }
+
+        // Swaps every plain Enemy / FlyingEnemy in the scene for a harder prefab variant,
+        // keeping the spot each one guarded.
+        static void ReplaceEnemies(string prefabName, bool isFlyer)
+        {
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/" + prefabName + ".prefab");
+            if (prefab == null) throw new Exception("KineticEnergySetup: missing prefab " + prefabName);
+
+            var targets = new List<GameObject>();
+            if (isFlyer)
+            {
+                foreach (FlyingEnemy flyer in UnityEngine.Object.FindObjectsByType<FlyingEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (flyer is WeakSpotFlyingEnemy) continue; // already the variant
+                    targets.Add(flyer.gameObject);
+                }
+            }
+            else
+            {
+                foreach (Enemy walker in UnityEngine.Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (walker.GetType() != typeof(Enemy)) continue; // leave existing variants alone
+                    targets.Add(walker.gameObject);
+                }
+            }
+
+            foreach (GameObject old in targets)
+            {
+                GameObject replacement = (GameObject)PrefabUtility.InstantiatePrefab(prefab, old.transform.parent);
+                replacement.name = old.name;
+                replacement.transform.SetPositionAndRotation(old.transform.position, old.transform.rotation);
+                UnityEngine.Object.DestroyImmediate(old);
+            }
+        }
+
+        // The sections screen is built from the section list, so dropping a section means
+        // rebuilding its buttons - otherwise a dead button points at a missing spawn.
+        static void RebuildSectionsScreenButtons(LevelSectionController sections)
+        {
+            PauseController pause = UnityEngine.Object.FindAnyObjectByType<PauseController>(FindObjectsInactive.Include);
+            if (pause == null || pause.sectionsPanel == null) return;
+
+            var list = new List<LevelSectionController.Section>(sections.sections);
+            Transform panel = pause.sectionsPanel.transform;
+            for (int i = panel.childCount - 1; i >= 0; i--)
+            {
+                if (panel.GetChild(i).name.StartsWith("Section_")) UnityEngine.Object.DestroyImmediate(panel.GetChild(i).gameObject);
+            }
+
+            Font font = FindBestFont();
+            Color accent = new Color(1f, 0.82f, 0.2f);
+            GameObject firstButton = null;
+            float y = 200f;
+            for (int i = 0; i < list.Count; i++)
+            {
+                GameObject sectionButton = CreateButton("Section_" + (i + 1) + "Button", panel,
+                    list[i].label, font, accent, new Vector2(0f, y), new Vector2(460f, 62f));
+                WireSceneButton(sectionButton, sections.GoToSection, i.ToString());
+                WireButton(sectionButton, pause.ResumeAfterSectionJump);
+                if (i == 0) firstButton = sectionButton;
+                y -= 76f;
+            }
+            pause.firstSectionsButton = firstButton;
+            EditorUtility.SetDirty(pause);
+        }
+
+        // The weak spot sat dead on top of the sphere, so it was as reachable from the front
+        // as from behind. Tilting it back makes the approach matter: you have to come at the
+        // flyer from above and BEHIND to land on it.
+        [MenuItem("Tools/Kinetic Energy/Angle WeakSpotFlyer Weak Spot")]
+        public static void AngleWeakSpotFlyerWeakSpot()
+        {
+            const float tiltDegrees = 42f;   // from straight up, leaning toward the back (-z)
+            const float spotDistance = 0.55f;
+
+            string path = PrefabFolder + "/WeakSpotFlyer.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(path);
+            try
+            {
+                Transform spot = root.transform.Find("WeakSpot");
+                if (spot == null) throw new Exception("KineticEnergySetup: WeakSpotFlyer has no WeakSpot child.");
+
+                // Euler(-tilt, 0, 0) leans the local up axis toward -z, i.e. the flyer's back.
+                Quaternion lean = Quaternion.Euler(-tiltDegrees, 0f, 0f);
+                spot.localRotation = lean;
+                spot.localPosition = lean * Vector3.up * spotDistance;
+                EditorUtility.SetDirty(spot);
+
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: weak spot angled " + tiltDegrees + " degrees toward the back OK");
+        }
+
+        // The scene held one hand-built rotating wall and one prefab instance. Swaps the
+        // loose one for the prefab, keeping its placement, spin settings and damage edges.
+        [MenuItem("Tools/Kinetic Energy/Replace Loose Rotating Walls With Prefab")]
+        public static void ReplaceLooseRotatingWallsWithPrefab()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest.unity", OpenSceneMode.Single);
+            int replaced = ReplaceLooseRotatingWalls();
+            EditorSceneManager.SaveOpenScenes();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: loose rotating walls replaced with the prefab OK (" + replaced + ")");
+        }
+
+        static int ReplaceLooseRotatingWalls()
+        {
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/SpinWall1.prefab");
+            if (prefab == null) throw new Exception("KineticEnergySetup: SpinWall1.prefab is missing.");
+            Material damageMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/DamageWallMaterial.mat");
+            LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
+            Transform fallbackSpawn = sections != null && sections.sections.Length > 0 ? sections.sections[0].spawnPoint : null;
+
+            int replaced = 0;
+            foreach (RotatingWall loose in UnityEngine.Object.FindObjectsByType<RotatingWall>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (PrefabUtility.IsPartOfPrefabInstance(loose.gameObject)) continue;
+
+                Transform old = loose.transform;
+                GameObject replacement = (GameObject)PrefabUtility.InstantiatePrefab(prefab, old.parent);
+                replacement.name = old.name;
+                replacement.transform.SetPositionAndRotation(old.position, old.rotation);
+                replacement.transform.localScale = old.localScale;
+
+                RotatingWall spin = replacement.GetComponent<RotatingWall>();
+                spin.degreesPerSecond = loose.degreesPerSecond;
+                spin.spinAxis = loose.spinAxis;
+                spin.startAngleOffset = loose.startAngleOffset;
+                EditorUtility.SetDirty(spin);
+
+                if (damageMat != null) AddEdgeDamageShell(replacement.transform, fallbackSpawn, damageMat);
+                UnityEngine.Object.DestroyImmediate(loose.gameObject);
+                replaced++;
+            }
+
+            if (replaced > 0 && sections != null) RefreshSectionHazards(sections);
+            return replaced;
+        }
+
+        // Re-collects every respawning hazard so newly built shells follow the checkpoint.
+        static void RefreshSectionHazards(LevelSectionController sections)
+        {
+            var hazards = new List<DamageWalls>();
+            foreach (DamageWalls hazard in UnityEngine.Object.FindObjectsByType<DamageWalls>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                hazards.Add(hazard);
+            }
+            sections.hazards = hazards.ToArray();
+            EditorUtility.SetDirty(sections);
+        }
+
         // SURGICAL: adds the damage edges to LevelElementsTest's turret and rotating walls
         // and touches NOTHING else. The full setup rebuilds the whole course, which throws
         // away hand-placed checkpoints and edited text - this is the safe way to add the
