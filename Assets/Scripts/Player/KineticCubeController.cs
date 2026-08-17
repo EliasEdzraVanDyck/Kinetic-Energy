@@ -73,6 +73,7 @@ namespace KineticEnergy.Player
         [Tooltip("Damping applied while airborne with no launch in flight, so plain falls accelerate naturally.")]
         public float plainFallDamping = 0.2f;
 
+        [Header("Player feedback")]
         [Tooltip("Should audio be used?")]
         public bool enableAudio = true;
         [Tooltip("The Player's AudioSource that will play the clips.")]
@@ -85,6 +86,19 @@ namespace KineticEnergy.Player
         public AudioClip chargingLoopSound;
         [Tooltip("The sound that plays while the cube lands on the ground (crashes).")]
         public AudioClip crashSound;
+
+        [Tooltip("Should screenshake happen on launch?")]
+        public bool enableScreenshakeLaunch = true;
+        public float screenshakeLaunchDuration = .3f;
+        public float screenshakeLaunchIntensity = 1f;
+        private bool isScreenshakeLaunch;
+        private float screenshakeLaunchTime = 0f;
+        [Tooltip("Should screenshake happen on crash?")]
+        public bool enableScreenshakeCrash = true;
+        public float screenshakeCrashDuration = .2f;
+        public float screenshakeCrashIntensity = 1f;
+        private bool isScreenshakeCrash;
+        private float screenshakeCrashTime = 0f;
 
         [Header("Control Scheme Variants (QuarryAim lab - all default OFF)")]
         // Toggled by ControlSchemeVariantController; every other scene keeps the classics.
@@ -707,6 +721,40 @@ namespace KineticEnergy.Player
                 return;
             }
 
+            if (enableScreenshakeLaunch && isScreenshakeLaunch && screenshakeLaunchTime < screenshakeLaunchDuration)
+            {
+                // Simulate screenshake
+                screenshakeLaunchTime += Time.deltaTime;
+                float progress = screenshakeLaunchTime / screenshakeLaunchDuration;
+                float strength = 1f - Mathf.Clamp01(progress);
+
+                Vector2 shake = Random.insideUnitCircle * screenshakeLaunchIntensity * strength;
+                cameraTransform.localPosition += new Vector3(shake.x, shake.y, 0f);
+
+                if (screenshakeLaunchTime >= screenshakeLaunchDuration)
+                {
+                    screenshakeLaunchTime = 0;
+                    isScreenshakeLaunch = false;
+                }
+            }
+
+            if (enableScreenshakeCrash && isScreenshakeCrash && screenshakeCrashTime < screenshakeCrashDuration)
+            {
+                // Simulate screenshake
+                screenshakeCrashTime += Time.deltaTime;
+                float progress = screenshakeCrashTime / screenshakeCrashDuration;
+                float strength = 1f - Mathf.Clamp01(progress);
+
+                Vector2 shake = Random.insideUnitCircle * screenshakeCrashIntensity * strength;
+                cameraTransform.localPosition += new Vector3(shake.x, shake.y, 0f);
+
+                if (screenshakeCrashTime >= screenshakeCrashDuration)
+                {
+                    screenshakeCrashTime = 0;
+                    isScreenshakeCrash = false;
+                }
+            }
+
             if (infiniteEnergy) energyFraction = 1f;
 
             // Re-arm the spent-aim-button latch only once both aim buttons are genuinely up.
@@ -811,6 +859,8 @@ namespace KineticEnergy.Player
 
             if (isGrounded && !groundedLastFrame)
             {
+                isScreenshakeCrash = true;
+
                 if (playerSounds && enableAudio)
                 {
                     playerSounds.Stop();
@@ -1857,6 +1907,8 @@ namespace KineticEnergy.Player
 
         void QueueLaunch(Vector3 direction, float force, float damping)
         {
+            isScreenshakeLaunch = true;
+
             // Overcharge scatter (economy variant 3): the committed charge buys imprecision.
             float scatterCone = ScatterConeAngleFor(ChargeFraction());
             if (scatterCone > 0.01f)

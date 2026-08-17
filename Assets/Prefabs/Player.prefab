@@ -4741,11 +4741,18 @@ MonoBehaviour:
   maxLaunchDamping: 1
   downLaunchDamping: 0.2
   plainFallDamping: 0.2
+  enableAudio: 1
   playerSounds: {fileID: 2049351145183922922}
   flyingSound: {fileID: 8300000, guid: 78cf081f30aae61439e996ff63afdcc1, type: 3}
   chargingSound: {fileID: 8300000, guid: e62fccd53101e6b43bfb273535862e4b, type: 3}
   chargingLoopSound: {fileID: 8300000, guid: c4dd4d1fdb2ddd6488adf36d882bac02, type: 3}
   crashSound: {fileID: 8300000, guid: b4d713f985ad47449a0763f89eb7f511, type: 3}
+  enableScreenshakeLaunch: 1
+  screenshakeLaunchDuration: 0.3
+  screenshakeLaunchIntensity: 1
+  enableScreenshakeCrash: 1
+  screenshakeCrashDuration: 0.2
+  screenshakeCrashIntensity: 1
   groundedAimCameraFollow: 0
   groundedAimFollowThreshold: 60
   groundedAimFollowBand: 5
@@ -4826,6 +4833,7 @@ MonoBehaviour:
   airAimAction: {fileID: -2791407109934888543, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   airLaunchAction: {fileID: 3433367232933704153, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   controlsPanelBody: {fileID: 0}
+  stuckSurfaceLaunchClearance: 0.12
   enemyHitControlLossSeconds: 0.35
 --- !u!114 &1834731943432722525
 MonoBehaviour:
