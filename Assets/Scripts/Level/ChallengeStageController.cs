@@ -59,8 +59,14 @@ namespace KineticEnergy.Level
         public Color scatterRingColor = new Color(1f, 0.45f, 0.15f, 0.9f);
 
         [Header("3 - Chasing wall (wired by setup)")]
-        [Tooltip("The moving wall instance - speed and start position are edited on it directly.")]
+        [Tooltip("The moving wall instance - its start position is edited on it directly; the speeds below drive it.")]
         public DeathWall chaseWall;
+        [Tooltip("Speed the wall STARTS the stage at, in metres per second.")]
+        public float chaseWallSpeed = 4f;
+        [Tooltip("The BUILDUP: metres per second gained per second while the wall runs. 0 = a constant pace.")]
+        public float chaseWallAcceleration = 0.25f;
+        [Tooltip("Speed ceiling in metres per second - the wall stops gaining here. 0 = no cap.")]
+        public float chaseWallMaxSpeed = 0f;
 
         [Header("4 - Sealing walls (wired by setup)")]
         [Tooltip("The DeathWall prefab cloned as a static seal in each jumped gap.")]
@@ -148,6 +154,11 @@ namespace KineticEnergy.Level
 
             if (chaseWall != null)
             {
+                // Stamped BEFORE the reset - the reset seeds the wall's live speed from
+                // moveSpeed, so the new pace has to be in place first.
+                chaseWall.moveSpeed = chaseWallSpeed;
+                chaseWall.moveAcceleration = chaseWallAcceleration;
+                chaseWall.maxMoveSpeed = chaseWallMaxSpeed;
                 chaseWall.gameObject.SetActive(stage == ChallengeStage.ChasingWall);
                 chaseWall.ResetToStart();
             }
@@ -186,7 +197,8 @@ namespace KineticEnergy.Level
         }
 
         // First platform 100%, last shrinkFinalScalePercent, equal steps between - applied
-        // to y and z only, so x (the course axis) never moves and every gap stays the same.
+        // to each platform's TWO LARGEST axes, so the landing FACE shrinks while the slab
+        // keeps its thickness.
         void ApplyShrinkScales()
         {
             if (coursePlatforms == null || coursePlatforms.Length < 2 || courseOriginalScales == null) return;
@@ -195,9 +207,19 @@ namespace KineticEnergy.Level
             {
                 if (coursePlatforms[i] == null) continue;
                 float factor = Mathf.Lerp(1f, finalFactor, i / (float)(coursePlatforms.Length - 1));
-                Vector3 original = courseOriginalScales[i];
-                coursePlatforms[i].localScale = new Vector3(original.x, original.y * factor, original.z * factor);
+                coursePlatforms[i].localScale = ShrinkTwoLargestAxes(courseOriginalScales[i], factor);
             }
+        }
+
+        // Shrinks everything EXCEPT the thinnest axis, which each shape uses as its
+        // thickness: an up-facing platform (10, 2, 10) loses landing area on x and z while
+        // staying 2 thick; a floating wall (2, 10, 10) shrinks the y/z face it presents and
+        // keeps its 2 of depth.
+        static Vector3 ShrinkTwoLargestAxes(Vector3 size, float factor)
+        {
+            if (size.x <= size.y && size.x <= size.z) return new Vector3(size.x, size.y * factor, size.z * factor);
+            if (size.y <= size.x && size.y <= size.z) return new Vector3(size.x * factor, size.y, size.z * factor);
+            return new Vector3(size.x * factor, size.y * factor, size.z);
         }
 
         void Update()
@@ -346,15 +368,10 @@ namespace KineticEnergy.Level
             // below them - over is a full launch away, under is the damage floor.
             wall.transform.position = gapCentre + Vector3.up * (sealWallSize.y * 0.4f);
 
-            // TURNED ACROSS the gap: sealWallSize is (thickness, height, width), so local
-            // +x must point along the crossing. This course wanders sideways as well as
-            // forward - an axis-aligned wall would lie flat along some gaps and block
-            // nothing at all.
-            Vector3 gapDirection = Vector3.ProjectOnPlane(to - from, Vector3.up);
-            if (gapDirection.sqrMagnitude > 0.0001f)
-            {
-                wall.transform.rotation = Quaternion.FromToRotation(Vector3.right, gapDirection.normalized);
-            }
+            // Never turned: the seal always lies ACROSS the x axis - thin in x, wide in z
+            // (sealWallSize) - so it cuts the course's forward direction whatever sideways
+            // offset the two platforms happen to have.
+            wall.transform.rotation = Quaternion.identity;
             wall.transform.localScale = sealWallSize;
 
             DeathWall death = wall.GetComponent<DeathWall>();
