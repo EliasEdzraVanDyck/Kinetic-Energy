@@ -289,12 +289,22 @@ namespace KineticEnergy.Player
         // SPOT, which doesn't exist then, so it hides; the trail still shows the arc, since
         // "here's the path, and it lands nowhere" is still meaningful. landingNormal orients
         // the marker flush against the landing face (wall, floor, ceiling alike).
-        public void SetLandingPoint(Vector3 lineStart, Vector3 landingPoint, Vector3[] trajectory, int trajectoryCount, bool didLand, Vector3 landingNormal = default, Collider landingCollider = null)
+        public void SetLandingPoint(Vector3 lineStart, Vector3 landingPoint, Vector3[] trajectory, int trajectoryCount, bool didLand, Vector3 landingNormal = default, Collider landingCollider = null, bool aimBlocked = false)
         {
             // Outcome colour: judged on real landings; a lost landing keeps its colour
             // through the same grace the cursor gets (single-frame prediction misses must
             // not flash red), then settles on fail - no landing means a fall reset.
-            if (didLand)
+            if (aimBlocked)
+            {
+                // Fired into the surface you are clinging to - the shot has nowhere to go,
+                // whatever the simulation reports it lands on.
+                if (outcomeSuccess)
+                {
+                    outcomeSuccess = false;
+                    outcomeTintApplied = false;
+                }
+            }
+            else if (didLand)
             {
                 Vector3 judgedNormal = landingNormal.sqrMagnitude > 0.0001f ? landingNormal.normalized : lastValidNormal;
                 bool success = LandingIsSuccessful(landingCollider, judgedNormal);

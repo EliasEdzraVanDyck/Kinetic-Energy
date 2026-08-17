@@ -1595,6 +1595,9 @@ namespace KineticEnergy.Player
             energyFraction = Mathf.Min(energyFraction, Mathf.Clamp01(fraction));
         }
 
+        [Tooltip("While clinging to a surface, an aim whose dot with that surface's normal is at or below this counts as fired INTO the surface - the preview marks it as a failed shot. Slightly above 0 so shots that merely graze along the face count too.")]
+        public float stuckSurfaceLaunchClearance = 0.12f;
+
         [Tooltip("Seconds of lost ground control after an enemy hit, so the knockback actually carries (grounded movement overwrites velocity every tick otherwise).")]
         public float enemyHitControlLossSeconds = 0.35f;
         float knockbackTimer;
@@ -2354,9 +2357,20 @@ namespace KineticEnergy.Player
             lastTrajectoryStepCount = stepCount;
             lastPredictedFlightSeconds = Mathf.Max(stepCount * Time.fixedDeltaTime, 0.1f);
 
+            // Aiming INTO the face you are clinging to: the shot cannot go that way - it
+            // buries itself in the surface the moment it fires. The prediction happily
+            // reports a landing there (often on the very sticky wall you are already on,
+            // which then read as a safe green shot), so the preview is told outright that
+            // this direction is blocked.
+            bool blockedByStuckSurface = isStuck
+                && stuckSurfaceNormal.sqrMagnitude > 0.0001f
+                && initialVelocity.sqrMagnitude > 0.0001f
+                && Vector3.Dot(initialVelocity.normalized, stuckSurfaceNormal) <= stuckSurfaceLaunchClearance;
+
             if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
             {
-                landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand, lastPredictedLandingNormal, lastPredictedLandingSource);
+                landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand,
+                    lastPredictedLandingNormal, lastPredictedLandingSource, blockedByStuckSurface);
             }
         }
 

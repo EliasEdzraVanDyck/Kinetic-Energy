@@ -348,6 +348,10 @@ namespace KineticEnergy.Camera
         float startPitch;
         bool startPoseCaptured;
 
+        // Set by ResetToStartPose; makes the next LateUpdate assign the camera's position
+        // outright instead of easing into it.
+        bool snapPositionNextUpdate;
+
         public void ResetToStartPose()
         {
             if (startPoseCaptured)
@@ -356,6 +360,7 @@ namespace KineticEnergy.Camera
                 pitch = startPitch;
             }
             recentering = false;
+            snapPositionNextUpdate = true;
             SnapToThirdPersonOrbit();
         }
 
@@ -780,6 +785,16 @@ namespace KineticEnergy.Camera
                 // instantly-applied rotation and reads as player jitter during sweeps.
                 transform.position = desiredPosition;
                 velocity = Vector3.zero;
+            }
+            else if (snapPositionNextUpdate)
+            {
+                // A respawn / section jump TELEPORTS the camera. SnapToThirdPersonOrbit
+                // places it on the plain orbit, but the desired position computed here can
+                // include aim-zoom, OTS anchor and framing offsets - so without this the
+                // camera still glided that remaining distance after every jump.
+                transform.position = desiredPosition;
+                velocity = Vector3.zero;
+                snapPositionNextUpdate = false;
             }
             else
             {
