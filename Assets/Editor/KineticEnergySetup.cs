@@ -5145,9 +5145,11 @@ namespace KineticEnergy.EditorSetup
             Material existing = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (existing != null)
             {
-                existing.shader = mat.shader;
-                existing.CopyPropertiesFromMaterial(mat);
-                EditorUtility.SetDirty(existing);
+                // NEVER overwrite a material that already exists. These are hand-tuned in
+                // the editor, and this used to stamp the setup script's own colour and
+                // smoothness back over them on every re-run - silently undoing that work.
+                // A setup method asks for a material by NAME; the asset on disk is the
+                // authority on what it looks like.
                 UnityEngine.Object.DestroyImmediate(mat);
                 return existing;
             }

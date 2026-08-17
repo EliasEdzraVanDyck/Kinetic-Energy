@@ -892,6 +892,13 @@ namespace KineticEnergy.Player
                     flightScale *= 1f + Mathf.Lerp(fallSpeedUpStart, fallSpeedUpEnd, descentProgress);
                 }
             }
+            // An enemy hit TAKES the flight away from you, so the launch speed-up ends with
+            // it: the rest of the tumble plays at normal speed, right through to landing.
+            // At 1.5-2x the knockback threw the player across the level far faster than it
+            // could be read, on top of the shove itself.
+            if (isGrounded) flightSpeedUpSuppressed = false;
+            if (flightSpeedUpSuppressed) flightScale = 1f;
+
             // The enemy-hit launch lock vetoes ALL slow-mo sources for its duration - if the
             // player can't aim or launch, they must not be able to buy time either.
             bool slowRequested = (airAimSlow || holdChargeSlow || poundWindowSlow) && launchLockTimer <= 0f;
@@ -1602,6 +1609,8 @@ namespace KineticEnergy.Player
         public float enemyHitControlLossSeconds = 0.35f;
         float knockbackTimer;
         float launchLockTimer; // enemy hits block launching briefly - duration set by the enemy
+        // An enemy hit ends the launch's game-speed bonus for the rest of the fall.
+        bool flightSpeedUpSuppressed;
         Vector3 pendingEnemyKnockback;
         bool hasPendingEnemyKnockback;
 
@@ -1637,9 +1646,20 @@ namespace KineticEnergy.Player
             pendingEnemyKnockback = impulse;
             hasPendingEnemyKnockback = true;
             knockbackTimer = enemyHitControlLossSeconds;
+            flightSpeedUpSuppressed = true; // normal game speed until the player lands
 
-            if (!infiniteEnergy) energyFraction = Mathf.Max(energyFraction - energyLoss, 0f);
+            if (!infiniteEnergy)
+            {
+                energyFraction = Mathf.Max(energyFraction - energyLoss, 0f);
+                // Drained dry by an attack: with no energy there is no launch and no way
+                // out, so the run is over here rather than leaving the player stranded.
+                // The scene's respawn owner decides WHERE back is.
+                if (energyFraction <= 0f) EnergyEmptiedByHit?.Invoke();
+            }
         }
+
+        // Raised when an enemy attack or projectile empties the tank outright.
+        public event System.Action EnergyEmptiedByHit;
 
         // Hazard hook (DamageWalls): a full instant respawn - every aim, charge, flight and
         // stick state is wound down, the tank returns to its starting level, and the player
@@ -1673,7 +1693,24 @@ namespace KineticEnergy.Player
             rb.angularVelocity = Vector3.zero;
             rb.useGravity = true;
             rb.linearDamping = plainFallDamping;
+            // A pending shove must not survive the respawn and fling the fresh spawn.
+            hasPendingEnemyKnockback = false;
+            knockbackTimer = 0f;
+            launchLockTimer = 0f;
+            flightSpeedUpSuppressed = false;
+
+            // BOTH the transform and the BODY. Unity defers transform-to-physics syncing
+            // (autoSyncTransforms is off), so a transform-only write leaves the rigidbody
+            // holding its old position - and the next physics step puts the player back
+            // where they were. During a PAUSED teleport (the section menu) no step runs in
+            // between to sync it, which is why those jumps only sometimes took effect.
             transform.position = position;
+            rb.position = position;
+            // Interpolation blends from a previous pose; without clearing it the cube
+            // visibly streaks in from wherever it used to be.
+            RigidbodyInterpolation previousInterpolation = rb.interpolation;
+            rb.interpolation = RigidbodyInterpolation.None;
+            rb.interpolation = previousInterpolation;
 
             energyFraction = infiniteEnergy ? 1f : startingEnergyFraction;
             Time.timeScale = 1f;

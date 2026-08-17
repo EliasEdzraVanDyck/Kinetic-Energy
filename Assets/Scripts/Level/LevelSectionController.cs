@@ -41,6 +41,26 @@ namespace KineticEnergy.Level
             // does not fall back to whatever the prefab happened to carry.
             PointHazardsAt(CurrentSection);
             ResetCheckpoints();
+
+            // An attack that empties the tank sends the player back to their checkpoint -
+            // with nothing left to launch with there is no way to recover in place.
+            if (controller != null) controller.EnergyEmptiedByHit += RespawnAtCheckpoint;
+        }
+
+        void OnDestroy()
+        {
+            if (controller != null) controller.EnergyEmptiedByHit -= RespawnAtCheckpoint;
+        }
+
+        public void RespawnAtCheckpoint()
+        {
+            Transform target = ActiveRespawn;
+            if (target == null && sections != null && sections.Length > 0) target = sections[0].spawnPoint;
+            if (target == null || controller == null) return;
+
+            controller.RespawnAtPoint(target.position);
+            ResetLevelState();
+            ResetCheckpoints();
         }
 
         void OnEnable()
@@ -87,8 +107,13 @@ namespace KineticEnergy.Level
             // state and the camera pose all reset exactly as they do on a hazard death.
             controller?.RespawnAtPoint(section.spawnPoint.position);
 
-            // Every enemy returns to its spawn, so a section is always entered in its
-            // opening state rather than mid-fight from a previous visit.
+            ResetLevelState();
+        }
+
+        // Every enemy returns to its spawn and live shots clear, so a section is always
+        // entered in its opening state rather than mid-fight from a previous visit.
+        void ResetLevelState()
+        {
             foreach (Enemy enemy in FindObjectsByType<Enemy>(FindObjectsInactive.Include)) enemy.ResetToSpawn();
             foreach (FlyingEnemy flyer in FindObjectsByType<FlyingEnemy>(FindObjectsInactive.Include)) flyer.ResetToSpawn();
             foreach (TurretEnemy turret in FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include)) turret.ResetToSpawn();
