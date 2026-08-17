@@ -1257,6 +1257,35 @@ namespace KineticEnergy.EditorSetup
 
             GameObject pauseSystem = GameObject.Find("PauseSystem");
             Debug.Log("PAUSECHECK pauseSystemObject=" + (pauseSystem != null ? "FOUND active=" + pauseSystem.activeInHierarchy : "MISSING"));
+
+            // Section buttons: label -> wired argument -> the section that argument selects.
+            LevelSectionController sectionController = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
+            PauseController owner = controllers.Length > 0 ? controllers[0] : null;
+            if (sectionController == null || owner == null || owner.sectionsPanel == null) return;
+
+            foreach (Button button in owner.sectionsPanel.GetComponentsInChildren<Button>(true))
+            {
+                Text label = button.GetComponentInChildren<Text>(true);
+                var so = new SerializedObject(button);
+                SerializedProperty calls = so.FindProperty("m_OnClick.m_PersistentCalls.m_Calls");
+                string wiring = "";
+                for (int c = 0; c < calls.arraySize; c++)
+                {
+                    SerializedProperty call = calls.GetArrayElementAtIndex(c);
+                    string method = call.FindPropertyRelative("m_MethodName").stringValue;
+                    string arg = call.FindPropertyRelative("m_Arguments.m_StringArgument").stringValue;
+                    wiring += method + "(" + arg + ") ";
+                    if (method != "GoToSection" || !int.TryParse(arg, out int index)) continue;
+                    string resolved = index >= 0 && index < sectionController.sections.Length
+                        ? sectionController.sections[index].label + " @x="
+                            + (sectionController.sections[index].spawnPoint != null
+                                ? sectionController.sections[index].spawnPoint.position.x.ToString("F0") : "?")
+                        : "OUT OF RANGE";
+                    wiring += "-> " + resolved + " ";
+                }
+                Debug.Log("SECTIONCHECK button=" + button.name
+                    + " label='" + (label != null ? label.text : "?") + "' " + wiring);
+            }
         }
 
         // ==================== LevelElementsTest ====================
@@ -1352,64 +1381,77 @@ namespace KineticEnergy.EditorSetup
                 return spawn.transform;
             }
 
-            float gap = 0.42f * L;   // a comfortable mid-charge hop between pads
+            float gap = 0.42f * L;      // a comfortable mid-charge hop
+            // The section pad sits a SHORT lead-in from its own first element, and a full
+            // gap from the previous section's last one. With an even spacing the pad landed
+            // exactly midway between the two, so jumping to a section dropped you next to
+            // the PREVIOUS section's content - it read as arriving one section early.
+            float lead = gap * 0.5f;
             float x = 0f;
+            float e1, e2;
 
             // ---- 1. Basics: plain platforms, gentle rise, slight weave ----
             OpenSection("1 - Basics", new Vector3(x, -1f, 0f));
             Vector3 playerSpawn = new Vector3(x, 1.5f, 0f);
-            CreateBlock(tf, "BasicsHop1", new Vector3(x + gap, 1f, 10f), pad, platformMat);
-            CreateBlock(tf, "BasicsHop2", new Vector3(x + gap * 2f, 4f, -8f), pad, platformMat);
+            e1 = x + lead; e2 = e1 + gap;
+            CreateBlock(tf, "BasicsHop1", new Vector3(e1, 1f, 10f), pad, platformMat);
+            CreateBlock(tf, "BasicsHop2", new Vector3(e2, 4f, -8f), pad, platformMat);
 
             // ---- 2. Moving platforms ----
-            x += gap * 3f;
+            x = e2 + gap;
             OpenSection("2 - Moving platforms", new Vector3(x, 4f, 0f));
-            SpawnMovingPlatform(tf, "MoverSide", new Vector3(x + gap, 5f, -14f), new Vector3(0f, 0f, 28f), 7f);
-            SpawnMovingPlatform(tf, "MoverLift", new Vector3(x + gap * 2f, 2f, 6f), new Vector3(0f, 14f, 0f), 6f);
+            e1 = x + lead; e2 = e1 + gap;
+            SpawnMovingPlatform(tf, "MoverSide", new Vector3(e1, 5f, -14f), new Vector3(0f, 0f, 28f), 7f);
+            SpawnMovingPlatform(tf, "MoverLift", new Vector3(e2, 2f, 6f), new Vector3(0f, 14f, 0f), 6f);
 
             // ---- 3. Rotating walls: sticky faces that keep turning away ----
-            x += gap * 3f;
+            x = e2 + gap;
             OpenSection("3 - Rotating walls", new Vector3(x, 8f, 0f));
-            SpawnRotatingWall(tf, "SpinWall1", new Vector3(x + gap, 10f, -10f), 28f, 0f, wallMat);
-            SpawnRotatingWall(tf, "SpinWall2", new Vector3(x + gap * 2f, 12f, 8f), -36f, 90f, wallMat);
+            e1 = x + lead; e2 = e1 + gap;
+            SpawnRotatingWall(tf, "SpinWall1", new Vector3(e1, 10f, -10f), 28f, 0f, wallMat);
+            SpawnRotatingWall(tf, "SpinWall2", new Vector3(e2, 12f, 8f), -36f, 90f, wallMat);
 
             // ---- 4. Lasers: timed gates over a straight runway ----
-            x += gap * 3f;
+            x = e2 + gap;
             Transform laserSpawn = OpenSection("4 - Lasers", new Vector3(x, 8f, 0f));
-            CreateBlock(tf, "LaserRun1", new Vector3(x + gap, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
-            CreateBlock(tf, "LaserRun2", new Vector3(x + gap * 2f, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
-            CreateLaserGate(tf, "ElementsGate1", new Vector3(x + gap * 0.5f, 9f, 0f), 24f, 12f, 1.5f, 1.5f, 0f, laserSpawn);
-            CreateLaserGate(tf, "ElementsGate2", new Vector3(x + gap * 1.5f, 9f, 0f), 24f, 12f, 1.2f, 1.4f, 0.7f, laserSpawn);
+            e1 = x + lead; e2 = e1 + gap;
+            CreateBlock(tf, "LaserRun1", new Vector3(e1, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateBlock(tf, "LaserRun2", new Vector3(e2, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateLaserGate(tf, "ElementsGate1", new Vector3(x + lead * 0.5f, 9f, 0f), 24f, 12f, 1.5f, 1.5f, 0f, laserSpawn);
+            CreateLaserGate(tf, "ElementsGate2", new Vector3((e1 + e2) * 0.5f, 9f, 0f), 24f, 12f, 1.2f, 1.4f, 0.7f, laserSpawn);
 
             // ---- 5. Grounded enemies: wide arenas to fight across ----
-            x += gap * 3f;
+            x = e2 + gap;
             OpenSection("5 - Ground enemies", new Vector3(x, 4f, 0f));
-            CreateBlock(tf, "GroundArena1", new Vector3(x + gap, 2f, 12f), new Vector3(26f, 2f, 26f), platformMat);
-            SpawnEnemy("ElementsEnemy1", new Vector3(x + gap, 4f, 12f), EnemyWanderMode.PlatformSurface, 10f, 2f);
-            CreateBlock(tf, "GroundArena2", new Vector3(x + gap * 2f, 2f, -12f), new Vector3(26f, 2f, 26f), platformMat);
-            SpawnEnemy("ElementsEnemy2", new Vector3(x + gap * 2f - 5f, 4f, -12f), EnemyWanderMode.PlatformSurface, 10f, 2f);
-            SpawnEnemy("ElementsEnemy3", new Vector3(x + gap * 2f + 5f, 4f, -12f), EnemyWanderMode.WithinRadius, 8f, 2f);
+            e1 = x + lead; e2 = e1 + gap;
+            CreateBlock(tf, "GroundArena1", new Vector3(e1, 2f, 12f), new Vector3(26f, 2f, 26f), platformMat);
+            SpawnEnemy("ElementsEnemy1", new Vector3(e1, 4f, 12f), EnemyWanderMode.PlatformSurface, 10f, 2f);
+            CreateBlock(tf, "GroundArena2", new Vector3(e2, 2f, -12f), new Vector3(26f, 2f, 26f), platformMat);
+            SpawnEnemy("ElementsEnemy2", new Vector3(e2 - 5f, 4f, -12f), EnemyWanderMode.PlatformSurface, 10f, 2f);
+            SpawnEnemy("ElementsEnemy3", new Vector3(e2 + 5f, 4f, -12f), EnemyWanderMode.WithinRadius, 8f, 2f);
 
             // ---- 6. Flying enemies: shooters over open gaps ----
-            x += gap * 3f;
+            x = e2 + gap;
             OpenSection("6 - Flying enemies", new Vector3(x, 6f, 0f));
-            CreateBlock(tf, "FlyStep1", new Vector3(x + gap, 9f, -10f), pad, platformMat);
-            SpawnFlyingEnemy("ElementsFlyer1", new Vector3(x + gap * 0.5f, 16f, -4f), 9f, 24f);
-            CreateBlock(tf, "FlyStep2", new Vector3(x + gap * 2f, 12f, 10f), pad, platformMat);
-            SpawnFlyingEnemy("ElementsFlyer2", new Vector3(x + gap * 1.6f, 20f, 6f), 11f, 26f);
+            e1 = x + lead; e2 = e1 + gap;
+            CreateBlock(tf, "FlyStep1", new Vector3(e1, 9f, -10f), pad, platformMat);
+            SpawnFlyingEnemy("ElementsFlyer1", new Vector3(x + lead * 0.6f, 16f, -4f), 9f, 24f);
+            CreateBlock(tf, "FlyStep2", new Vector3(e2, 12f, 10f), pad, platformMat);
+            SpawnFlyingEnemy("ElementsFlyer2", new Vector3(e1 + gap * 0.6f, 20f, 6f), 11f, 26f);
 
             // ---- 7. Turrets: fixed guns covering the final corridor ----
-            x += gap * 3f;
+            x = e2 + gap;
             OpenSection("7 - Turrets", new Vector3(x, 10f, 0f));
-            CreateBlock(tf, "TurretRun1", new Vector3(x + gap, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
-            CreateBlock(tf, "TurretWallLeft", new Vector3(x + gap, 12f, -16f), new Vector3(20f, 16f, 2f), wallMat);
-            SpawnTurret("ElementsTurret1", new Vector3(x + gap, 13f, -14.8f), new Vector3(-90f, 0f, 0f));
-            CreateBlock(tf, "TurretRun2", new Vector3(x + gap * 2f, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
-            CreateBlock(tf, "TurretWallRight", new Vector3(x + gap * 2f, 12f, 16f), new Vector3(20f, 16f, 2f), wallMat);
-            SpawnTurret("ElementsTurret2", new Vector3(x + gap * 2f, 13f, 14.8f), new Vector3(90f, 0f, 0f));
+            e1 = x + lead; e2 = e1 + gap;
+            CreateBlock(tf, "TurretRun1", new Vector3(e1, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateBlock(tf, "TurretWallLeft", new Vector3(e1, 12f, -16f), new Vector3(20f, 16f, 2f), wallMat);
+            SpawnTurret("ElementsTurret1", new Vector3(e1, 13f, -14.8f), new Vector3(-90f, 0f, 0f));
+            CreateBlock(tf, "TurretRun2", new Vector3(e2, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateBlock(tf, "TurretWallRight", new Vector3(e2, 12f, 16f), new Vector3(20f, 16f, 2f), wallMat);
+            SpawnTurret("ElementsTurret2", new Vector3(e2, 13f, 14.8f), new Vector3(90f, 0f, 0f));
 
             // ---- Finish ----
-            x += gap * 3f;
+            x = e2 + gap;
             CreateBlock(tf, "FinishPad", new Vector3(x, -1f, 0f), new Vector3(16f, 2f, 16f), platformMat);
             float courseLength = x;
 

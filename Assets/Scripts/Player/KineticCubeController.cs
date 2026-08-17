@@ -517,8 +517,14 @@ namespace KineticEnergy.Player
             CancelAirAim();
             rb.linearVelocity = Vector3.zero; // no flight resume - you fall from a standstill
             rb.useGravity = true;
+            // ...and the fall is COMMITTED: no reopening the aim on the way down. Only
+            // touching the ground again gives the aim back.
+            airAimLockedUntilGrounded = true;
             cameraOrbit?.SnapToThirdPersonOrbit();
         }
+
+        // Set by a combo-window drop, cleared the moment the player is grounded again.
+        bool airAimLockedUntilGrounded;
 
 
         public void AddEnergy(float delta)
@@ -1292,6 +1298,9 @@ namespace KineticEnergy.Player
 
         void UpdateAirAim()
         {
+            // Landing clears a combo-drop lock - the ONLY thing that does.
+            if (isGrounded) airAimLockedUntilGrounded = false;
+
             bool aimHeld = airAimAction != null && airAimAction.action != null && airAimAction.action.IsPressed();
 
             if (!aimHeld)
@@ -1318,6 +1327,8 @@ namespace KineticEnergy.Player
 
             if (!airAiming)
             {
+                // Dropped by a combo window running dry: the fall is yours to ride out.
+                if (airAimLockedUntilGrounded) return;
                 // No energy, or no launch available (the wall-crash limit / launch budget
                 // spent) - then there is nothing to aim WITH, so aim mode must not open.
                 // The post-pound window is exempt: claiming its boost IS the energy source.
@@ -1609,10 +1620,17 @@ namespace KineticEnergy.Player
             nonStickyReleaseTimer = 0f;
             rb.useGravity = true;
             rb.linearDamping = plainFallDamping;
-            // NOT applied here: OnCollisionEnter fires mid-physics-step, after the solver
-            // has already slammed the player with the kinematic enemy's contact impulse -
-            // a velocity written now loses to it. Deferred one tick so the shove is the
-            // last word (see FixedUpdate).
+            // The hit WIPES your momentum before it shoves: whatever speed you carried in
+            // (a full-power flight, a fall) is gone, so the knockback is the only thing
+            // moving you and always lands at its own strength. Without this the solver's
+            // contact impulse from the enemy stacked on top of the flight and flung the
+            // player away far too fast to react to.
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            // The shove itself is NOT applied here: OnCollisionEnter fires mid-physics-step,
+            // after the solver has already slammed the player with the kinematic enemy's
+            // contact impulse - a velocity written now loses to it. Deferred one tick so the
+            // shove is the last word (see FixedUpdate).
             pendingEnemyKnockback = impulse;
             hasPendingEnemyKnockback = true;
             knockbackTimer = enemyHitControlLossSeconds;
@@ -1646,6 +1664,7 @@ namespace KineticEnergy.Player
             previousLaunchChargeFraction = 0f;
             wallCarryArmed = false;
             hasLaunchHeading = false; // a respawned run has no launch to inherit a heading from
+            airAimLockedUntilGrounded = false; // a respawn always hands the aim back
 
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;

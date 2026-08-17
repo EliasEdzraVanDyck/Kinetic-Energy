@@ -91,8 +91,8 @@ namespace KineticEnergy.UI
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
             cameraSettingsPanel?.SetActive(false);
-            variantsPanel?.SetActive(false);
-            sectionsPanel?.SetActive(false);
+            if (variantsPanel != null) variantsPanel.SetActive(false);
+            if (sectionsPanel != null) sectionsPanel.SetActive(false);
             winLabel?.gameObject.SetActive(false);
 
             // Everything that should vanish while the menu is open: the prefab's wired
@@ -173,8 +173,8 @@ namespace KineticEnergy.UI
             Time.timeScale = 0f;
             controlsPanel?.SetActive(false);
             cameraSettingsPanel?.SetActive(false);
-            variantsPanel?.SetActive(false);
-            sectionsPanel?.SetActive(false);
+            if (variantsPanel != null) variantsPanel.SetActive(false);
+            if (sectionsPanel != null) sectionsPanel.SetActive(false);
             pausePanel?.SetActive(true);
             SetHintsVisible(false);
             RefreshCameraVariantLabel();
@@ -190,8 +190,8 @@ namespace KineticEnergy.UI
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
             cameraSettingsPanel?.SetActive(false);
-            variantsPanel?.SetActive(false);
-            sectionsPanel?.SetActive(false);
+            if (variantsPanel != null) variantsPanel.SetActive(false);
+            if (sectionsPanel != null) sectionsPanel.SetActive(false);
             SetHintsVisible(true);
             // Un-pausing after winning keeps playing in the finished level, which is fine - but
             // the win label shouldn't stick around on the NEXT pause after that.
@@ -278,13 +278,13 @@ namespace KineticEnergy.UI
         public void OnSectionsClicked()
         {
             pausePanel?.SetActive(false);
-            sectionsPanel?.SetActive(true);
+            if (sectionsPanel != null) sectionsPanel.SetActive(true);
             Select(firstSectionsButton);
         }
 
         public void OnSectionsBackClicked()
         {
-            sectionsPanel?.SetActive(false);
+            if (sectionsPanel != null) sectionsPanel.SetActive(false);
             pausePanel?.SetActive(true);
             Select(firstPauseButton);
         }
@@ -293,7 +293,7 @@ namespace KineticEnergy.UI
         // the player where they asked to be, so staying paused would just be in the way.
         public void ResumeAfterSectionJump()
         {
-            sectionsPanel?.SetActive(false);
+            if (sectionsPanel != null) sectionsPanel.SetActive(false);
             Resume();
         }
 
@@ -302,13 +302,13 @@ namespace KineticEnergy.UI
         public void OnVariantsClicked()
         {
             pausePanel?.SetActive(false);
-            variantsPanel?.SetActive(true);
+            if (variantsPanel != null) variantsPanel.SetActive(true);
             Select(firstVariantsButton);
         }
 
         public void OnVariantsBackClicked()
         {
-            variantsPanel?.SetActive(false);
+            if (variantsPanel != null) variantsPanel.SetActive(false);
             pausePanel?.SetActive(true);
             Select(firstPauseButton);
         }
