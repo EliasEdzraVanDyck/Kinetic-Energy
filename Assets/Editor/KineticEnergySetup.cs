@@ -1002,7 +1002,7 @@ namespace KineticEnergy.EditorSetup
             {
                 "StartPlatform", "Platform1", "Platform2", "Platform3", "Platform4",
                 "Platform5", "Platform6", "FloatingWall1", "FloatingWall2", "FloatingWall3",
-                "EndPlatform", "EndPlatform (1)", "EndPlatform (2)",
+                "EndPlatform", "UpsidePlatform", "EndPlatform (2)",
             };
             var course = new List<Transform>();
             foreach (string courseName in courseNames)
@@ -1096,11 +1096,26 @@ namespace KineticEnergy.EditorSetup
             playerController.slowdownMeter = budgetMeter;
             EditorUtility.SetDirty(playerController);
 
+            // Lethal shells on the objects you must land on PRECISELY - every face except
+            // the one facing the course gets a 0.5-thick damage slab.
+            Material shellMaterial = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+            foreach (string shellTarget in new[] { "FloatingWall1", "FloatingWall2", "FloatingWall3", "UpsidePlatform" })
+            {
+                GameObject shellGo = GameObject.Find(shellTarget);
+                if (shellGo == null) throw new Exception("KineticEnergySetup: Level1Challenge is missing " + shellTarget);
+                AddDamageShell(shellGo.transform, respawn.transform, shellMaterial);
+            }
+
+            // The explainer, shown at first boot and reopened by the pause menu's BuildInfo
+            // button (both read this one string).
+            economy.introText = Level1ChallengeInfoText;
+            EditorUtility.SetDirty(economy);
+
             EnsureSceneInBuildSettings(scenePath); // the cycle reloads itself by name
             EditorSceneManager.SaveOpenScenes();
             AssetDatabase.SaveAssets();
             Debug.Log("KineticEnergySetup: Level1Challenge five-stage cycle configured OK ("
-                + course.Count + " course platforms, budget bar split from combo meter)");
+                + course.Count + " course platforms, damage shells + build info updated)");
         }
 
         // ADDITIVE, SCENE-ONLY: Level1Challenge's challenge-variant picker - a "Variants"
@@ -1199,6 +1214,121 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
             Debug.Log("KineticEnergySetup: grounded charge ramp stamped OK (" + ramp + " in both aim scenes)");
         }
+
+        const float DamageShellThickness = 0.5f;
+
+        // Wraps a landing object in damage slabs on every face EXCEPT the one the player
+        // arrives at - the face turned toward the course. Deliberately NOT a solid box
+        // around the object: slabs sit just OUTSIDE each covered face, so the approach to
+        // the landing face is completely clear and nothing can clip into a hazard on a
+        // clean landing.
+        //
+        // The slabs are CHILDREN, so the shrinking-platforms variant scales them with
+        // their platform for free.
+        static void AddDamageShell(Transform platform, Transform respawnPoint, Material material)
+        {
+            for (int i = platform.childCount - 1; i >= 0; i--)
+            {
+                if (platform.GetChild(i).name.StartsWith("DamageShell"))
+                {
+                    UnityEngine.Object.DestroyImmediate(platform.GetChild(i).gameObject);
+                }
+            }
+
+            // Which face stays safe: the one pointing at the course line (its own x, the
+            // platform deck's height, the centre z). For a floating wall that is the side
+            // turned inward; for the upside-down platform it is the underside - which
+            // leaves the outward side (+z / -z respectively, +y for the ceiling) lethal.
+            Vector3 courseReference = new Vector3(platform.position.x, -1f, 0f);
+            Vector3 toCourseLocal = platform.InverseTransformDirection(courseReference - platform.position);
+            int landingAxis = 0;
+            for (int axis = 1; axis < 3; axis++)
+            {
+                if (Mathf.Abs(toCourseLocal[axis]) > Mathf.Abs(toCourseLocal[landingAxis])) landingAxis = axis;
+            }
+            float landingSign = Mathf.Sign(toCourseLocal[landingAxis]);
+            float outwardSign = -landingSign;
+
+            // Local thickness per axis - the parent's scale turns each into 0.5 world units.
+            Vector3 scale = platform.localScale;
+            Vector3 t = new Vector3(
+                DamageShellThickness / Mathf.Max(Mathf.Abs(scale.x), 0.0001f),
+                DamageShellThickness / Mathf.Max(Mathf.Abs(scale.y), 0.0001f),
+                DamageShellThickness / Mathf.Max(Mathf.Abs(scale.z), 0.0001f));
+            float outwardThickness = t[landingAxis];
+
+            for (int axis = 0; axis < 3; axis++)
+            {
+                if (axis == landingAxis)
+                {
+                    // The far face - the one you would sail past the object to reach.
+                    Vector3 position = Vector3.zero;
+                    position[axis] = outwardSign * (0.5f + outwardThickness * 0.5f);
+                    Vector3 size = Vector3.one;
+                    size[axis] = outwardThickness;
+                    CreateDamageSlab(platform, "DamageShell_Outward", position, size, respawnPoint, material);
+                    continue;
+                }
+
+                // A side pair. Each spans from the SAFE face's plane to the outer edge of
+                // the far slab, so it never overhangs the landing approach, and is widened
+                // on the remaining axis to close the corners.
+                int otherAxis = 3 - landingAxis - axis;
+                for (int sign = -1; sign <= 1; sign += 2)
+                {
+                    Vector3 position = Vector3.zero;
+                    position[axis] = sign * (0.5f + t[axis] * 0.5f);
+                    position[landingAxis] = outwardSign * outwardThickness * 0.5f;
+                    Vector3 size = Vector3.one;
+                    size[axis] = t[axis];
+                    size[landingAxis] = 1f + outwardThickness;
+                    size[otherAxis] = 1f + 2f * t[otherAxis];
+                    CreateDamageSlab(platform, "DamageShell_" + axis + (sign > 0 ? "P" : "N"),
+                        position, size, respawnPoint, material);
+                }
+            }
+        }
+
+        static void CreateDamageSlab(Transform parent, string name, Vector3 localPosition, Vector3 localScale, Transform respawnPoint, Material material)
+        {
+            GameObject slab = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            slab.name = name;
+            slab.transform.SetParent(parent, false);
+            slab.transform.localPosition = localPosition;
+            slab.transform.localRotation = Quaternion.identity;
+            slab.transform.localScale = localScale;
+            slab.GetComponent<Renderer>().sharedMaterial = material;
+            // SOLID, not a trigger: the aim preview only mirrors solid geometry, so a
+            // trigger shell would be invisible to the landing prediction and the cursor
+            // would read a lethal face as a safe green landing.
+            slab.GetComponent<BoxCollider>().isTrigger = false;
+            DamageWalls damage = slab.AddComponent<DamageWalls>();
+            damage.respawnPoint = respawnPoint;
+            EditorUtility.SetDirty(slab);
+        }
+
+        // Shown at first boot and behind the pause menu's BuildInfo button.
+        const string Level1ChallengeInfoText =
+            "CHALLENGE RUN - 5 VARIATIONS\n\n" +
+            "Reach the finish and the level restarts on the next challenge. Clear all five to win.\n" +
+            "Pause > Variants jumps straight to one.\n\n" +
+            "1 - LIMITED SLOWDOWN: midair aiming runs on a budget (the blue bar under the combo meter). " +
+            "Aim too long and the slow-mo cuts out mid-flight. Every crash refills it.\n" +
+            "2 - OVERCHARGE SCATTER: launches drift off target, and the orange ring at your landing spot shows how far. " +
+            "The spread follows a square root curve, so the first energy you commit costs the most accuracy.\n" +
+            "3 - CHASING WALL: a purple wall sweeps the level and SPEEDS UP the longer it runs. Touching it respawns you.\n" +
+            "4 - SEALING WALLS: every platform you land on walls off the gap behind you. There is no way back.\n" +
+            "5 - SHRINKING PLATFORMS: each platform is smaller than the last, down to half size at the finish.\n\n" +
+            "THE METER: the first 4 blocks (40%) are normal energy. The 6 taller blocks are boosted energy, " +
+            "only combo bonuses and the groundpound boost can fill them.\n\n" +
+            "COMBOS: a successful launch refunds the energy of your launch(es) times the combo multiplier. " +
+            "Relaunch within the window to raise the multiplier - it keeps draining while you fly. " +
+            "Landing back on the object you launched from pays nothing.\n" +
+            "If you miss the window, your energy reverts to 40% and everything boosted is lost.\n\n" +
+            "GROUND POUND: if you groundpound and aim within the slow-mo window, the pound pays back 1.5x what you put in.\n\n" +
+            "AIM COLOURS: the dots and cursor turn green where the landing holds you and red where it does not - " +
+            "the red shells on the floating walls and the ceiling platform kill on contact.\n\n" +
+            "Press any button to start.";
 
         static void EnsureSceneInBuildSettings(string scenePath)
         {
