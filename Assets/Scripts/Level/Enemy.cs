@@ -323,6 +323,7 @@ namespace KineticEnergy.Level
 
         bool lastMoveUnsupported; // set by WithGroundedY - drives the hunter's return launch
         bool groundedSinceSpawn;  // gates that launch until the enemy has actually landed
+        bool attackConnected;     // this attack flight body-checked the player - no punish window
         bool returnLaunching;     // a return hop is in flight - no re-trigger until it lands
         bool lastFlightWasAttack; // Land() opens the punish window only after real attacks
         float dodgeCooldownRemaining;
@@ -805,7 +806,19 @@ namespace KineticEnergy.Level
             // Landed after a real ATTACK: dodging switches off while it cools down from
             // attacking (the FULL attack cooldown, or the configured minimum if that is
             // longer) - the player's guaranteed opening starts the moment it touches down.
-            if (lastFlightWasAttack) vulnerableTimer = Mathf.Max(vulnerableAfterAttackSeconds, attackCooldown);
+            //
+            // UNLESS the attack CONNECTED: a landed hit is a won exchange, so there is no
+            // punish window and no long recovery - the enemy straightens up almost at once.
+            // The brief beat that remains is collision grace, not recovery: contact with
+            // the player is ignored until wandering resumes (the enemy lands right where
+            // the player stood, and re-enabling collision in the same instant let its
+            // kinematic collider eat the very knockback it just dealt).
+            if (lastFlightWasAttack)
+            {
+                if (attackConnected) stateTimer = 0.25f;
+                else vulnerableTimer = Mathf.Max(vulnerableAfterAttackSeconds, attackCooldown);
+            }
+            attackConnected = false;
             lastFlightWasAttack = false;
             platformBelow = landedOn; // the walkable area follows the enemy to its new platform
             if (bodyRenderer != null) bodyRenderer.material.color = IdleColor;
@@ -847,6 +860,7 @@ namespace KineticEnergy.Level
             }
             Vector3 shoveDirection = (away.normalized + Vector3.up * 0.6f).normalized;
             player.ApplyEnemyHit(shoveDirection * knockbackForce, attackEnergyDrain, postHitLaunchLockSeconds);
+            attackConnected = true; // a LANDED hit - this attack earns no punish window
 
             // No further contacts until the enemy is back to wandering: the landed enemy
             // sits right where the player stood, and its infinite-mass kinematic collider
@@ -906,6 +920,7 @@ namespace KineticEnergy.Level
             cooldownRemaining = 0f;
             fallVelocity = 0f;
             returnLaunching = false;
+            attackConnected = false;
             // A fresh spawn has not touched down yet, so it must not read its opening
             // descent as "stranded over the void" and hurl itself at a platform.
             groundedSinceSpawn = false;

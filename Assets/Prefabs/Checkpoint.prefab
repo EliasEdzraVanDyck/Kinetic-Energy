@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!1 &3343889841917815238
+--- !u!1 &2868129750271232027
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -8,10 +8,10 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 6537564986316585040}
-  - component: {fileID: 2344188784055854281}
-  - component: {fileID: 8858428585057271336}
-  - component: {fileID: 6463343301246038895}
+  - component: {fileID: 8657740942454097760}
+  - component: {fileID: 8283306609768893548}
+  - component: {fileID: 4848739266491342754}
+  - component: {fileID: 11511140835430871}
   m_Layer: 0
   m_Name: Button
   m_TagString: Untagged
@@ -19,36 +19,36 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &6537564986316585040
+--- !u!4 &8657740942454097760
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3343889841917815238}
+  m_GameObject: {fileID: 2868129750271232027}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0.6, z: 0}
-  m_LocalScale: {x: 0.6, y: 1.2, z: 0.6}
+  m_LocalScale: {x: 0.69808745, y: 1.3961749, z: 0.69808745}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 3137500941380996460}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!33 &2344188784055854281
+--- !u!33 &8283306609768893548
 MeshFilter:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3343889841917815238}
+  m_GameObject: {fileID: 2868129750271232027}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
---- !u!65 &8858428585057271336
+--- !u!65 &4848739266491342754
 BoxCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3343889841917815238}
+  m_GameObject: {fileID: 2868129750271232027}
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2
@@ -63,13 +63,13 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 1, y: 1, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
---- !u!23 &6463343301246038895
+--- !u!23 &11511140835430871
 MeshRenderer:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3343889841917815238}
+  m_GameObject: {fileID: 2868129750271232027}
   m_Enabled: 1
   m_CastShadows: 1
   m_ReceiveShadows: 1
@@ -143,10 +143,10 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 12, y: 0.47395, z: 12}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 6537564986316585040}
+  - {fileID: 8657740942454097760}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &7188892970397303500
@@ -240,14 +240,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.Checkpoint
   respawnPoint: {fileID: 0}
-  buttonVisual: {fileID: 6537564986316585040}
-  pressDepth: 0.9
+  buttonVisual: {fileID: 8657740942454097760}
+  pressDepth: 0.45
   pressSpeed: 2.5
   minimumImpactSteepness: 0.7
   idleColor: {r: 0.25, g: 0.55, b: 1, a: 1}
   pressedColor: {r: 0.25, g: 0.95, b: 0.45, a: 1}
-  buttonRenderer: {fileID: 6463343301246038895}
-  buttonCollider: {fileID: 8858428585057271336}
+  buttonRenderer: {fileID: 11511140835430871}
+  buttonCollider: {fileID: 4848739266491342754}
 --- !u!54 &1882056215976506596
 Rigidbody:
   m_ObjectHideFlags: 0

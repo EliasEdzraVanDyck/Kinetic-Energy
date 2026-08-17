@@ -2275,7 +2275,10 @@ namespace KineticEnergy.EditorSetup
                 checkpoint.buttonVisual = button.transform;
                 checkpoint.buttonRenderer = button.GetComponent<Renderer>();
                 checkpoint.buttonCollider = button.GetComponent<Collider>();
-                checkpoint.pressDepth = 0.9f; // local units - the button sinks flush into the frame
+                // The button spans local y 0 -> 1.2 and the frame's top face sits at 0.5, so
+                // it stands 0.7 proud. Sinking 0.45 leaves 0.25 still showing: pressed IN,
+                // not swallowed - at 0.9 it dropped below the frame and disappeared.
+                checkpoint.pressDepth = 0.45f;
 
                 PrefabUtility.SaveAsPrefabAsset(root, path);
             }
@@ -2283,6 +2286,64 @@ namespace KineticEnergy.EditorSetup
 
             AssetDatabase.SaveAssets();
             Debug.Log("KineticEnergySetup: Checkpoint button prefab updated in place OK");
+        }
+
+        // The flying rotated slabs - turret walls, the flyer-section side walls and the
+        // arena ledges - are LANDING TARGETS, so the aim must read them green on every face
+        // rather than only where they happen to point upward. The rule for that already
+        // exists: a StickySurface marks a surface safe "regardless of its value", so one
+        // with sticky OFF makes the preview green while leaving the gameplay exactly as it
+        // was - a brief cling, no permanent hold.
+        //
+        // The same pass gives the side walls and ledges their damage ridges: rim only, so
+        // both broad faces stay landable and it is the thin edges that punish a miss.
+        [MenuItem("Tools/Kinetic Energy/Mark Flying Ledges Safe And Ridged")]
+        public static void MarkFlyingLedgesSafeAndRidged()
+        {
+            Material damageMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/DamageWallMaterial.mat");
+            if (damageMat == null) throw new Exception("KineticEnergySetup: DamageWallMaterial is missing.");
+
+            foreach (string scenePath in new[]
+            {
+                "Assets/Scenes/LevelElementsTest.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
+                Transform fallbackSpawn = sections != null && sections.sections.Length > 0 ? sections.sections[0].spawnPoint : null;
+
+                int marked = 0, ridged = 0;
+                foreach (Transform candidate in UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    string name = candidate.name;
+                    bool isTurretWall = name.StartsWith("TurretWall");
+                    bool isSideWall = name.StartsWith("FlySideWall");
+                    bool isLedge = name.Contains("Ledge");
+                    if (!isTurretWall && !isSideWall && !isLedge) continue;
+
+                    // Safe to land on, from any angle - without becoming a permanent perch.
+                    StickySurface marker = candidate.GetComponent<StickySurface>();
+                    if (marker == null) marker = candidate.gameObject.AddComponent<StickySurface>();
+                    marker.sticky = false;
+                    EditorUtility.SetDirty(marker);
+                    marked++;
+
+                    // The turret walls already carry the full shell (edges AND the back, so
+                    // only the mounted face is landable) - leave those exactly as they are.
+                    if (isTurretWall) continue;
+                    AddEdgeDamageShell(candidate, fallbackSpawn, damageMat);
+                    ridged++;
+                }
+
+                if (sections != null) RefreshSectionHazards(sections);
+                if (marked > 0) EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: " + scenePath + " - " + marked + " surfaces marked safe, " + ridged + " ridged");
+            }
+            AssetDatabase.SaveAssets();
         }
 
         // Diagnostic: reports every checkpoint's wiring in both element scenes. Changes nothing.

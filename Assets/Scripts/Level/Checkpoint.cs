@@ -18,8 +18,8 @@ namespace KineticEnergy.Level
         [Header("Button")]
         [Tooltip("The part that sinks. Empty = this object's own transform.")]
         public Transform buttonVisual;
-        [Tooltip("How far the button sinks when claimed, in the button's own local units.")]
-        public float pressDepth = 0.3f;
+        [Tooltip("How far the button sinks when claimed, in local units. Keep it SHORT of the frame's top face - a claimed button should still stand proud, just visibly pushed in, rather than vanishing into the plinth.")]
+        public float pressDepth = 0.45f;
         [Tooltip("Local units per second the button travels between up and down.")]
         public float pressSpeed = 2.5f;
 
