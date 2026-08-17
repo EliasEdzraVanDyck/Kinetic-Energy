@@ -81,6 +81,9 @@ namespace KineticEnergy.Player
         // added into the grounded velocity so movers CARRY their rider smoothly. Read by
         // KineticCubeController too, so a grounded aim frozen on a mover rides along.
         public Vector3 GroundPlatformVelocity { get; private set; }
+        // True while a mover is genuinely underfoot - distinct from a zero velocity, which
+        // a platform also has for an instant at each end of its trip.
+        public bool OnMovingPlatform { get; private set; }
         Quaternion visualTargetRotation = Quaternion.identity;
         float launchFacingYaw;
 
@@ -159,7 +162,12 @@ namespace KineticEnergy.Player
                 // Walking speed rides ON TOP of whatever the platform underfoot is doing -
                 // standing still on a moving platform means moving WITH it.
                 Vector3 horizontalVelocity = moveDirection * moveSpeed + new Vector3(GroundPlatformVelocity.x, 0f, GroundPlatformVelocity.z);
-                rb.linearVelocity = new Vector3(horizontalVelocity.x, rb.linearVelocity.y, horizontalVelocity.z);
+                // The rider follows the platform VERTICALLY too. Only x/z were carried, so
+                // a platform starting its descent simply dropped away and the player fell
+                // after it under gravity - the separation read as a little hop every time
+                // it turned over at the top.
+                float verticalVelocity = OnMovingPlatform ? GroundPlatformVelocity.y : rb.linearVelocity.y;
+                rb.linearVelocity = new Vector3(horizontalVelocity.x, verticalVelocity, horizontalVelocity.z);
 
                 // Face the movement direction instantly while walking - "launch forward"
                 // means the way the cube is visibly pointing, so walking must keep facing
@@ -281,6 +289,7 @@ namespace KineticEnergy.Player
             MovingPlatform platform = isGrounded && hit.collider != null && hit.collider.attachedRigidbody != null
                 ? hit.collider.attachedRigidbody.GetComponent<MovingPlatform>()
                 : null;
+            OnMovingPlatform = platform != null;
             GroundPlatformVelocity = platform != null ? platform.CurrentVelocity : Vector3.zero;
         }
 
