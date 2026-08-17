@@ -73,6 +73,17 @@ namespace KineticEnergy.Player
         [Tooltip("Damping applied while airborne with no launch in flight, so plain falls accelerate naturally.")]
         public float plainFallDamping = 0.2f;
 
+        [Tooltip("The Player's AudioSource that will play the clips.")]
+        public AudioSource playerSounds;
+        [Tooltip("The sound that plays while the cube is airborne.")]
+        public AudioClip flyingSound;
+        [Tooltip("The sound that plays while the cube is charging.")]
+        public AudioClip chargingSound;
+        [Tooltip("The sound that plays while the cube is done charging but not fired yet.")]
+        public AudioClip chargingLoopSound;
+        [Tooltip("The sound that plays while the cube lands on the ground (crashes).")]
+        public AudioClip crashSound;
+
         [Header("Control Scheme Variants (QuarryAim lab - all default OFF)")]
         // Toggled by ControlSchemeVariantController; every other scene keeps the classics.
         [Tooltip("Grounded aim: the camera slowly pans horizontally after the aim swings past the follow threshold to either side.")]
@@ -388,6 +399,7 @@ namespace KineticEnergy.Player
         Vector3 stuckSurfaceNormal;
         float nonStickyReleaseTimer;
         bool isGrounded;
+        bool groundedLastFrame;
 
         // Queued launch, applied on the next physics tick.
         bool launchQueued;
@@ -758,6 +770,19 @@ namespace KineticEnergy.Player
                     UpdateAirAim();
                 }
             }
+
+            if (isGrounded && !groundedLastFrame)
+            {
+                if (playerSounds)
+                {
+                    playerSounds.Stop();
+                    playerSounds.loop = false;
+                    playerSounds.clip = crashSound;
+                    playerSounds.Play();
+                }
+            }
+
+            groundedLastFrame = isGrounded;
         }
 
         // ---------- Slowdown resource ----------
@@ -1004,6 +1029,32 @@ namespace KineticEnergy.Player
                     // The cursor at the end of the line shows for grounded aims too.
                     landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
                     if (!isGrounded) MidairAimOpened?.Invoke();
+                }
+                else
+                {
+                    if (playerSounds != null)
+                    {
+                        // If we are charging
+                        if (playerSounds.clip == chargingSound || playerSounds.clip == chargingLoopSound)
+                        {
+                            // But the audio stopped playing
+                            if (!playerSounds.isPlaying)
+                            {
+                                // Play the loop sound
+                                playerSounds.clip = chargingLoopSound;
+                                playerSounds.loop = true;
+                                playerSounds.Play();
+                            }
+                        }
+                        else
+                        {
+                            // If we are not playing charing or loop sound yet, play the charging sound once
+                            playerSounds.Stop();
+                            playerSounds.clip = chargingSound;
+                            playerSounds.loop = false;
+                            playerSounds.Play();
+                        }
+                    }
                 }
 
                 if (groundedDialControls)
@@ -1808,6 +1859,16 @@ namespace KineticEnergy.Player
             }
 
             previousLaunchChargeFraction = ChargeFraction(); // the NEXT launch's wall carry reads this
+
+            // While in the air, loop this audio
+            if (playerSounds != null)
+            {
+                playerSounds.Stop();
+                playerSounds.loop = true;
+                playerSounds.clip = flyingSound;
+                playerSounds.Play();
+            }
+
             LaunchFired?.Invoke();
         }
 
