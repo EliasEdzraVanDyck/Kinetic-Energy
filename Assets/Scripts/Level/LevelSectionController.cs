@@ -40,6 +40,28 @@ namespace KineticEnergy.Level
             // The starting section still repoints the hazards, so a first-section death
             // does not fall back to whatever the prefab happened to carry.
             PointHazardsAt(CurrentSection);
+            ResetCheckpoints();
+        }
+
+        void OnEnable()
+        {
+            DamageWalls.PlayerRespawned += ResetCheckpoints;
+        }
+
+        void OnDisable()
+        {
+            DamageWalls.PlayerRespawned -= ResetCheckpoints;
+        }
+
+        // Every pad comes back for the retry EXCEPT the one you are respawning at - that
+        // one is already yours, so it stays claimed and stays hidden. Run on a respawn and
+        // on a section jump alike.
+        public void ResetCheckpoints()
+        {
+            foreach (Checkpoint checkpoint in FindObjectsByType<Checkpoint>(FindObjectsInactive.Include))
+            {
+                checkpoint.SetClaimed(ActiveRespawn != null && checkpoint.RespawnTarget == ActiveRespawn);
+            }
         }
 
         // Called by the pause menu's per-section buttons (the index arrives as a string,
@@ -58,6 +80,7 @@ namespace KineticEnergy.Level
 
             CurrentSection = index;
             PointHazardsAt(index);
+            ResetCheckpoints();
 
             if (controller == null) controller = FindAnyObjectByType<KineticCubeController>();
             // The controller's own respawn does the whole job: position, velocity, flight
@@ -76,12 +99,21 @@ namespace KineticEnergy.Level
         void PointHazardsAt(int index)
         {
             if (sections == null || index < 0 || index >= sections.Length) return;
-            Transform spawn = sections[index].spawnPoint;
+            SetActiveRespawn(sections[index].spawnPoint);
+        }
+
+        // The single place "where back is" lives - claimed either by touching a checkpoint
+        // pad or by jumping to a section from the pause menu.
+        public void SetActiveRespawn(Transform spawn)
+        {
             if (spawn == null || hazards == null) return;
+            ActiveRespawn = spawn;
             foreach (DamageWalls hazard in hazards)
             {
                 if (hazard != null) hazard.respawnPoint = spawn;
             }
         }
+
+        public Transform ActiveRespawn { get; private set; }
     }
 }

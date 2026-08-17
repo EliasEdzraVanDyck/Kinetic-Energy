@@ -1300,6 +1300,7 @@ namespace KineticEnergy.EditorSetup
         {
             const string scenePath = "Assets/Scenes/LevelElementsTest.unity";
             CreateLaserGatePrefab();
+            CreateCheckpointPrefab();
             EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
 
             KineticCubeController player = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
@@ -1369,7 +1370,8 @@ namespace KineticEnergy.EditorSetup
             var hazards = new List<DamageWalls>();
 
             // Every section opens with a plain pad the player is teleported onto, so a jump
-            // into any element starts from solid, safe ground.
+            // into any element starts from solid, safe ground - and a checkpoint slab
+            // hovering over it, so reaching the section on foot claims it as well.
             Transform OpenSection(string label, Vector3 padCentre)
             {
                 GameObject sectionPad = CreateBlock(tf, label + "Pad", padCentre, pad, platformMat);
@@ -1378,6 +1380,16 @@ namespace KineticEnergy.EditorSetup
                 spawn.transform.SetParent(tf, false);
                 spawn.transform.position = padCentre + new Vector3(0f, pad.y * 0.5f + 1.5f, 0f);
                 sections.Add(new LevelSectionController.Section { label = label, spawnPoint = spawn.transform });
+
+                GameObject checkpoint = InstantiatePrefab("Checkpoint");
+                checkpoint.name = label + "Checkpoint";
+                checkpoint.transform.SetParent(tf, false);
+                // Hovers just clear of the deck, thin enough to pass through on landing.
+                checkpoint.transform.position = padCentre + new Vector3(0f, pad.y * 0.5f + 0.75f, 0f);
+                checkpoint.transform.localScale = new Vector3(pad.x * 0.9f, 0.5f, pad.z * 0.9f);
+                checkpoint.GetComponent<Checkpoint>().respawnPoint = spawn.transform;
+                EditorUtility.SetDirty(checkpoint);
+
                 return spawn.transform;
             }
 
@@ -1463,14 +1475,31 @@ namespace KineticEnergy.EditorSetup
             finishBox.size = new Vector3(6f, 6f, 12f);
             finish.AddComponent<WinOnFinish>();
 
+            // ---- Lasers HURT rather than kill ----
+            // Their beam root's DamageWalls is swapped for the hazard component, so a
+            // mistimed run costs a shove plus a chunk of tank - the same as walking into an
+            // enemy - instead of ending the run. They stop being respawn sources with it.
+            foreach (LaserWall gate in course.GetComponentsInChildren<LaserWall>(true))
+            {
+                foreach (DamageWalls beamDamage in gate.GetComponentsInChildren<DamageWalls>(true))
+                {
+                    GameObject beamsGo = beamDamage.gameObject;
+                    UnityEngine.Object.DestroyImmediate(beamDamage);
+                    if (beamsGo.GetComponent<LaserHazard>() == null) beamsGo.AddComponent<LaserHazard>();
+                    EditorUtility.SetDirty(beamsGo);
+                }
+            }
+
             // ---- Hazard floor, well below the whole run ----
             GameObject damageFloor = CreateBlock(null, "DamageFloor",
                 new Vector3(courseLength * 0.5f, -26f, 0f), new Vector3(courseLength + 120f, 2f, 220f), damageMat);
             DamageWalls floorDamage = damageFloor.AddComponent<DamageWalls>();
             hazards.Add(floorDamage);
-            foreach (DamageWalls gateDamage in course.GetComponentsInChildren<DamageWalls>(true))
+            // Anything else in the course that still respawns (none today - the lasers gave
+            // it up above - but a future hazard is picked up automatically).
+            foreach (DamageWalls courseHazard in course.GetComponentsInChildren<DamageWalls>(true))
             {
-                hazards.Add(gateDamage);
+                hazards.Add(courseHazard);
             }
 
             // ---- Section index (drives the pause menu's jump screen) ----
@@ -1644,6 +1673,29 @@ namespace KineticEnergy.EditorSetup
             // The Variants screen rebuild carries the new order/labels (tuning untouched).
             AddVariantsScreenToLevel1Challenge();
             Debug.Log("KineticEnergySetup: sealing/chasing order swapped OK");
+        }
+
+        // The checkpoint pad: a blue see-through slab that hovers over a section's platform.
+        // Sized per instance (90% of its platform in x/z, 0.5 tall), so the prefab is a
+        // plain unit cube trigger.
+        [MenuItem("Tools/Kinetic Energy/Create Checkpoint Prefab")]
+        public static void CreateCheckpointPrefab()
+        {
+            string path = PrefabFolder + "/Checkpoint.prefab";
+            Material checkpointMat = MakeTransparentMaterial("CheckpointMaterial", new Color(0.25f, 0.55f, 1f, 0.35f));
+
+            GameObject pad = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            pad.name = "Checkpoint";
+            pad.GetComponent<Renderer>().sharedMaterial = checkpointMat;
+            pad.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            BoxCollider trigger = pad.GetComponent<BoxCollider>();
+            trigger.isTrigger = true; // a pad you pass THROUGH, never something you land on
+            pad.AddComponent<Checkpoint>();
+
+            PrefabUtility.SaveAsPrefabAsset(pad, path);
+            UnityEngine.Object.DestroyImmediate(pad);
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: Checkpoint prefab created OK");
         }
 
         const float DamageShellThickness = 0.5f;
