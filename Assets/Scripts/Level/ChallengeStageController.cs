@@ -52,8 +52,8 @@ namespace KineticEnergy.Level
         // Same tuning the QuarryChallenge harness uses for its scatter variant.
         [Tooltip("Scatter cone radius (degrees) at full charge.")]
         public float scatterMaxAngle = 14f;
-        [Tooltip("Charge fraction where the cone starts opening.")]
-        [Range(0f, 1f)] public float scatterStartFraction = 0.25f;
+        [Tooltip("Charge fraction where the cone leaves zero. 0 keeps the pure square-root curve (scatter = sqrt(energy%) x maxAngle/10), which is what this scene plays.")]
+        [Range(0f, 1f)] public float scatterStartFraction = 0f;
         [Tooltip("Dots drawn around the predicted landing to visualise how far the shot could drift.")]
         public int scatterRingDots = 24;
         public Color scatterRingColor = new Color(1f, 0.45f, 0.15f, 0.9f);
@@ -283,11 +283,7 @@ namespace KineticEnergy.Level
         // "2 consecutive platforms") - no way back.
         void TrackPlatformLandings()
         {
-            if (!controller.IsGrounded) return;
-            if (!Physics.Raycast(controller.transform.position, Vector3.down, out RaycastHit hit, 4f,
-                Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)) return;
-
-            Transform platform = MatchCoursePlatform(hit.collider.transform);
+            Transform platform = CurrentSupportPlatform();
             if (platform == null || platform == lastPlatform) return;
 
             Transform previous = lastPlatform;
@@ -295,11 +291,35 @@ namespace KineticEnergy.Level
             if (stage != ChallengeStage.SealingWalls || previous == null) return;
 
             int landedIndex = System.Array.IndexOf(coursePlatforms, platform);
-            if (landedIndex <= 0 || sealedGaps.Contains(landedIndex)) return;
+            if (landedIndex < 0 || sealedGaps.Contains(landedIndex)) return;
 
-            Vector3 a = coursePlatforms[landedIndex - 1].position;
-            Vector3 b = coursePlatforms[landedIndex].position;
-            SpawnSealWall((a + b) * 0.5f, landedIndex);
+            // Sealed across the gap ACTUALLY crossed (left -> landed), not the course-order
+            // neighbours: floating walls and the upside-down platform are reached out of
+            // order, and a neighbour-based seal would wall off the wrong gap entirely.
+            SpawnSealWall(previous.position, platform.position, landedIndex);
+        }
+
+        // Whatever the player is currently resting on - standing OR clung to. The old
+        // check was a downward ray while grounded, so it only ever saw platform TOPS: a
+        // floating wall's side or the upside-down platform's underside left the player
+        // stuck (not grounded) with nothing under the ray, and no seal ever spawned.
+        Transform CurrentSupportPlatform()
+        {
+            if (controller.IsGrounded && Physics.Raycast(controller.transform.position, Vector3.down,
+                out RaycastHit hit, 4f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                Transform standing = MatchCoursePlatform(hit.collider.transform);
+                if (standing != null) return standing;
+            }
+
+            // Stuck to a face (wall, ceiling, any angle): the crash that stuck us there
+            // recorded the surface, which covers every landing the ray cannot see.
+            if (controller.IsStuck || controller.IsGrounded)
+            {
+                Collider crashSurface = controller.LastCrashSurface;
+                if (crashSurface != null) return MatchCoursePlatform(crashSurface.transform);
+            }
+            return null;
         }
 
         Transform MatchCoursePlatform(Transform hitTransform)
@@ -315,17 +335,34 @@ namespace KineticEnergy.Level
             return null;
         }
 
-        void SpawnSealWall(Vector3 gapCentre, int gapIndex)
+        void SpawnSealWall(Vector3 from, Vector3 to, int gapIndex)
         {
             if (sealWallPrefab == null) return;
             GameObject wall = Instantiate(sealWallPrefab);
             wall.name = "SealWall_" + gapIndex;
+
+            Vector3 gapCentre = (from + to) * 0.5f;
             // Centre lifted so the wall reaches well above the platform tops and a little
             // below them - over is a full launch away, under is the damage floor.
             wall.transform.position = gapCentre + Vector3.up * (sealWallSize.y * 0.4f);
+
+            // TURNED ACROSS the gap: sealWallSize is (thickness, height, width), so local
+            // +x must point along the crossing. This course wanders sideways as well as
+            // forward - an axis-aligned wall would lie flat along some gaps and block
+            // nothing at all.
+            Vector3 gapDirection = Vector3.ProjectOnPlane(to - from, Vector3.up);
+            if (gapDirection.sqrMagnitude > 0.0001f)
+            {
+                wall.transform.rotation = Quaternion.FromToRotation(Vector3.right, gapDirection.normalized);
+            }
             wall.transform.localScale = sealWallSize;
+
             DeathWall death = wall.GetComponent<DeathWall>();
-            if (death != null) death.moveSpeed = 0f;
+            if (death != null)
+            {
+                death.moveSpeed = 0f;         // a seal never travels...
+                death.moveAcceleration = 0f;  // ...and never picks up the chase's speed
+            }
             wall.SetActive(true);
             sealWalls.Add(wall);
             sealedGaps.Add(gapIndex);

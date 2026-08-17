@@ -1027,6 +1027,10 @@ namespace KineticEnergy.EditorSetup
             chaseGo.transform.localScale = new Vector3(2f, 46f, 140f);
             DeathWall chase = chaseGo.GetComponent<DeathWall>();
             chase.moveSpeed = 4f;
+            // Gains pace as it runs: ~0.25 m/s per second, so the ~550-unit course tightens
+            // from a walk into a real chase. Editable on the ChaseWall instance.
+            chase.moveAcceleration = 0.25f;
+            chase.maxMoveSpeed = 0f; // uncapped
             chase.moveDirection = Vector3.right;
             EditorUtility.SetDirty(chase);
 

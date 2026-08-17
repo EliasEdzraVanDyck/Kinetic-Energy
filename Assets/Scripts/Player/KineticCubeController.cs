@@ -1672,11 +1672,29 @@ namespace KineticEnergy.Player
         }
 
         // The scatter cone's current radius for a given charge (0 while scatter is off).
+        //
+        // SQUARE-ROOT curve, in exactly the requested form: x is the PERCENTAGE of energy
+        // committed to the launch (0..100), the core function is sqrt(x), and a FACTOR
+        // normalises it so a full-energy launch lands on the editor's maximum:
+        //
+        //     factor = launchScatterMaxAngle / sqrt(100)
+        //     cone   = sqrt(x) * factor
+        //
+        // so f(100) = sqrt(100) * factor == launchScatterMaxAngle by construction, and the
+        // maximum stays a plain editor value. The curve is steep early and flattens near
+        // the top: the first energy committed costs the most precision.
+        //
+        // launchScatterStartFraction shifts where the curve leaves zero (0 = the pure
+        // form above, where x IS the committed energy percentage).
         public float ScatterConeAngleFor(float chargeFraction)
         {
             if (launchScatterMaxAngle <= 0f) return 0f;
-            float excess = Mathf.InverseLerp(launchScatterStartFraction, 1f, chargeFraction);
-            return launchScatterMaxAngle * excess;
+            float span = 1f - launchScatterStartFraction;
+            if (span <= 0.0001f) return chargeFraction >= 1f ? launchScatterMaxAngle : 0f;
+
+            float x = Mathf.Clamp01((chargeFraction - launchScatterStartFraction) / span) * 100f;
+            float factor = launchScatterMaxAngle / Mathf.Sqrt(100f);
+            return Mathf.Sqrt(x) * factor;
         }
 
         static Vector3 RandomDirectionInCone(Vector3 direction, float coneAngleDegrees)

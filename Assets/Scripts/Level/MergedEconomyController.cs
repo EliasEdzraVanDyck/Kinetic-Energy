@@ -208,8 +208,14 @@ namespace KineticEnergy.Level
             pauseController = FindAnyObjectByType<KineticEnergy.UI.PauseController>(FindObjectsInactive.Include);
 
             // The one-time economy wiring (per-variant refund routing lives in
-            // ApplyVariant); slow-down stays free.
-            controller.slowdownMode = SlowdownMode.Unlimited;
+            // ApplyVariant); slow-down stays free - EXCEPT where a challenge director owns
+            // it. Level1Challenge's stage 1 runs the aim BUDGET, and both components write
+            // this in Start: whichever ran last won, so the budget bar kept vanishing.
+            // The director owns the rule wherever one exists; order stops mattering.
+            if (FindAnyObjectByType<ChallengeStageController>(FindObjectsInactive.Include) == null)
+            {
+                controller.slowdownMode = SlowdownMode.Unlimited;
+            }
             controller.ordinaryRefundCeiling = PremiumBoundary;
             // The safety recharge IS this scene's stranding failsafe - the grounded
             // reserve (unspendable bottom slice) is disabled, the whole tank fires.
