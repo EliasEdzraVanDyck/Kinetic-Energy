@@ -12,6 +12,7 @@ namespace KineticEnergy.Level
         OverchargeScatter, // 2 - big launches scatter (charge buys distance, costs precision)
         ChasingWall,       // 3 - a purple death wall sweeps the level behind the player
         SealingWalls,      // 4 - every platform-to-platform jump seals the gap behind
+        ShrinkingPlatforms,// 5 - each course platform is a step smaller than the one before
     }
 
     // Carries the chosen stage across the scene reload (the SlowdownVariantSelection
@@ -30,6 +31,18 @@ namespace KineticEnergy.Level
     {
         [Tooltip("Stage played when no pause-menu selection is pending (a fresh boot).")]
         public ChallengeStage startingStage = ChallengeStage.LimitedSlowdown;
+
+        [Tooltip("The stages this scene cycles through, in play order - each finish reloads onto the next; the last one wins. The default keeps Level 8 on its original four.")]
+        public ChallengeStage[] stageSequence =
+        {
+            ChallengeStage.LimitedSlowdown,
+            ChallengeStage.OverchargeScatter,
+            ChallengeStage.ChasingWall,
+            ChallengeStage.SealingWalls,
+        };
+
+        [Tooltip("Win with the locked pause screen ('You win!', no resume) instead of the ordinary one - for the self-contained test scenes.")]
+        public bool lockedWinScreen = false;
 
         [Header("1 - Limited slowdown")]
         [Tooltip("Seconds of midair slow-down in the budget (the meter refills on every crash).")]
@@ -54,6 +67,10 @@ namespace KineticEnergy.Level
         [Tooltip("World size of a spawned seal wall (x thickness, y height, z width).")]
         public Vector3 sealWallSize = new Vector3(1.5f, 40f, 40f);
 
+        [Header("5 - Shrinking platforms")]
+        [Tooltip("The LAST course platform's size as a percentage of the first (50 = half). The first keeps 100%, every platform between interpolates in equal steps. Only y and z scale - x is untouched, so course gaps never change.")]
+        [Range(1f, 100f)] public float shrinkFinalScalePercent = 50f;
+
         [Header("Respawn")]
         [Tooltip("Where a death-wall touch puts the player - the level's ordinary respawn point.")]
         public Transform respawnPoint;
@@ -65,6 +82,7 @@ namespace KineticEnergy.Level
         ChallengeStage stage;
         Text hudLabel;
         Transform lastPlatform;
+        Vector3[] courseOriginalScales;
         readonly List<GameObject> sealWalls = new List<GameObject>();
         readonly HashSet<int> sealedGaps = new HashSet<int>(); // keyed by the gap's far platform index
 
@@ -80,7 +98,15 @@ namespace KineticEnergy.Level
 
             stage = ChallengeStageSelection.PendingStage ?? startingStage;
             ChallengeStageSelection.PendingStage = null;
+            // A stage this scene doesn't play (stale selection from another scene) falls
+            // back to the sequence's opener.
+            if (stageSequence == null || stageSequence.Length == 0)
+            {
+                stageSequence = new[] { startingStage };
+            }
+            if (SequenceIndex(stage) < 0) stage = stageSequence[0];
 
+            CaptureCourseScales();
             BuildHudTag();
             ApplyStage();
         }
@@ -120,9 +146,52 @@ namespace KineticEnergy.Level
                 chaseWall.gameObject.SetActive(stage == ChallengeStage.ChasingWall);
                 chaseWall.ResetToStart();
             }
+            RestoreCourseScales();
+            if (stage == ChallengeStage.ShrinkingPlatforms) ApplyShrinkScales();
             ClearSealWalls();
             lastPlatform = null;
             if (hudLabel != null) hudLabel.text = StageLabel;
+        }
+
+        int SequenceIndex(ChallengeStage lookFor)
+        {
+            return stageSequence == null ? -1 : System.Array.IndexOf(stageSequence, lookFor);
+        }
+
+        // ---------- Shrinking platforms ----------
+
+        void CaptureCourseScales()
+        {
+            if (coursePlatforms == null) return;
+            courseOriginalScales = new Vector3[coursePlatforms.Length];
+            for (int i = 0; i < coursePlatforms.Length; i++)
+            {
+                if (coursePlatforms[i] != null) courseOriginalScales[i] = coursePlatforms[i].localScale;
+            }
+        }
+
+        void RestoreCourseScales()
+        {
+            if (coursePlatforms == null || courseOriginalScales == null) return;
+            for (int i = 0; i < coursePlatforms.Length && i < courseOriginalScales.Length; i++)
+            {
+                if (coursePlatforms[i] != null) coursePlatforms[i].localScale = courseOriginalScales[i];
+            }
+        }
+
+        // First platform 100%, last shrinkFinalScalePercent, equal steps between - applied
+        // to y and z only, so x (the course axis) never moves and every gap stays the same.
+        void ApplyShrinkScales()
+        {
+            if (coursePlatforms == null || coursePlatforms.Length < 2 || courseOriginalScales == null) return;
+            float finalFactor = Mathf.Clamp(shrinkFinalScalePercent, 1f, 100f) / 100f;
+            for (int i = 0; i < coursePlatforms.Length && i < courseOriginalScales.Length; i++)
+            {
+                if (coursePlatforms[i] == null) continue;
+                float factor = Mathf.Lerp(1f, finalFactor, i / (float)(coursePlatforms.Length - 1));
+                Vector3 original = courseOriginalScales[i];
+                coursePlatforms[i].localScale = new Vector3(original.x, original.y * factor, original.z * factor);
+            }
         }
 
         void Update()
@@ -219,29 +288,42 @@ namespace KineticEnergy.Level
         // The end pad's trigger lands here: advance and reload, or win after the last stage.
         public void OnFinishReached()
         {
-            int last = System.Enum.GetValues(typeof(ChallengeStage)).Length - 1;
-            if ((int)stage < last)
+            int index = SequenceIndex(stage);
+            if (index >= 0 && index < stageSequence.Length - 1)
             {
-                ChallengeStageSelection.PendingStage = (ChallengeStage)((int)stage + 1);
+                ChallengeStageSelection.PendingStage = stageSequence[index + 1];
                 Time.timeScale = 1f;
                 SceneManager.LoadScene(SceneManager.GetActiveScene().name);
                 return;
             }
 
-            // All four cleared - the ordinary win screen (the pause menu with the win
+            // The whole sequence cleared - the win screen (the pause menu with the win
             // label showing). A restart from there begins the sequence fresh.
             ChallengeStageSelection.PendingStage = null;
             var pause = FindAnyObjectByType<KineticEnergy.UI.PauseController>(FindObjectsInactive.Include);
-            if (pause != null) pause.ShowWin();
+            if (pause == null) return;
+            if (lockedWinScreen) pause.ShowWinLocked();
+            else pause.ShowWin();
         }
 
-        string StageLabel => stage switch
+        string StageLabel
         {
-            ChallengeStage.LimitedSlowdown => "Challenge 1/4 - Limited slowdown",
-            ChallengeStage.OverchargeScatter => "Challenge 2/4 - Overcharge scatter",
-            ChallengeStage.ChasingWall => "Challenge 3/4 - Chasing wall",
-            ChallengeStage.SealingWalls => "Challenge 4/4 - Sealing walls",
-            _ => "Challenge ?",
+            get
+            {
+                int index = SequenceIndex(stage);
+                return "Challenge " + (index >= 0 ? index + 1 : 1) + "/"
+                    + (stageSequence != null ? stageSequence.Length : 1) + " - " + StageName(stage);
+            }
+        }
+
+        static string StageName(ChallengeStage named) => named switch
+        {
+            ChallengeStage.LimitedSlowdown => "Limited slowdown",
+            ChallengeStage.OverchargeScatter => "Overcharge scatter",
+            ChallengeStage.ChasingWall => "Chasing wall",
+            ChallengeStage.SealingWalls => "Sealing walls",
+            ChallengeStage.ShrinkingPlatforms => "Shrinking platforms",
+            _ => "?",
         };
 
         void BuildHudTag()

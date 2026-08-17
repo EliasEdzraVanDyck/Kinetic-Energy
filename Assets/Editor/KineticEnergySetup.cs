@@ -972,6 +972,146 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: camera settings screen added to the pause menu OK");
         }
 
+        // Turns Level1Challenge into the five-stage challenge cycle: the four Level 8
+        // challenges plus the shrinking-platforms stage, each finish reloading the scene
+        // onto the next, the LOCKED win screen after the last. Idempotent - safe to re-run.
+        [MenuItem("Tools/Kinetic Energy/Setup Level1Challenge Cycle")]
+        public static void SetupLevel1ChallengeCycle()
+        {
+            const string scenePath = "Assets/Scenes/Level1Challenge.unity";
+            CreateDeathWallPrefab();
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            // The finish pads advance the stage sequence now instead of showing the win
+            // screen directly - the controller decides when the run is truly over.
+            foreach (WinOnFinish win in UnityEngine.Object.FindObjectsByType<WinOnFinish>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                GameObject finishGo = win.gameObject;
+                UnityEngine.Object.DestroyImmediate(win);
+                if (finishGo.GetComponent<ChallengeFinishTrigger>() == null)
+                {
+                    finishGo.AddComponent<ChallengeFinishTrigger>();
+                }
+                EditorUtility.SetDirty(finishGo);
+            }
+
+            // The course in run order (ascending x - the course axis), floating walls
+            // included: the sealing stage matches landings against it and the shrinking
+            // stage scales along it.
+            string[] courseNames =
+            {
+                "StartPlatform", "Platform1", "Platform2", "Platform3", "Platform4",
+                "Platform5", "Platform6", "FloatingWall1", "FloatingWall2", "FloatingWall3",
+                "EndPlatform", "EndPlatform (1)", "EndPlatform (2)",
+            };
+            var course = new List<Transform>();
+            foreach (string courseName in courseNames)
+            {
+                GameObject courseGo = GameObject.Find(courseName);
+                if (courseGo == null) throw new Exception("KineticEnergySetup: Level1Challenge is missing course object " + courseName);
+                course.Add(courseGo.transform);
+            }
+            course.Sort((a, b) => a.position.x.CompareTo(b.position.x));
+
+            GameObject respawn = GameObject.Find("RespawnPoint");
+            if (respawn == null) throw new Exception("KineticEnergySetup: Level1Challenge has no RespawnPoint.");
+
+            // The chase wall: parked behind the start, sweeping along +x. Tall and wide
+            // enough to cover the course's full y spread (the elevated end pad) and its
+            // z spread (platforms sit from z=-61 to z=+37).
+            GameObject oldChase = GameObject.Find("ChaseWall");
+            if (oldChase != null) UnityEngine.Object.DestroyImmediate(oldChase);
+            GameObject chaseGo = InstantiatePrefab("DeathWall");
+            chaseGo.name = "ChaseWall";
+            chaseGo.transform.position = new Vector3(-60f, 13f, -12f);
+            chaseGo.transform.localScale = new Vector3(2f, 46f, 140f);
+            DeathWall chase = chaseGo.GetComponent<DeathWall>();
+            chase.moveSpeed = 4f;
+            chase.moveDirection = Vector3.right;
+            EditorUtility.SetDirty(chase);
+
+            GameObject oldStages = GameObject.Find("ChallengeStages");
+            if (oldStages != null) UnityEngine.Object.DestroyImmediate(oldStages);
+            GameObject stagesGo = new GameObject("ChallengeStages");
+            ChallengeStageController stages = stagesGo.AddComponent<ChallengeStageController>();
+            stages.stageSequence = new[]
+            {
+                ChallengeStage.LimitedSlowdown,
+                ChallengeStage.OverchargeScatter,
+                ChallengeStage.ChasingWall,
+                ChallengeStage.SealingWalls,
+                ChallengeStage.ShrinkingPlatforms,
+            };
+            stages.lockedWinScreen = true; // the scene's self-contained "You win!" screen
+            stages.chaseWall = chase;
+            stages.sealWallPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/DeathWall.prefab");
+            stages.coursePlatforms = course.ToArray();
+            // Wider than Level 8's default - this course wanders in z, so a seal must
+            // still block the whole corridor between two laterally offset platforms.
+            stages.sealWallSize = new Vector3(1.5f, 40f, 90f);
+            stages.respawnPoint = respawn.transform;
+            EditorUtility.SetDirty(stages);
+
+            // Stage 1 shows the aim BUDGET on its own bar underneath the combo meter -
+            // previously both systems fought over the one repurposed slowdown meter. The
+            // combo meter stays the economy's (via its explicit comboMeter reference);
+            // the new bar becomes controller.slowdownMeter, which the controller itself
+            // hides outside AimBudget mode - so it only appears in the first variation.
+            KineticCubeController playerController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            MergedEconomyController economy = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
+            GameObject comboMeterGo = GameObject.Find("ComboMeter");
+            if (playerController == null || economy == null || comboMeterGo == null)
+            {
+                throw new Exception("KineticEnergySetup: Level1Challenge is missing the player, MergedEconomy or ComboMeter.");
+            }
+            EnergyMeterController comboMeterController = comboMeterGo.GetComponentInChildren<EnergyMeterController>(true);
+            economy.comboMeter = comboMeterController;
+            EditorUtility.SetDirty(economy);
+
+            GameObject oldBudget = GameObject.Find("SlowBudgetMeter");
+            if (oldBudget != null) UnityEngine.Object.DestroyImmediate(oldBudget);
+            GameObject budgetGo = (GameObject)PrefabUtility.InstantiatePrefab(
+                AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/ComboMeter.prefab"),
+                comboMeterGo.transform.parent);
+            budgetGo.name = "SlowBudgetMeter";
+            RectTransform comboRect = comboMeterGo.GetComponent<RectTransform>();
+            RectTransform budgetRect = budgetGo.GetComponent<RectTransform>();
+            budgetRect.anchorMin = comboRect.anchorMin;
+            budgetRect.anchorMax = comboRect.anchorMax;
+            budgetRect.pivot = comboRect.pivot;
+            // 45 below the combo meter's serialized spot: the economy drops the combo
+            // meter 20px at runtime (comboMeterDropPixels), the body is 20 tall - this
+            // lands the budget bar 5px under the dropped combo meter.
+            budgetRect.anchoredPosition = comboRect.anchoredPosition + new Vector2(0f, -45f);
+            EnergyMeterController budgetMeter = budgetGo.GetComponentInChildren<EnergyMeterController>(true);
+            if (budgetMeter != null && budgetMeter.energyFillImage != null)
+            {
+                budgetMeter.energyFillImage.color = new Color(0.3f, 0.65f, 1f); // budget blue, not combo orange
+                EditorUtility.SetDirty(budgetMeter.energyFillImage);
+            }
+            playerController.slowdownMeter = budgetMeter;
+            EditorUtility.SetDirty(playerController);
+
+            EnsureSceneInBuildSettings(scenePath); // the cycle reloads itself by name
+            EditorSceneManager.SaveOpenScenes();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: Level1Challenge five-stage cycle configured OK ("
+                + course.Count + " course platforms, budget bar split from combo meter)");
+        }
+
+        static void EnsureSceneInBuildSettings(string scenePath)
+        {
+            foreach (EditorBuildSettingsScene existing in EditorBuildSettings.scenes)
+            {
+                if (existing.path == scenePath) return;
+            }
+            var scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes)
+            {
+                new EditorBuildSettingsScene(scenePath, true),
+            };
+            EditorBuildSettings.scenes = scenes.ToArray();
+        }
+
         // The pause panel's button column, top to bottom, on an even 90px rhythm centred
         // where the old six-button stack sat (midpoint y = -40). Camera Settings goes
         // directly ABOVE Controls.

@@ -174,6 +174,13 @@ namespace KineticEnergy.Level
         float regenPool;         // the FRESH regen slice, drawn orange - decays into yellow
 
 
+        [Tooltip("Explicit combo-window meter. When set, the combo display lives HERE and controller.slowdownMeter is left alone - so a scene can show the aim-budget bar separately (Level1Challenge stage 1). Empty = repurpose controller.slowdownMeter, as before.")]
+        public KineticEnergy.Player.EnergyMeterController comboMeter;
+
+        // The meter the combo display actually drives.
+        KineticEnergy.Player.EnergyMeterController ComboDisplayMeter
+            => comboMeter != null ? comboMeter : (controller != null ? controller.slowdownMeter : null);
+
         // Runtime UI (combo circle riding the repurposed slowdown meter, HUD tag).
         GameObject comboCircle;
         Image comboCircleImage;
@@ -339,15 +346,24 @@ namespace KineticEnergy.Level
             // where a platform paid nothing). Resting on the ground with an open ledger
             // for a settle moment closes it unpaid: every registered crash - wall or
             // platform alike - can only ever pay its OWN flight.
-            if (flightOpen && controller.IsGrounded) groundedSettleTimer += Time.unscaledDeltaTime;
+            if ((flightOpen || chainInFlight) && controller.IsGrounded) groundedSettleTimer += Time.unscaledDeltaTime;
             else groundedSettleTimer = 0f;
             if (groundedSettleTimer >= Mathf.Max(flightSettleSeconds, 0.05f))
             {
                 flightOpen = false;
+                // The chain freeze must thaw here too: a swallowed landing keeps
+                // HasLaunched set, so the thaw above never ran and chainInFlight pinned
+                // the combo meter at FULL forever - "doesn't always deplete" (direct
+                // report). Settled on the ground, the window resumes draining.
+                chainInFlight = false;
                 groundedSettleTimer = 0f;
             }
 
-            if (windowRemaining > 0f && !chainInFlight)
+            // The window drains CONTINUOUSLY in real seconds - midair included. The old
+            // chain freeze held it (and the meter) at full for the whole flight, which
+            // read as "the combo meter doesn't deplete" (direct report); the scenes tune
+            // comboWindowSeconds long enough to cover launch, flight and the next landing.
+            if (windowRemaining > 0f)
             {
                 windowRemaining -= Time.unscaledDeltaTime;
                 if (windowRemaining <= 0f) ResetCombo(revoke: true);
@@ -383,7 +399,7 @@ namespace KineticEnergy.Level
                 // recharge must run on every platform type alike). It also WAITS for the
                 // combo meter to go idle: while a chain window is live (or a chained
                 // launch is in the air), the chain is the income - no double-dipping.
-                bool comboIdle = windowRemaining <= 0f && !chainInFlight;
+                bool comboIdle = windowRemaining <= 0f;
                 bool restingOnSurface = controller.IsGrounded || controller.IsStuck;
                 if (comboIdle && restingOnSurface && energyNow < ActiveSafetyCeiling)
                 {
@@ -623,14 +639,15 @@ namespace KineticEnergy.Level
         {
             if (controller == null) return;
 
-            // The slow meter is the chain-window meter, exactly like variant B.
-            var meter = controller.slowdownMeter;
+            // The chain-window meter (a dedicated one when wired, else the repurposed
+            // slowdown meter, exactly like variant B).
+            var meter = ComboDisplayMeter;
             if (meter != null)
             {
-                bool windowLive = windowRemaining > 0f || chainInFlight;
+                bool windowLive = windowRemaining > 0f;
                 meter.SetVisible(true);
                 meter.SetCharge(0f, false);
-                meter.SetEnergy(chainInFlight ? 1f : (comboWindowSeconds > 0f ? windowRemaining / comboWindowSeconds : 0f));
+                meter.SetEnergy(comboWindowSeconds > 0f ? windowRemaining / comboWindowSeconds : 0f);
                 if (comboCircle != null)
                 {
                     // ALWAYS shown, value included: grey while no chain runs (the value
@@ -695,7 +712,7 @@ namespace KineticEnergy.Level
 
         void SetupComboMeter()
         {
-            var meter = controller.slowdownMeter;
+            var meter = ComboDisplayMeter;
             if (meter == null) return;
 
             if (meter.energyFillImage != null)
