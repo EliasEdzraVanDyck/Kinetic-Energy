@@ -2296,7 +2296,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 5079661256463077288, guid: f972db76d20153040bae63dfd0f63981, type: 3}
       propertyPath: m_LocalPosition.x
-      value: -60
+      value: -68.1
       objectReference: {fileID: 0}
     - target: {fileID: 5079661256463077288, guid: f972db76d20153040bae63dfd0f63981, type: 3}
       propertyPath: m_LocalPosition.y
@@ -3729,7 +3729,7 @@ MonoBehaviour:
   autoMaxEnergy: 0
   comboBaseRefund: 1
   comboStepPerLevel: 0.05
-  comboWindowSeconds: 5.5
+  comboWindowSeconds: 5.2
   comboMaxMultiplier: 2
   comboMeterDropPixels: 20
   comboMeterColor: {r: 1, g: 0.62, b: 0.1, a: 1}
@@ -3745,60 +3745,41 @@ MonoBehaviour:
   totalLossSafetyTriggerFraction: 0.1
   totalLossSafetyCeilingFraction: 0.4
   introKey: level1economy
-  introText: 'CHALLENGE RUN - 5 VARIATIONS
+  introText: 'CHALLENGE BUILD - 5 VARIATIONS
 
 
-    Reach the finish and the level restarts
-    on the next challenge. Clear all five to win.
+    Reach the finish and the level
+    restarts on the next challenge. Clear all five to win.
 
-    Pause > Variants jumps straight
-    to one.
+    Go to the pause menu
+    to jump straight to one you''d like to replay.
 
 
-    1 - LIMITED SLOWDOWN: midair aiming runs on a budget (the blue
-    bar under the combo meter). Aim too long and the slow-mo cuts out mid-flight.
-    Every crash refills it.
+    1 - LIMITED SLOWDOWN: midair
+    aiming runs on a budget (the blue bar under the combo meter). Aim too long and
+    the slowmo cuts out midflight and you fall down. Every crash refills it.
 
-    2 - OVERCHARGE SCATTER: launches drift off target,
-    and the orange ring at your landing spot shows how far. The spread follows a
-    square root curve, so the first energy you commit costs the most accuracy.
+
+    2
+    - OVERCHARGE SCATTER: launches drift off target, and the orange ring at your
+    landing spot shows how far. The more energy, the larger the scatter.
+
 
     3
-    - CHASING WALL: a purple wall sweeps the level and SPEEDS UP the longer it runs.
-    Touching it respawns you.
-
-    4 - SEALING WALLS: every platform you land on
-    walls off the gap behind you. There is no way back.
-
-    5 - SHRINKING PLATFORMS:
-    each platform is smaller than the last, down to half size at the finish.
+    - CHASING WALL: a purple wall sweeps the level and speeds up over time. Touching
+    it respawns you.
 
 
-    THE
-    METER: the first 4 blocks (40%) are normal energy. The 6 taller blocks are boosted
-    energy, only combo bonuses and the groundpound boost can fill them.
+    4 - SEALING WALLS: every platform you land on walls off
+    the gap behind you. There is no way back.
 
 
-    COMBOS:
-    a successful launch refunds the energy of your launch(es) times the combo multiplier.
-    Relaunch within the window to raise the multiplier - it keeps draining while
-    you fly. Landing back on the object you launched from pays nothing.
-
-    If you
-    miss the window, your energy reverts to 40% and everything boosted is lost.
+    5 - SHRINKING PLATFORMS: each
+    platform is smaller than the last, down to 30% of the original size at the finish.
 
 
-    GROUND
-    POUND: if you groundpound and aim within the slow-mo window, the pound pays back
-    1.5x what you put in.
-
-
-    AIM COLOURS: the dots and cursor turn green where
-    the landing holds you and red where it does not - the red shells on the floating
-    walls and the ceiling platform kill on contact.
-
-
-    Press any button to start.'
+    Press
+    any button to start.'
   safetyTriggerFraction: 0.1
   safetyCeilingFraction: 0.4
   regenPerSecond: 0.12
@@ -6899,13 +6880,13 @@ MonoBehaviour:
   stageSequence: 0000000001000000020000000300000004000000
   lockedWinScreen: 1
   slowdownBudgetSeconds: 2
-  scatterMaxAngle: 14
-  scatterStartFraction: 0
+  scatterMaxAngle: 6
+  scatterStartFraction: 0.1
   scatterRingDots: 24
   scatterRingColor: {r: 1, g: 0.45, b: 0.15, a: 0.9}
   chaseWall: {fileID: 722155330}
-  chaseWallSpeed: 4
-  chaseWallAcceleration: 0.25
+  chaseWallSpeed: 4.8
+  chaseWallAcceleration: 1.3
   chaseWallMaxSpeed: 0
   sealWallPrefab: {fileID: 3589693143088109430, guid: f972db76d20153040bae63dfd0f63981, type: 3}
   coursePlatforms:
@@ -6923,7 +6904,7 @@ MonoBehaviour:
   - {fileID: 2090516562}
   - {fileID: 1659997880}
   sealWallSize: {x: 1.5, y: 40, z: 90}
-  shrinkFinalScalePercent: 50
+  shrinkFinalScalePercent: 30
   respawnPoint: {fileID: 1686521411}
   showHudTag: 1
 --- !u!4 &1846406647
