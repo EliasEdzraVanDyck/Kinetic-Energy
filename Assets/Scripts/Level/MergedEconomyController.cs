@@ -143,6 +143,8 @@ namespace KineticEnergy.Level
         public bool momentumLaunches = false;
         [Tooltip("E: a missed combo window clamps energy TO this fraction (0 = lose everything; Level1Economy uses 0.4).")]
         [Range(0f, 1f)] public float totalLossKeepFraction = 0f;
+        [Tooltip("A combo window that runs dry while you are AIRBORNE cuts the midair aim and drops you - the held flight is forfeited and you fall. Off where the window is purely an economy timer.")]
+        public bool dropPlayerWhenWindowExpires = false;
         [Tooltip("Show the bottom-right variant tag (off in the locked test scenes).")]
         public bool showHudTag = true;
 
@@ -372,7 +374,16 @@ namespace KineticEnergy.Level
             if (windowRemaining > 0f)
             {
                 windowRemaining -= Time.unscaledDeltaTime;
-                if (windowRemaining <= 0f) ResetCombo(revoke: true);
+                if (windowRemaining <= 0f)
+                {
+                    ResetCombo(revoke: true);
+                    // Missing the window in the AIR costs the flight as well as the combo:
+                    // the aim is cut and the cube drops from where it hung.
+                    if (dropPlayerWhenWindowExpires && !controller.IsGrounded)
+                    {
+                        controller.ForceEndAirAimAndFall();
+                    }
+                }
             }
 
             // The boost cap bites ONLY at a FULL tank: reaching 100% converts any

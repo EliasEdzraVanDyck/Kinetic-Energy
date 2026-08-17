@@ -507,6 +507,20 @@ namespace KineticEnergy.Player
         public float CurrentChargeFraction => ChargeFraction();
         // (EnergyFraction already exists further up.)
 
+        // DROPS the player out of a midair aim: the aim closes and the cube falls from
+        // where it hung. Unlike releasing the aim button, the suspended flight is NOT
+        // resumed - the velocity the aim froze is forfeited, which is the whole point
+        // (the combo window running dry mid-flight cuts you loose).
+        public void ForceEndAirAimAndFall()
+        {
+            if (!airAiming) return;
+            CancelAirAim();
+            rb.linearVelocity = Vector3.zero; // no flight resume - you fall from a standstill
+            rb.useGravity = true;
+            cameraOrbit?.SnapToThirdPersonOrbit();
+        }
+
+
         public void AddEnergy(float delta)
         {
             if (infiniteEnergy) return;

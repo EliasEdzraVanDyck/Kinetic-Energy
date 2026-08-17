@@ -22,11 +22,14 @@ namespace KineticEnergy.UI
         public GameObject cameraSettingsPanel;
         [Tooltip("Level1Challenge's challenge-variant list (a scene-only screen) - left empty everywhere else.")]
         public GameObject variantsPanel;
+        [Tooltip("LevelElementsTest's section-jump list (a scene-only screen) - left empty everywhere else.")]
+        public GameObject sectionsPanel;
         public GameObject firstPauseButton;
         public GameObject firstControlsButton;
         public GameObject firstScenesButton;
         public GameObject firstCameraSettingsButton;
         public GameObject firstVariantsButton;
+        public GameObject firstSectionsButton;
 
         [Header("Corner Hint (wired by setup)")]
         // The top-left "Open the pause menu ..." label - pointless while the menu is
@@ -89,6 +92,7 @@ namespace KineticEnergy.UI
             scenesPanel?.SetActive(false);
             cameraSettingsPanel?.SetActive(false);
             variantsPanel?.SetActive(false);
+            sectionsPanel?.SetActive(false);
             winLabel?.gameObject.SetActive(false);
 
             // Everything that should vanish while the menu is open: the prefab's wired
@@ -170,6 +174,7 @@ namespace KineticEnergy.UI
             controlsPanel?.SetActive(false);
             cameraSettingsPanel?.SetActive(false);
             variantsPanel?.SetActive(false);
+            sectionsPanel?.SetActive(false);
             pausePanel?.SetActive(true);
             SetHintsVisible(false);
             RefreshCameraVariantLabel();
@@ -177,7 +182,7 @@ namespace KineticEnergy.UI
             Select(firstPauseButton);
         }
 
-        void Resume()
+        public void Resume()
         {
             isPaused = false;
             Time.timeScale = 1f;
@@ -186,6 +191,7 @@ namespace KineticEnergy.UI
             scenesPanel?.SetActive(false);
             cameraSettingsPanel?.SetActive(false);
             variantsPanel?.SetActive(false);
+            sectionsPanel?.SetActive(false);
             SetHintsVisible(true);
             // Un-pausing after winning keeps playing in the finished level, which is fine - but
             // the win label shouldn't stick around on the NEXT pause after that.
@@ -265,6 +271,30 @@ namespace KineticEnergy.UI
             {
                 cameraVariantEnergyNote.text = variants.EnergyControlsNote;
             }
+        }
+
+        // The section list (LevelElementsTest only). Picking one teleports rather than
+        // reloading, so the menu closes itself and hands play straight back.
+        public void OnSectionsClicked()
+        {
+            pausePanel?.SetActive(false);
+            sectionsPanel?.SetActive(true);
+            Select(firstSectionsButton);
+        }
+
+        public void OnSectionsBackClicked()
+        {
+            sectionsPanel?.SetActive(false);
+            pausePanel?.SetActive(true);
+            Select(firstPauseButton);
+        }
+
+        // Wired AFTER the section jump on each section button: the teleport already put
+        // the player where they asked to be, so staying paused would just be in the way.
+        public void ResumeAfterSectionJump()
+        {
+            sectionsPanel?.SetActive(false);
+            Resume();
         }
 
         // The challenge-variant list (Level1Challenge only) - picking one restarts the

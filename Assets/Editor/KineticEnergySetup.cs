@@ -1215,6 +1215,357 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: grounded charge ramp stamped OK (" + ramp + " in both aim scenes)");
         }
 
+        // Diagnostic: opens LevelElementsTest and reports whether a working pause menu is
+        // actually present and wired (object active, panels/buttons assigned, an
+        // EventSystem to drive it). Changes nothing.
+        [MenuItem("Tools/Kinetic Energy/Validate LevelElementsTest Pause Menu")]
+        public static void ValidateLevelElementsPauseMenu()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest.unity", OpenSceneMode.Single);
+
+            PauseController[] controllers = UnityEngine.Object.FindObjectsByType<PauseController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            Debug.Log("PAUSECHECK controllers=" + controllers.Length);
+            foreach (PauseController pause in controllers)
+            {
+                Debug.Log("PAUSECHECK root=" + pause.transform.root.name
+                    + " activeInHierarchy=" + pause.gameObject.activeInHierarchy
+                    + " componentEnabled=" + pause.enabled
+                    + " pausePanel=" + (pause.pausePanel != null ? pause.pausePanel.name : "NULL")
+                    + " pausePanelActiveSelf=" + (pause.pausePanel != null && pause.pausePanel.activeSelf)
+                    + " firstPauseButton=" + (pause.firstPauseButton != null ? pause.firstPauseButton.name : "NULL")
+                    + " pauseAction=" + (pause.pauseAction != null ? pause.pauseAction.name : "NULL")
+                    + " sectionsPanel=" + (pause.sectionsPanel != null ? pause.sectionsPanel.name : "NULL"));
+
+                foreach (Canvas canvas in pause.transform.root.GetComponentsInChildren<Canvas>(true))
+                {
+                    Debug.Log("PAUSECHECK canvas=" + canvas.name
+                        + " enabled=" + canvas.enabled
+                        + " activeInHierarchy=" + canvas.gameObject.activeInHierarchy
+                        + " renderMode=" + canvas.renderMode
+                        + " sortingOrder=" + canvas.sortingOrder
+                        + " children=" + canvas.transform.childCount);
+                }
+                foreach (Transform child in pause.transform.root)
+                {
+                    Debug.Log("PAUSECHECK rootChild=" + child.name + " active=" + child.gameObject.activeSelf);
+                }
+            }
+
+            var eventSystems = UnityEngine.Object.FindObjectsByType<UnityEngine.EventSystems.EventSystem>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            Debug.Log("PAUSECHECK eventSystems=" + eventSystems.Length
+                + (eventSystems.Length > 0 ? " firstActive=" + eventSystems[0].gameObject.activeInHierarchy : ""));
+
+            GameObject pauseSystem = GameObject.Find("PauseSystem");
+            Debug.Log("PAUSECHECK pauseSystemObject=" + (pauseSystem != null ? "FOUND active=" + pauseSystem.activeInHierarchy : "MISSING"));
+        }
+
+        // ==================== LevelElementsTest ====================
+
+        // Rebuilds LevelElementsTest as a LINEAR element showcase: one march along +x, each
+        // section introducing a single new kind of platform, obstacle or enemy, with height
+        // and lateral variation between them. The challenge-variation machinery the scene
+        // inherited from its Level1Challenge copy is stripped out; the economy stays.
+        // Idempotent - safe to re-run.
+        [MenuItem("Tools/Kinetic Energy/Setup LevelElementsTest")]
+        public static void SetupLevelElementsTest()
+        {
+            const string scenePath = "Assets/Scenes/LevelElementsTest.unity";
+            CreateLaserGatePrefab();
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            KineticCubeController player = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            MergedEconomyController economy = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
+            PauseController pause = UnityEngine.Object.FindAnyObjectByType<PauseController>(FindObjectsInactive.Include);
+            if (player == null || economy == null || pause == null)
+            {
+                throw new Exception("KineticEnergySetup: LevelElementsTest is missing the player, MergedEconomy or PauseController.");
+            }
+
+            // ---- Strip the inherited challenge run ----
+            foreach (ChallengeStageController stale in UnityEngine.Object.FindObjectsByType<ChallengeStageController>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                UnityEngine.Object.DestroyImmediate(stale.gameObject);
+            }
+            foreach (DeathWall stale in UnityEngine.Object.FindObjectsByType<DeathWall>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                UnityEngine.Object.DestroyImmediate(stale.gameObject);
+            }
+            foreach (ChallengeFinishTrigger stale in UnityEngine.Object.FindObjectsByType<ChallengeFinishTrigger>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                UnityEngine.Object.DestroyImmediate(stale);
+            }
+            foreach (string staleCourse in new[] { "Level1Course", "ElementsCourse" })
+            {
+                GameObject courseGo = GameObject.Find(staleCourse);
+                if (courseGo != null) UnityEngine.Object.DestroyImmediate(courseGo);
+            }
+            foreach (string loose in new[] { "DamageFloor", "RespawnPoint", "ChaseWall", "FinishTrigger", "FinishTrigger (1)" })
+            {
+                GameObject looseGo = GameObject.Find(loose);
+                if (looseGo != null) UnityEngine.Object.DestroyImmediate(looseGo);
+            }
+            foreach (Enemy stale in UnityEngine.Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                UnityEngine.Object.DestroyImmediate(stale.gameObject);
+            }
+            foreach (FlyingEnemy stale in UnityEngine.Object.FindObjectsByType<FlyingEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                UnityEngine.Object.DestroyImmediate(stale.gameObject);
+            }
+            foreach (TurretEnemy stale in UnityEngine.Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                UnityEngine.Object.DestroyImmediate(stale.gameObject);
+            }
+
+            BuildElementsCourse(player, economy, pause);
+
+            EnsureSceneInBuildSettings(scenePath);
+            EditorSceneManager.SaveOpenScenes();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: LevelElementsTest built OK (7 sections)");
+        }
+
+        static void BuildElementsCourse(KineticCubeController player, MergedEconomyController economy, PauseController pause)
+        {
+            MeasureLaunchDistances(out float L, out float H);
+
+            Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
+            Material wallMat = MakeMaterial("ElementsWallMaterial", new Color(0.42f, 0.45f, 0.55f));
+            Material damageMat = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
+
+            GameObject course = new GameObject("ElementsCourse");
+            Transform tf = course.transform;
+            Vector3 pad = new Vector3(12f, 2f, 12f);
+            var sections = new List<LevelSectionController.Section>();
+            var hazards = new List<DamageWalls>();
+
+            // Every section opens with a plain pad the player is teleported onto, so a jump
+            // into any element starts from solid, safe ground.
+            Transform OpenSection(string label, Vector3 padCentre)
+            {
+                GameObject sectionPad = CreateBlock(tf, label + "Pad", padCentre, pad, platformMat);
+                sectionPad.AddComponent<StickySurface>();
+                GameObject spawn = new GameObject(label + "Spawn");
+                spawn.transform.SetParent(tf, false);
+                spawn.transform.position = padCentre + new Vector3(0f, pad.y * 0.5f + 1.5f, 0f);
+                sections.Add(new LevelSectionController.Section { label = label, spawnPoint = spawn.transform });
+                return spawn.transform;
+            }
+
+            float gap = 0.42f * L;   // a comfortable mid-charge hop between pads
+            float x = 0f;
+
+            // ---- 1. Basics: plain platforms, gentle rise, slight weave ----
+            OpenSection("1 - Basics", new Vector3(x, -1f, 0f));
+            Vector3 playerSpawn = new Vector3(x, 1.5f, 0f);
+            CreateBlock(tf, "BasicsHop1", new Vector3(x + gap, 1f, 10f), pad, platformMat);
+            CreateBlock(tf, "BasicsHop2", new Vector3(x + gap * 2f, 4f, -8f), pad, platformMat);
+
+            // ---- 2. Moving platforms ----
+            x += gap * 3f;
+            OpenSection("2 - Moving platforms", new Vector3(x, 4f, 0f));
+            SpawnMovingPlatform(tf, "MoverSide", new Vector3(x + gap, 5f, -14f), new Vector3(0f, 0f, 28f), 7f);
+            SpawnMovingPlatform(tf, "MoverLift", new Vector3(x + gap * 2f, 2f, 6f), new Vector3(0f, 14f, 0f), 6f);
+
+            // ---- 3. Rotating walls: sticky faces that keep turning away ----
+            x += gap * 3f;
+            OpenSection("3 - Rotating walls", new Vector3(x, 8f, 0f));
+            SpawnRotatingWall(tf, "SpinWall1", new Vector3(x + gap, 10f, -10f), 28f, 0f, wallMat);
+            SpawnRotatingWall(tf, "SpinWall2", new Vector3(x + gap * 2f, 12f, 8f), -36f, 90f, wallMat);
+
+            // ---- 4. Lasers: timed gates over a straight runway ----
+            x += gap * 3f;
+            Transform laserSpawn = OpenSection("4 - Lasers", new Vector3(x, 8f, 0f));
+            CreateBlock(tf, "LaserRun1", new Vector3(x + gap, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateBlock(tf, "LaserRun2", new Vector3(x + gap * 2f, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateLaserGate(tf, "ElementsGate1", new Vector3(x + gap * 0.5f, 9f, 0f), 24f, 12f, 1.5f, 1.5f, 0f, laserSpawn);
+            CreateLaserGate(tf, "ElementsGate2", new Vector3(x + gap * 1.5f, 9f, 0f), 24f, 12f, 1.2f, 1.4f, 0.7f, laserSpawn);
+
+            // ---- 5. Grounded enemies: wide arenas to fight across ----
+            x += gap * 3f;
+            OpenSection("5 - Ground enemies", new Vector3(x, 4f, 0f));
+            CreateBlock(tf, "GroundArena1", new Vector3(x + gap, 2f, 12f), new Vector3(26f, 2f, 26f), platformMat);
+            SpawnEnemy("ElementsEnemy1", new Vector3(x + gap, 4f, 12f), EnemyWanderMode.PlatformSurface, 10f, 2f);
+            CreateBlock(tf, "GroundArena2", new Vector3(x + gap * 2f, 2f, -12f), new Vector3(26f, 2f, 26f), platformMat);
+            SpawnEnemy("ElementsEnemy2", new Vector3(x + gap * 2f - 5f, 4f, -12f), EnemyWanderMode.PlatformSurface, 10f, 2f);
+            SpawnEnemy("ElementsEnemy3", new Vector3(x + gap * 2f + 5f, 4f, -12f), EnemyWanderMode.WithinRadius, 8f, 2f);
+
+            // ---- 6. Flying enemies: shooters over open gaps ----
+            x += gap * 3f;
+            OpenSection("6 - Flying enemies", new Vector3(x, 6f, 0f));
+            CreateBlock(tf, "FlyStep1", new Vector3(x + gap, 9f, -10f), pad, platformMat);
+            SpawnFlyingEnemy("ElementsFlyer1", new Vector3(x + gap * 0.5f, 16f, -4f), 9f, 24f);
+            CreateBlock(tf, "FlyStep2", new Vector3(x + gap * 2f, 12f, 10f), pad, platformMat);
+            SpawnFlyingEnemy("ElementsFlyer2", new Vector3(x + gap * 1.6f, 20f, 6f), 11f, 26f);
+
+            // ---- 7. Turrets: fixed guns covering the final corridor ----
+            x += gap * 3f;
+            OpenSection("7 - Turrets", new Vector3(x, 10f, 0f));
+            CreateBlock(tf, "TurretRun1", new Vector3(x + gap, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateBlock(tf, "TurretWallLeft", new Vector3(x + gap, 12f, -16f), new Vector3(20f, 16f, 2f), wallMat);
+            SpawnTurret("ElementsTurret1", new Vector3(x + gap, 13f, -14.8f), new Vector3(-90f, 0f, 0f));
+            CreateBlock(tf, "TurretRun2", new Vector3(x + gap * 2f, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateBlock(tf, "TurretWallRight", new Vector3(x + gap * 2f, 12f, 16f), new Vector3(20f, 16f, 2f), wallMat);
+            SpawnTurret("ElementsTurret2", new Vector3(x + gap * 2f, 13f, 14.8f), new Vector3(90f, 0f, 0f));
+
+            // ---- Finish ----
+            x += gap * 3f;
+            CreateBlock(tf, "FinishPad", new Vector3(x, -1f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            float courseLength = x;
+
+            GameObject finish = new GameObject("ElementsFinish");
+            finish.transform.SetParent(tf, false);
+            finish.transform.position = new Vector3(x, 2f, 0f);
+            BoxCollider finishBox = finish.AddComponent<BoxCollider>();
+            finishBox.isTrigger = true;
+            finishBox.size = new Vector3(6f, 6f, 12f);
+            finish.AddComponent<WinOnFinish>();
+
+            // ---- Hazard floor, well below the whole run ----
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(courseLength * 0.5f, -26f, 0f), new Vector3(courseLength + 120f, 2f, 220f), damageMat);
+            DamageWalls floorDamage = damageFloor.AddComponent<DamageWalls>();
+            hazards.Add(floorDamage);
+            foreach (DamageWalls gateDamage in course.GetComponentsInChildren<DamageWalls>(true))
+            {
+                hazards.Add(gateDamage);
+            }
+
+            // ---- Section index (drives the pause menu's jump screen) ----
+            GameObject sectionsGo = GameObject.Find("LevelSections");
+            if (sectionsGo != null) UnityEngine.Object.DestroyImmediate(sectionsGo);
+            sectionsGo = new GameObject("LevelSections");
+            LevelSectionController sectionController = sectionsGo.AddComponent<LevelSectionController>();
+            sectionController.sections = sections.ToArray();
+            sectionController.hazards = hazards.ToArray();
+            EditorUtility.SetDirty(sectionController);
+
+            // Every hazard starts pointed at section 1 (the controller re-points them on
+            // each jump); the player begins there too.
+            foreach (DamageWalls hazard in hazards)
+            {
+                hazard.respawnPoint = sections[0].spawnPoint;
+                EditorUtility.SetDirty(hazard);
+            }
+
+            player.transform.position = playerSpawn;
+            EditorUtility.SetDirty(player);
+
+            // The scene's own rule: a combo window that runs dry in the air drops you.
+            economy.dropPlayerWhenWindowExpires = true;
+            economy.introText = LevelElementsInfoText;
+            // Its OWN intro key. The scene inherited "level1economy" from the copy, and the
+            // shown-once set is static and keyed by this string - so whichever of those
+            // scenes you entered first swallowed the other's explainer for the session.
+            economy.introKey = "levelelements";
+            EditorUtility.SetDirty(economy);
+
+            BuildSectionsScreen(pause, sectionController, sections);
+        }
+
+        // The pause menu's SECTIONS screen: a button per section that teleports the player
+        // there and hands play straight back. Built on the scene's PauseSystem instance, so
+        // no other scene's menu changes. The inherited Variants screen is removed.
+        static void BuildSectionsScreen(PauseController pause, LevelSectionController sectionController, List<LevelSectionController.Section> sections)
+        {
+            Transform pauseCanvas = pause.transform.parent != null && pause.transform.parent.Find("PausePanel") != null
+                ? pause.transform.parent
+                : pause.transform.root.Find("PauseCanvas");
+            if (pauseCanvas == null) throw new Exception("KineticEnergySetup: could not locate PauseCanvas in LevelElementsTest.");
+            Transform pausePanel = pauseCanvas.Find("PausePanel");
+            if (pausePanel == null) throw new Exception("KineticEnergySetup: LevelElementsTest's PauseCanvas has no PausePanel.");
+
+            // The challenge-variant screen this scene inherited has no meaning here.
+            DestroyDirectChildIfExists(pausePanel, "VariantsButton");
+            DestroyDirectChildIfExists(pauseCanvas, "VariantsPanel");
+            DestroyDirectChildIfExists(pausePanel, "SectionsButton");
+            DestroyDirectChildIfExists(pauseCanvas, "SectionsPanel");
+            pause.variantsPanel = null;
+            pause.firstVariantsButton = null;
+
+            Font font = FindBestFont();
+            Color accent = new Color(1f, 0.82f, 0.2f);
+
+            GameObject panel = CreatePanel("SectionsPanel", pauseCanvas, new Color(0.05f, 0.06f, 0.08f, 0.96f));
+            Text title = CreateText("SectionsTitle", panel.transform, "SECTIONS", font, 48,
+                new Vector2(0f, 330f), new Vector2(900f, 70f));
+            title.alignment = TextAnchor.MiddleCenter;
+            Text subtitle = CreateText("SectionsSubtitle", panel.transform,
+                "Jump to an element and respawn there while you test it.", font, 20,
+                new Vector2(0f, 278f), new Vector2(900f, 32f));
+            subtitle.alignment = TextAnchor.MiddleCenter;
+            subtitle.color = new Color(1f, 1f, 1f, 0.7f);
+
+            GameObject firstButton = null;
+            float y = 200f;
+            for (int i = 0; i < sections.Count; i++)
+            {
+                GameObject sectionButton = CreateButton("Section_" + (i + 1) + "Button", panel.transform,
+                    sections[i].label, font, accent, new Vector2(0f, y), new Vector2(460f, 62f));
+                // Two listeners, in order: jump, then close the menu - the teleport has
+                // already put the player where they asked to be.
+                WireSceneButton(sectionButton, sectionController.GoToSection, i.ToString());
+                WireButton(sectionButton, pause.ResumeAfterSectionJump);
+                if (i == 0) firstButton = sectionButton;
+                y -= 76f;
+            }
+
+            GameObject backButton = CreateButton("SectionsBackButton", panel.transform, "Back",
+                font, accent, new Vector2(0f, y - 20f), new Vector2(300f, 62f));
+            WireButton(backButton, pause.OnSectionsBackClicked);
+
+            panel.SetActive(false);
+            pause.sectionsPanel = panel;
+            pause.firstSectionsButton = firstButton;
+
+            GameObject openButton = CreateButton("SectionsButton", pausePanel, "Sections",
+                font, accent, new Vector2(0f, 140f), new Vector2(300f, 70f));
+            WireButton(openButton, pause.OnSectionsClicked);
+            LayOutPausePanelButtons(pausePanel);
+            EditorUtility.SetDirty(pause);
+        }
+
+        static void SpawnMovingPlatform(Transform parent, string name, Vector3 position, Vector3 moveOffset, float lapSeconds)
+        {
+            GameObject instance = InstantiatePrefab("MovingPlatform");
+            instance.name = name;
+            instance.transform.SetParent(parent, false);
+            instance.transform.position = position;
+            MovingPlatform mover = instance.GetComponent<MovingPlatform>();
+            mover.moveOffset = moveOffset;
+            mover.lapSeconds = lapSeconds;
+            EditorUtility.SetDirty(mover);
+        }
+
+        // A floating wall on a turntable: sticky, so its face holds you and carries you
+        // round once you land on it.
+        static void SpawnRotatingWall(Transform parent, string name, Vector3 position, float degreesPerSecond, float startAngle, Material material)
+        {
+            GameObject wall = CreateBlock(parent, name, position, new Vector3(14f, 12f, 2f), material);
+            wall.AddComponent<StickySurface>();
+            RotatingWall spin = wall.AddComponent<RotatingWall>();
+            spin.degreesPerSecond = degreesPerSecond;
+            spin.startAngleOffset = startAngle;
+            spin.spinAxis = Vector3.up;
+            EditorUtility.SetDirty(spin);
+        }
+
+        const string LevelElementsInfoText =
+            "LEVEL ELEMENTS TEST\n\n" +
+            "A straight run along one axis, introducing one element at a time. Pause > Sections jumps " +
+            "straight to any of them - you respawn there while you keep testing it.\n\n" +
+            "1 - BASICS: plain platforms.\n" +
+            "2 - MOVING PLATFORMS: one slides sideways, one rides up and down. While you aim, a blue " +
+            "arrow shows where the platform will BE when your shot lands - aim at the tip.\n" +
+            "3 - ROTATING WALLS: sticky faces that keep turning. Time the shot as well as aiming it.\n" +
+            "4 - LASERS: gates that blink on and off. Cross while they are dark.\n" +
+            "5 - GROUND ENEMIES: they wander their platform and leap at you when you land nearby.\n" +
+            "6 - FLYING ENEMIES: they drift over the gaps and shoot on sight.\n" +
+            "7 - TURRETS: fixed wall guns that flash before firing.\n\n" +
+            "FALLING: if the combo window runs out while you are in the air, the aim is cut and you DROP. " +
+            "Keep landing before the meter empties.\n\n" +
+            "Press any button to start.";
+
         // ORDER-ONLY swap of the sealing and chasing stages in the live scene: the two
         // sequence entries trade places, the info text renumbers, and the Variants screen
         // is rebuilt in the new order. No tuning value is touched.
@@ -1380,9 +1731,11 @@ namespace KineticEnergy.EditorSetup
         const float PauseButtonTopY = 230f;
         const float PauseButtonSpacing = 90f;
 
+        // VariantsButton and SectionsButton are the scene-specific slot right under Resume -
+        // no scene has both, and the layout closes over whichever is absent.
         static readonly string[] PauseButtonOrder =
         {
-            "ResumeButton", "VariantsButton", "RestartButton", "FeedbackButton",
+            "ResumeButton", "VariantsButton", "SectionsButton", "RestartButton", "FeedbackButton",
             "CameraSettingsButton", "ControlsButton", "QuitButton", "MainMenuButton",
         };
 
