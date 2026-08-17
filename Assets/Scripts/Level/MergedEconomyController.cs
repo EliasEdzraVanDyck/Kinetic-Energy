@@ -490,7 +490,17 @@ namespace KineticEnergy.Level
                 flightMidairSpend += controller.LastLaunchEnergySpent;
             }
 
-            if (windowRemaining > 0f) chainInFlight = true;
+            if (windowRemaining > 0f)
+            {
+                // Launching INSIDE a live window continues the chain and leaves the clock
+                // alone - only a successful landing refreshes it.
+                chainInFlight = true;
+            }
+            else
+            {
+                // Idle: this launch is what STARTS the window running.
+                windowRemaining = comboWindowSeconds;
+            }
         }
 
         void OnCrash(Vector3 position)

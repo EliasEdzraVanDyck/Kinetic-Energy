@@ -1495,6 +1495,14 @@ namespace KineticEnergy.EditorSetup
 
             // The scene's own rule: a combo window that runs dry in the air drops you.
             economy.dropPlayerWhenWindowExpires = true;
+            // Standing still below the 40% baseline ALWAYS refills you (while no combo
+            // window is running). The recharge latches on below its trigger and fills to
+            // its ceiling, so trigger == ceiling == the baseline turns it into a plain
+            // "anything under 40% regenerates" rule. Set on every variant's pair so the
+            // rule holds whichever one the scene is on.
+            economy.safetyTriggerFraction = economy.safetyCeilingFraction;
+            economy.dualSafetyTriggerFraction = economy.dualSafetyCeilingFraction;
+            economy.totalLossSafetyTriggerFraction = economy.totalLossSafetyCeilingFraction;
             economy.introText = LevelElementsInfoText;
             // Its OWN intro key. The scene inherited "level1economy" from the copy, and the
             // shown-once set is static and keyed by this string - so whichever of those

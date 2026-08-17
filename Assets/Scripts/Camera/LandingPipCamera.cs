@@ -118,8 +118,21 @@ namespace KineticEnergy.Camera
                 extraData.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
                 extraData.antialiasingQuality = AntialiasingQuality.High;
             }
+            pip.MatchMainCameraBackground();
             pip.BuildBorder();
             return pip;
+        }
+
+        // The window renders into its OWN texture, so it clears with its own background -
+        // by default the bare camera default rather than whatever the level uses. Copied
+        // from the main camera so the small screen sits on the same solid ground as the
+        // big one.
+        void MatchMainCameraBackground()
+        {
+            UnityEngine.Camera main = UnityEngine.Camera.main;
+            if (main == null || pipCam == null) return;
+            pipCam.clearFlags = main.clearFlags;
+            pipCam.backgroundColor = main.backgroundColor;
         }
 
         public void SetPreset(AimCameraPreset activePreset)
@@ -164,6 +177,9 @@ namespace KineticEnergy.Camera
             transform.rotation = Quaternion.LookRotation(landing - vantage, Vector3.up);
             pipCam.fieldOfView = preset.pipFieldOfView;
             EnsureTexture(preset.pipViewport);
+            // Re-matched here as well as at creation: Camera.main may not have existed yet
+            // when the window was built, and the level can swap its background at runtime.
+            MatchMainCameraBackground();
             if (!pipCam.enabled) pipCam.enabled = true;
 
             // Border frame anchored to the same normalized rect as the viewport.
