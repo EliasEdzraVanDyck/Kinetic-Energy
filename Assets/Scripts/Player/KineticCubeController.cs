@@ -488,6 +488,8 @@ namespace KineticEnergy.Player
         public float LastLaunchEnergySpent => lastLaunchEnergySpent;
         public Vector3 LastPredictedLanding => lastPredictedLanding;
         public bool HasValidPredictedLanding => hasValidPredictedLanding;
+        // The landing FACE's normal - the scatter ring lies flat against it.
+        public Vector3 LastPredictedLandingNormal => lastPredictedLandingNormal;
         public float CurrentChargeFraction => ChargeFraction();
         // (EnergyFraction already exists further up.)
 

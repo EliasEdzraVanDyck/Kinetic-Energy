@@ -20,10 +20,13 @@ namespace KineticEnergy.UI
         public GameObject controlsPanel;
         public GameObject scenesPanel;
         public GameObject cameraSettingsPanel;
+        [Tooltip("Level1Challenge's challenge-variant list (a scene-only screen) - left empty everywhere else.")]
+        public GameObject variantsPanel;
         public GameObject firstPauseButton;
         public GameObject firstControlsButton;
         public GameObject firstScenesButton;
         public GameObject firstCameraSettingsButton;
+        public GameObject firstVariantsButton;
 
         [Header("Corner Hint (wired by setup)")]
         // The top-left "Open the pause menu ..." label - pointless while the menu is
@@ -85,6 +88,7 @@ namespace KineticEnergy.UI
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
             cameraSettingsPanel?.SetActive(false);
+            variantsPanel?.SetActive(false);
             winLabel?.gameObject.SetActive(false);
 
             // Everything that should vanish while the menu is open: the prefab's wired
@@ -165,6 +169,7 @@ namespace KineticEnergy.UI
             Time.timeScale = 0f;
             controlsPanel?.SetActive(false);
             cameraSettingsPanel?.SetActive(false);
+            variantsPanel?.SetActive(false);
             pausePanel?.SetActive(true);
             SetHintsVisible(false);
             RefreshCameraVariantLabel();
@@ -180,6 +185,7 @@ namespace KineticEnergy.UI
             controlsPanel?.SetActive(false);
             scenesPanel?.SetActive(false);
             cameraSettingsPanel?.SetActive(false);
+            variantsPanel?.SetActive(false);
             SetHintsVisible(true);
             // Un-pausing after winning keeps playing in the finished level, which is fine - but
             // the win label shouldn't stick around on the NEXT pause after that.
@@ -261,6 +267,22 @@ namespace KineticEnergy.UI
             }
         }
 
+        // The challenge-variant list (Level1Challenge only) - picking one restarts the
+        // scene on that variant, so the panel itself just navigates.
+        public void OnVariantsClicked()
+        {
+            pausePanel?.SetActive(false);
+            variantsPanel?.SetActive(true);
+            Select(firstVariantsButton);
+        }
+
+        public void OnVariantsBackClicked()
+        {
+            variantsPanel?.SetActive(false);
+            pausePanel?.SetActive(true);
+            Select(firstPauseButton);
+        }
+
         // The camera-settings sub-screen (the speed sliders), same in/out pattern as the
         // Controls and Scenes panels.
         public void OnCameraSettingsClicked()
@@ -337,6 +359,11 @@ namespace KineticEnergy.UI
         public void LoadChallengeStage4(string sceneName)
         {
             LoadChallengeStage(sceneName, KineticEnergy.Level.ChallengeStage.SealingWalls);
+        }
+
+        public void LoadChallengeStage5(string sceneName)
+        {
+            LoadChallengeStage(sceneName, KineticEnergy.Level.ChallengeStage.ShrinkingPlatforms);
         }
 
         void LoadChallengeStage(string sceneName, KineticEnergy.Level.ChallengeStage stage)

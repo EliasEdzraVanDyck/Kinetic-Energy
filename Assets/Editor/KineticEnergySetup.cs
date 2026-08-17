@@ -1099,6 +1099,84 @@ namespace KineticEnergy.EditorSetup
                 + course.Count + " course platforms, budget bar split from combo meter)");
         }
 
+        // ADDITIVE, SCENE-ONLY: Level1Challenge's challenge-variant picker - a "Variants"
+        // button under Resume opening a screen that lists all five challenges; picking one
+        // restarts the scene on it. Built on the scene's PauseSystem INSTANCE, so no other
+        // scene's pause menu changes.
+        [MenuItem("Tools/Kinetic Energy/Add Variants Screen To Level1Challenge")]
+        public static void AddVariantsScreenToLevel1Challenge()
+        {
+            const string scenePath = "Assets/Scenes/Level1Challenge.unity";
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            PauseController pause = UnityEngine.Object.FindAnyObjectByType<PauseController>(FindObjectsInactive.Include);
+            if (pause == null) throw new Exception("KineticEnergySetup: Level1Challenge has no PauseController.");
+            Transform pauseCanvas = pause.transform.parent != null && pause.transform.parent.Find("PausePanel") != null
+                ? pause.transform.parent
+                : pause.transform.root.Find("PauseCanvas");
+            if (pauseCanvas == null) throw new Exception("KineticEnergySetup: could not locate PauseCanvas in Level1Challenge.");
+            Transform pausePanel = pauseCanvas.Find("PausePanel");
+            if (pausePanel == null) throw new Exception("KineticEnergySetup: Level1Challenge's PauseCanvas has no PausePanel.");
+
+            DestroyDirectChildIfExists(pausePanel, "VariantsButton");
+            DestroyDirectChildIfExists(pauseCanvas, "VariantsPanel");
+
+            Font font = FindBestFont();
+            Color accent = new Color(1f, 0.82f, 0.2f);
+
+            // The screen: title, the five challenges, Back.
+            GameObject panel = CreatePanel("VariantsPanel", pauseCanvas, new Color(0.05f, 0.06f, 0.08f, 0.96f));
+            Text title = CreateText("VariantsTitle", panel.transform, "CHALLENGE VARIANTS",
+                font, 48, new Vector2(0f, 300f), new Vector2(900f, 70f));
+            title.alignment = TextAnchor.MiddleCenter;
+            Text subtitle = CreateText("VariantsSubtitle", panel.transform,
+                "Restarts the level on the chosen challenge.", font, 20,
+                new Vector2(0f, 248f), new Vector2(900f, 32f));
+            subtitle.alignment = TextAnchor.MiddleCenter;
+            subtitle.color = new Color(1f, 1f, 1f, 0.7f);
+
+            string[] variantLabels =
+            {
+                "1 - Limited slowdown", "2 - Overcharge scatter", "3 - Chasing wall",
+                "4 - Sealing walls", "5 - Shrinking platforms",
+            };
+            UnityEngine.Events.UnityAction<string>[] variantCalls =
+            {
+                pause.LoadChallengeStage1, pause.LoadChallengeStage2, pause.LoadChallengeStage3,
+                pause.LoadChallengeStage4, pause.LoadChallengeStage5,
+            };
+            GameObject firstVariantButton = null;
+            float y = 160f;
+            for (int i = 0; i < variantLabels.Length; i++)
+            {
+                GameObject variantButton = CreateButton("Variant_" + (i + 1) + "Button", panel.transform,
+                    variantLabels[i], font, accent, new Vector2(0f, y), new Vector2(420f, 70f));
+                WireSceneButton(variantButton, variantCalls[i], "Level1Challenge");
+                if (i == 0) firstVariantButton = variantButton;
+                y -= 90f;
+            }
+
+            GameObject backButton = CreateButton("VariantsBackButton", panel.transform, "Back",
+                font, accent, new Vector2(0f, y - 30f), new Vector2(300f, 70f));
+            WireButton(backButton, pause.OnVariantsBackClicked);
+
+            panel.SetActive(false);
+            pause.variantsPanel = panel;
+            pause.firstVariantsButton = firstVariantButton;
+
+            // The way in, directly under Resume - then the whole column is re-laid so the
+            // eight buttons keep the even rhythm.
+            GameObject openButton = CreateButton("VariantsButton", pausePanel, "Variants",
+                font, accent, new Vector2(0f, 140f), new Vector2(300f, 70f));
+            WireButton(openButton, pause.OnVariantsClicked);
+            LayOutPausePanelButtons(pausePanel);
+            EditorUtility.SetDirty(pause);
+
+            EditorSceneManager.SaveOpenScenes();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: Level1Challenge variants screen added OK (5 variants + back)");
+        }
+
         // Stamps the steeper grounded-aim charge ramp on the two aim-test scenes' player
         // instances - everywhere else keeps the shared default.
         [MenuItem("Tools/Kinetic Energy/Set Grounded Charge Ramp (Aim Scenes)")]
@@ -1131,24 +1209,32 @@ namespace KineticEnergy.EditorSetup
             EditorBuildSettings.scenes = scenes.ToArray();
         }
 
-        // The pause panel's button column, top to bottom, on an even 90px rhythm centred
-        // where the old six-button stack sat (midpoint y = -40). Camera Settings goes
-        // directly ABOVE Controls.
+        // The pause panel's button column, top to bottom, on an even 90px rhythm. The TOP
+        // is anchored (230, clearing the title at 327) rather than the centre, so a scene
+        // that adds a button - Level1Challenge's Variants - grows the stack downward
+        // instead of pushing the first button up into the title.
+        const float PauseButtonTopY = 230f;
+        const float PauseButtonSpacing = 90f;
+
+        static readonly string[] PauseButtonOrder =
+        {
+            "ResumeButton", "VariantsButton", "RestartButton", "FeedbackButton",
+            "CameraSettingsButton", "ControlsButton", "QuitButton", "MainMenuButton",
+        };
+
+        // Only the buttons that EXIST are placed, and the rhythm closes over the gaps -
+        // scenes without the Variants button keep exactly the original seven positions.
         static void LayOutPausePanelButtons(Transform pausePanel)
         {
-            string[] order =
+            int slot = 0;
+            foreach (string buttonName in PauseButtonOrder)
             {
-                "ResumeButton", "RestartButton", "FeedbackButton",
-                "CameraSettingsButton", "ControlsButton", "QuitButton", "MainMenuButton",
-            };
-            const float spacing = 90f;
-            float top = -40f + (order.Length - 1) * spacing * 0.5f; // 230 for 7 buttons
-            for (int i = 0; i < order.Length; i++)
-            {
-                Transform button = pausePanel.Find(order[i]);
+                Transform button = pausePanel.Find(buttonName);
                 if (button == null) continue;
                 RectTransform rect = button.GetComponent<RectTransform>();
-                rect.anchoredPosition = new Vector2(0f, top - i * spacing);
+                rect.anchoredPosition = new Vector2(0f, PauseButtonTopY - slot * PauseButtonSpacing);
+                EditorUtility.SetDirty(button);
+                slot++;
             }
         }
 

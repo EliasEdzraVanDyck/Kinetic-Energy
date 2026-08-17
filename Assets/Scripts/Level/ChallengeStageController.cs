@@ -54,6 +54,9 @@ namespace KineticEnergy.Level
         public float scatterMaxAngle = 14f;
         [Tooltip("Charge fraction where the cone starts opening.")]
         [Range(0f, 1f)] public float scatterStartFraction = 0.25f;
+        [Tooltip("Dots drawn around the predicted landing to visualise how far the shot could drift.")]
+        public int scatterRingDots = 24;
+        public Color scatterRingColor = new Color(1f, 0.45f, 0.15f, 0.9f);
 
         [Header("3 - Chasing wall (wired by setup)")]
         [Tooltip("The moving wall instance - speed and start position are edited on it directly.")]
@@ -83,6 +86,8 @@ namespace KineticEnergy.Level
         Text hudLabel;
         Transform lastPlatform;
         Vector3[] courseOriginalScales;
+        Transform scatterRingRoot;
+        Transform[] scatterDots;
         readonly List<GameObject> sealWalls = new List<GameObject>();
         readonly HashSet<int> sealedGaps = new HashSet<int>(); // keyed by the gap's far platform index
 
@@ -148,6 +153,7 @@ namespace KineticEnergy.Level
             }
             RestoreCourseScales();
             if (stage == ChallengeStage.ShrinkingPlatforms) ApplyShrinkScales();
+            if (scatterRingRoot != null) scatterRingRoot.gameObject.SetActive(false);
             ClearSealWalls();
             lastPlatform = null;
             if (hudLabel != null) hudLabel.text = StageLabel;
@@ -196,8 +202,79 @@ namespace KineticEnergy.Level
 
         void Update()
         {
-            if (controller == null || Time.timeScale <= 0f) return;
+            if (controller == null) return;
+            // The ring must keep tracking through the aim's bullet-time freeze (timeScale
+            // hits 0 while aiming, which is exactly when the ring matters).
+            UpdateScatterRing();
+            if (Time.timeScale <= 0f) return;
             TrackPlatformLandings();
+        }
+
+        // ---------- Scatter ring ----------
+
+        // The orange dot-ring around the predicted landing, showing how far this shot
+        // could drift at its current charge. Lies flat on the landing FACE, so it reads
+        // correctly on walls and floors alike.
+        void UpdateScatterRing()
+        {
+            bool show = stage == ChallengeStage.OverchargeScatter
+                && controller.IsAimingOrCharging
+                && controller.HasValidPredictedLanding;
+
+            float cone = show ? controller.ScatterConeAngleFor(controller.CurrentChargeFraction) : 0f;
+            show = show && cone > 0.05f;
+
+            if (!show)
+            {
+                if (scatterRingRoot != null && scatterRingRoot.gameObject.activeSelf)
+                {
+                    scatterRingRoot.gameObject.SetActive(false);
+                }
+                return;
+            }
+
+            if (scatterRingRoot == null) BuildScatterRing();
+            scatterRingRoot.gameObject.SetActive(true);
+
+            Vector3 landing = controller.LastPredictedLanding;
+            float distance = Vector3.Distance(controller.transform.position, landing);
+            float radius = Mathf.Tan(cone * Mathf.Deg2Rad) * distance;
+
+            // Ring axes from the landing face's normal - a flat-XZ ring would cut into a
+            // wall landing edge-on and disappear.
+            Vector3 normal = controller.LastPredictedLandingNormal;
+            if (normal.sqrMagnitude < 0.0001f) normal = Vector3.up;
+            normal.Normalize();
+            Vector3 right = Vector3.Cross(normal, Mathf.Abs(Vector3.Dot(normal, Vector3.up)) > 0.9f ? Vector3.forward : Vector3.up).normalized;
+            Vector3 forward = Vector3.Cross(right, normal).normalized;
+            Vector3 centre = landing + normal * 0.08f;
+
+            for (int i = 0; i < scatterDots.Length; i++)
+            {
+                float angle = i / (float)scatterDots.Length * Mathf.PI * 2f;
+                scatterDots[i].position = centre + (right * Mathf.Cos(angle) + forward * Mathf.Sin(angle)) * radius;
+                scatterDots[i].localScale = Vector3.one * Mathf.Clamp(radius * 0.06f, 0.12f, 0.5f);
+            }
+        }
+
+        void BuildScatterRing()
+        {
+            scatterRingRoot = new GameObject("ScatterRing").transform;
+            scatterDots = new Transform[Mathf.Max(scatterRingDots, 8)];
+
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            Material dotMaterial = new Material(shader != null ? shader : Shader.Find("Unlit/Color"));
+            dotMaterial.color = scatterRingColor;
+
+            for (int i = 0; i < scatterDots.Length; i++)
+            {
+                GameObject dot = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                dot.name = "ScatterDot" + i;
+                Destroy(dot.GetComponent<Collider>());
+                dot.GetComponent<Renderer>().sharedMaterial = dotMaterial;
+                dot.transform.SetParent(scatterRingRoot, false);
+                scatterDots[i] = dot.transform;
+            }
         }
 
         // Watches which course platform the player stands on. In the sealing stage, a
