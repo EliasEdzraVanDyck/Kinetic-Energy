@@ -155,6 +155,8 @@ namespace KineticEnergy.Player
         // groundPoundChargeBaseSpeed/groundPoundChargeSpeedGrowth.)
         [Tooltip("How quickly a charge input's rate ramps up while sustained (1 = rate doubles after one second). Ramp resets when the dial flips direction.")]
         public float chargeAcceleration = 1f;
+        [Tooltip("GROUNDED aim only: overrides chargeAcceleration for the hold-to-charge ramp when >= 0 (the aim-lab scenes set a steeper value - the bullet-time's scaled fill mutes the shared default there). -1 = use chargeAcceleration, identical everywhere.")]
+        public float groundedAimChargeAcceleration = -1f;
         [Tooltip("Test-level switch: the tank is pinned at 100% and refunds/costs are ignored.")]
         public bool infiniteEnergy = false;
         // Test-level switch (Level 1): a launch's cost drains from the meter OVER the
@@ -1023,9 +1025,13 @@ namespace KineticEnergy.Player
                 else
                 {
                     // Classic: the charge rate ramps up the longer the aim is held - same
-                    // acceleration principle as the up/down hold-charges.
+                    // acceleration principle as the up/down hold-charges. Scenes may give
+                    // the grounded ramp its own steeper coefficient.
                     aimChargeHeldSeconds += Time.unscaledDeltaTime;
-                    AccumulateCharge(Time.deltaTime * chargeAccumulationRate * ChargeRateRamp(aimChargeHeldSeconds));
+                    float groundedRamp = groundedAimChargeAcceleration >= 0f
+                        ? 1f + aimChargeHeldSeconds * groundedAimChargeAcceleration
+                        : ChargeRateRamp(aimChargeHeldSeconds);
+                    AccumulateCharge(Time.deltaTime * chargeAccumulationRate * groundedRamp);
                 }
 
                 // Aim adjustment runs on unscaled time - responsiveness must not slow down

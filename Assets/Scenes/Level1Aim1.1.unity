@@ -1011,6 +1011,10 @@ PrefabInstance:
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
+      propertyPath: groundedAimChargeAcceleration
+      value: 2.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: gamepadMidairDialRateMultiplier
       value: 1.5
       objectReference: {fileID: 0}
@@ -1405,7 +1409,7 @@ MonoBehaviour:
   autoMaxEnergy: 0
   comboBaseRefund: 1
   comboStepPerLevel: 0.05
-  comboWindowSeconds: 3
+  comboWindowSeconds: 5.5
   comboMaxMultiplier: 2
   comboMeterDropPixels: 20
   comboMeterColor: {r: 1, g: 0.62, b: 0.1, a: 1}
@@ -1441,6 +1445,7 @@ MonoBehaviour:
   totalLossKeepFraction: 0.4
   showHudTag: 0
   flightSettleSeconds: 0.25
+  comboMeter: {fileID: 0}
 --- !u!4 &1012176931
 Transform:
   m_ObjectHideFlags: 0

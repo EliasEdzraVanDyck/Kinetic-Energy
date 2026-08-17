@@ -1099,6 +1099,25 @@ namespace KineticEnergy.EditorSetup
                 + course.Count + " course platforms, budget bar split from combo meter)");
         }
 
+        // Stamps the steeper grounded-aim charge ramp on the two aim-test scenes' player
+        // instances - everywhere else keeps the shared default.
+        [MenuItem("Tools/Kinetic Energy/Set Grounded Charge Ramp (Aim Scenes)")]
+        public static void SetGroundedChargeRampAimScenes()
+        {
+            const float ramp = 2.5f;
+            foreach (string scenePath in new[] { "Assets/Scenes/Level1Aim1.1.unity", "Assets/Scenes/Level1Challenge.unity" })
+            {
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                KineticCubeController player = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+                if (player == null) throw new Exception("KineticEnergySetup: no player in " + scenePath);
+                player.groundedAimChargeAcceleration = ramp;
+                EditorUtility.SetDirty(player);
+                EditorSceneManager.SaveOpenScenes();
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: grounded charge ramp stamped OK (" + ramp + " in both aim scenes)");
+        }
+
         static void EnsureSceneInBuildSettings(string scenePath)
         {
             foreach (EditorBuildSettingsScene existing in EditorBuildSettings.scenes)

@@ -1136,6 +1136,10 @@ PrefabInstance:
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
+      propertyPath: groundedAimChargeAcceleration
+      value: 2.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: gamepadMidairDialRateMultiplier
       value: 1.5
       objectReference: {fileID: 0}
@@ -1617,7 +1621,7 @@ MonoBehaviour:
   autoMaxEnergy: 0
   comboBaseRefund: 1
   comboStepPerLevel: 0.05
-  comboWindowSeconds: 2.75
+  comboWindowSeconds: 5.5
   comboMaxMultiplier: 2
   comboMeterDropPixels: 20
   comboMeterColor: {r: 1, g: 0.62, b: 0.1, a: 1}
@@ -2730,9 +2734,9 @@ MonoBehaviour:
   startingStage: 0
   stageSequence: 0000000001000000020000000300000004000000
   lockedWinScreen: 1
-  slowdownBudgetSeconds: 2
-  scatterMaxAngle: 14
-  scatterStartFraction: 0.25
+  slowdownBudgetSeconds: 1.75
+  scatterMaxAngle: 20
+  scatterStartFraction: 0
   chaseWall: {fileID: 889907510}
   sealWallPrefab: {fileID: 3589693143088109430, guid: f972db76d20153040bae63dfd0f63981, type: 3}
   coursePlatforms:
