@@ -1070,6 +1070,17 @@ namespace KineticEnergy.Camera
 
         // Hides any renderer whose collider sits directly between the camera and the player,
         // restoring it the instant it no longer does - see occlusionMask's own comment.
+        // Marks a renderer as occluding this frame, disabling it on the first frame it
+        // appears. The restore pass below re-enables anything that stops occluding.
+        void HideOccluder(Renderer occluder)
+        {
+            if (occluder == null) return;
+            stillOccludedThisFrame.Add(occluder);
+            if (occludedRenderers.Contains(occluder)) return;
+            occluder.enabled = false;
+            occludedRenderers.Add(occluder);
+        }
+
         void UpdateWallOcclusion(Vector3 focusPoint)
         {
             stillOccludedThisFrame.Clear();
@@ -1087,14 +1098,24 @@ namespace KineticEnergy.Camera
                     // never hide the player's own collider/visual.
                     if (target != null && (hit.collider.transform == target || hit.collider.transform.IsChildOf(target))) continue;
 
-                    Renderer hitRenderer = hit.collider.GetComponent<Renderer>();
-                    if (hitRenderer == null) continue;
-
-                    stillOccludedThisFrame.Add(hitRenderer);
-                    if (!occludedRenderers.Contains(hitRenderer))
+                    // A platform and the damage shells wrapped around it hide as ONE unit.
+                    // The shells are separate child colliders, so hiding only whichever one
+                    // the cast happened to touch left the rest of the group floating in
+                    // front of the aim - the platform gone, its red shell still blocking.
+                    Transform groupRoot = hit.collider.transform;
+                    if (groupRoot.parent != null
+                        && groupRoot.GetComponent<KineticEnergy.Level.DamageWalls>() != null
+                        && groupRoot.parent.GetComponent<Renderer>() != null)
                     {
-                        hitRenderer.enabled = false;
-                        occludedRenderers.Add(hitRenderer);
+                        groupRoot = groupRoot.parent; // hit a shell - the platform owns the group
+                    }
+
+                    HideOccluder(hit.collider.GetComponent<Renderer>());
+                    HideOccluder(groupRoot.GetComponent<Renderer>());
+                    foreach (KineticEnergy.Level.DamageWalls shell in
+                        groupRoot.GetComponentsInChildren<KineticEnergy.Level.DamageWalls>(true))
+                    {
+                        if (shell.transform != groupRoot) HideOccluder(shell.GetComponent<Renderer>());
                     }
                 }
             }
