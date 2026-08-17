@@ -73,6 +73,8 @@ namespace KineticEnergy.Player
         [Tooltip("Damping applied while airborne with no launch in flight, so plain falls accelerate naturally.")]
         public float plainFallDamping = 0.2f;
 
+        [Tooltip("Should audio be used?")]
+        public bool enableAudio = true;
         [Tooltip("The Player's AudioSource that will play the clips.")]
         public AudioSource playerSounds;
         [Tooltip("The sound that plays while the cube is airborne.")]
@@ -773,7 +775,7 @@ namespace KineticEnergy.Player
 
             if (isGrounded && !groundedLastFrame)
             {
-                if (playerSounds)
+                if (playerSounds && enableAudio)
                 {
                     playerSounds.Stop();
                     playerSounds.loop = false;
@@ -1032,7 +1034,7 @@ namespace KineticEnergy.Player
                 }
                 else
                 {
-                    if (playerSounds != null)
+                    if (playerSounds != null && enableAudio)
                     {
                         // If we are charging
                         if (playerSounds.clip == chargingSound || playerSounds.clip == chargingLoopSound)
@@ -1861,7 +1863,7 @@ namespace KineticEnergy.Player
             previousLaunchChargeFraction = ChargeFraction(); // the NEXT launch's wall carry reads this
 
             // While in the air, loop this audio
-            if (playerSounds != null)
+            if (playerSounds != null && enableAudio)
             {
                 playerSounds.Stop();
                 playerSounds.loop = true;
