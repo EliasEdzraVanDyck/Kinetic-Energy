@@ -114,6 +114,27 @@ namespace KineticEnergy.Player
         // read dies at the segment seam.
         Image premiumEnergyFill;
         bool premiumEnergyResolved;
+        Color normalChargeColor;
+        bool chargeColorCaptured;
+        Image premiumChargeFill;
+        Color normalPremiumChargeColor;
+        bool premiumChargeResolved;
+
+        Image ResolvePremiumChargeFill()
+        {
+            if (premiumChargeResolved) return premiumChargeFill;
+            premiumChargeResolved = true;
+            Transform body = chargeFillImage != null ? chargeFillImage.transform.parent : null;
+            if (body == null) return null;
+            if (premiumRect == null) premiumRect = body.Find("PremiumZone") as RectTransform;
+            Transform fill = premiumRect != null ? premiumRect.Find("PremiumChargeFill") : null;
+            if (fill != null)
+            {
+                premiumChargeFill = fill.GetComponent<Image>();
+                if (premiumChargeFill != null) normalPremiumChargeColor = premiumChargeFill.color;
+            }
+            return premiumChargeFill;
+        }
 
         Image ResolvePremiumEnergyFill()
         {
@@ -150,6 +171,33 @@ namespace KineticEnergy.Player
             // Both halves of the same tank: one continuous temperature across the seam.
             Image premiumEnergy = ResolvePremiumEnergyFill();
             if (premiumEnergy != null) premiumEnergy.color = band.baseColor;
+        }
+
+        // The CHARGE bar - the slice this launch is about to spend - runs the same band
+        // lookup as everything else, so while you hold the aim its colour climbs the heat
+        // ramp in step with the charge. Grounded or midair makes no difference: it tracks
+        // the spend, so it heats up as the charge grows and cools as it is released.
+        // Outside a charge it returns to its own colour, since a spend of nothing has no
+        // temperature to report.
+        public void SetChargeTint(float chargeTankFraction, bool charging)
+        {
+            if (chargeFillImage == null) return;
+            if (!chargeColorCaptured)
+            {
+                normalChargeColor = chargeFillImage.color;
+                chargeColorCaptured = true;
+            }
+
+            Image premiumCharge = ResolvePremiumChargeFill();
+            KineticEnergy.Level.EnergyBandPalette.Band band = charging && bandPalette != null
+                ? bandPalette.GetBand(chargeTankFraction)
+                : null;
+
+            Color paint = band != null ? band.baseColor : normalChargeColor;
+            chargeFillImage.color = paint;
+            // Both halves of the same bar: one continuous temperature across the seam, so
+            // passing the main bar's span is not mistaken for a change of meaning.
+            if (premiumCharge != null) premiumCharge.color = band != null ? paint : normalPremiumChargeColor;
         }
 
         // The threshold marker: a thin line at the fraction an aimed-at interactable

@@ -27,7 +27,7 @@ namespace KineticEnergy.Level
             public int minPercent;
             public int maxPercent;
             public Color baseColor = Color.white;
-            [Tooltip("HDR emission multiplier - the ramp's ordering carrier under bloom. Band 1 barely blooms, band 5 bleeds.")]
+            [Tooltip("UNUSED while the language is flat-coloured. Kept as the authored ramp in case the emissive treatment is ever restored - bloom made objects read as washed-out versions of their own band, which broke the meter-vs-object comparison.")]
             public float emissionIntensity = 1f;
         }
 

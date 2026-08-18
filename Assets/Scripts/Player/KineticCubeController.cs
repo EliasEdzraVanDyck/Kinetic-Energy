@@ -1135,6 +1135,14 @@ namespace KineticEnergy.Player
                 {
                     aimedRequirement = lastPredictedLandingSource.GetComponentInParent<KineticEnergy.Level.EnergyRequirement>();
                 }
+                // Exactly what a launch fired this instant would pay - the same figure the
+                // gates on the far end compare against (see lastLaunchEnergySpent), so the
+                // band the charge bar reports is directly comparable to a requirement.
+                // Covers grounded and midair alike: both routes charge through this.
+                float projectedSpend = energyCostPerFullCharge > 0f
+                    ? Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge)
+                    : SpendableEnergy();
+                energyMeter.SetChargeTint(projectedSpend, charging);
                 energyMeter.SetRequirementTick(
                     aimedRequirement != null ? aimedRequirement.RequirementFraction : 0f,
                     aimedRequirement != null ? aimedRequirement.TierColor : Color.white,

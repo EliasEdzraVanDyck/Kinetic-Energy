@@ -3,10 +3,10 @@ using UnityEngine;
 namespace KineticEnergy.Level
 {
     // Declares WHAT an interactable costs (20/40/60/80/100% of the tank) and paints the
-    // blackbody band language onto it at runtime: the band's colour, its HDR emission
-    // (always on for interactables - being emissive at depth is what separates them from
-    // the flat HUD meter drawing the same hues), the exactly-100% arc flicker, and the
-    // countable pip row.
+    // blackbody band language onto it at runtime: the band's FLAT colour, the exactly-100%
+    // arc flicker, and the countable pip row. No HDR emission - a bloomed object reads as a
+    // washed-out version of its own band, which breaks the one comparison the whole system
+    // rests on ("is my meter at least as hot as that object?").
     //
     // Everything is applied at runtime through per-renderer material instances and the
     // components' own colour hooks - no serialized inspector value on the object is
@@ -28,15 +28,12 @@ namespace KineticEnergy.Level
         public Color TierColor { get; private set; } = Color.white;
 
         EnergyBandPalette.Band band;
-        Material emissiveMaterial;
+        Material bandMaterial;
         Transform tickRoot;
         float flickerSeed;
-        // Set only for enemies that HAVE a kill window. The band glow is then gated on it:
-        // the colour means "punishable right now", not "this thing costs 60%". Turrets and
-        // weak-spot flyers leave this null - they are punishable whenever you can reach
-        // them, so their band never switches off.
-        Enemy vulnerabilityGate;
-        bool emissionLit;
+        // Enemies paint their own body every frame (red when untouchable, the band colour
+        // while punishable), so this component must not fight them for the material.
+        bool ownsColour;
 
         // Flicker is derived from the requirement, never authored: ONLY the exactly-100%
         // case flickers, and nothing else in the game does - the flicker IS the 80-vs-100
@@ -56,13 +53,11 @@ namespace KineticEnergy.Level
             // Component hooks first: these repaint through their own colour logic, so the
             // band survives their per-tick colour writes.
             Enemy enemy = GetComponent<Enemy>();
-            if (enemy != null)
-            {
-                enemy.vulnerableColor = band.baseColor;
-                // A plain Always-window enemy is punishable whenever you reach it, so it
-                // needs no gate; the hunter windows do.
-                if (enemy.killWindow != EnemyKillWindow.Always) vulnerabilityGate = enemy;
-            }
+            // The enemy owns its own body colour: red while untouchable, this band's colour
+            // the moment a launch would kill. That switch IS the punishable tell - it needs
+            // no glow on top of it.
+            if (enemy != null) enemy.vulnerableColor = band.baseColor;
+            ownsColour = enemy == null;
             WeakSpotFlyingEnemy weakSpotFlyer = GetComponent<WeakSpotFlyingEnemy>();
             if (weakSpotFlyer != null) weakSpotFlyer.SetSpotTier(band.baseColor);
             TurretEnemy turret = GetComponent<TurretEnemy>();
@@ -70,45 +65,24 @@ namespace KineticEnergy.Level
             Checkpoint checkpoint = GetComponent<Checkpoint>();
             if (checkpoint != null) checkpoint.SetTier(band.baseColor);
 
-            // The glow: always on for interactables (treatment is the separator from the
-            // HUD), set once on the renderer's own material instance. Colour writes by the
-            // components above touch _BaseColor only, so the emission persists.
-            if (targetRenderer != null)
-            {
-                emissiveMaterial = targetRenderer.material;
-                emissiveMaterial.EnableKeyword("_EMISSION");
-                emissiveMaterial.SetColor("_EmissionColor", band.baseColor * band.emissionIntensity);
-                emissionLit = true;
-            }
+            // FLAT colour only - no HDR emission. An intensity above 1 pushes the colour
+            // past white and blooms out, so the object stopped matching the flat band
+            // colour the meter shows, and matching those two IS the read.
+            if (targetRenderer != null) bandMaterial = targetRenderer.material;
 
             if (buildTickMarks) BuildTickMarks();
         }
 
         void Update()
         {
-            if (band == null || emissiveMaterial == null) return;
-
-            // The glow IS the kill window on gated enemies. Outside it the body is plain
-            // red and unlit - so the band colour never doubles as a nameplate, and lighting
-            // up is itself the tell that the enemy can be taken right now.
-            if (vulnerabilityGate != null)
-            {
-                bool lit = vulnerabilityGate.CanBeKilledByLaunch;
-                if (lit != emissionLit)
-                {
-                    emissionLit = lit;
-                    emissiveMaterial.SetColor("_EmissionColor",
-                        lit ? band.baseColor * band.emissionIntensity : Color.black);
-                }
-                if (!lit) return;
-            }
-
-            // The exactly-100% tell: fast, irregular, low-amplitude emission noise - an arc
-            // flicker, not a pulse. Perlin keeps it aperiodic so it reads as electrical.
-            if (!Flickers) return;
+            // The exactly-100% tell: fast, irregular, low-amplitude BRIGHTNESS noise - an
+            // arc flicker, not a pulse, and the only animation in the game. Perlin keeps it
+            // aperiodic so it reads as electrical rather than as a throb. It rides the flat
+            // colour now that there is no emission channel to carry it, and it only runs on
+            // objects whose material this component actually owns.
+            if (!Flickers || band == null || bandMaterial == null || !ownsColour) return;
             float noise = Mathf.PerlinNoise(Time.unscaledTime * 18f, flickerSeed);
-            emissiveMaterial.SetColor("_EmissionColor",
-                band.baseColor * (band.emissionIntensity * (0.8f + 0.35f * noise)));
+            bandMaterial.color = band.baseColor * (0.86f + 0.14f * noise);
         }
 
         // The countable read: one pip per band ORDINAL (band 3 = three pips), centred above
@@ -135,9 +109,7 @@ namespace KineticEnergy.Level
                 tick.transform.localPosition = new Vector3((i - (count - 1) * 0.5f) * spacing, 0f, 0f);
                 tick.transform.localScale = Vector3.one * size;
                 Renderer tickRenderer = tick.GetComponent<Renderer>();
-                tickRenderer.material.color = band.baseColor;
-                tickRenderer.material.EnableKeyword("_EMISSION");
-                tickRenderer.material.SetColor("_EmissionColor", band.baseColor * band.emissionIntensity);
+                tickRenderer.material.color = band.baseColor; // flat, like everything else
                 tickRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             }
         }
