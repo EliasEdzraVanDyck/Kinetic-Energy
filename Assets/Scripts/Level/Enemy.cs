@@ -284,7 +284,15 @@ namespace KineticEnergy.Level
                     }
                     // Standing on the wrong platform outranks patrolling it: go home first.
                     if (TryHomePlatformLaunch()) break;
-                    if (MoveGrounded(WanderStep(dt), dt)) break;
+                    // A DETECTED player ends the wandering: the enemy holds its ground,
+                    // squared on the target, until the attack cooldown lets it strike.
+                    // Wandering only resumes once the player is genuinely gone - off this
+                    // platform and outside the detection radius.
+                    if (PlayerDetected())
+                    {
+                        if (MoveGrounded(body.position, dt)) break; // gravity settle only
+                    }
+                    else if (MoveGrounded(WanderStep(dt), dt)) break;
                     if (cooldownRemaining <= 0f && PlayerIsAttackable()) BeginWindUp();
                     break;
 
@@ -508,6 +516,33 @@ namespace KineticEnergy.Level
 
         // ---------- Attacking ----------
 
+        // Standing on the enemy's OWN platform counts as detected no matter the distance -
+        // its patrol ground is its territory, and a shared floor leaves nowhere to hide on
+        // a platform bigger than the radius. Geometry, not identity: the player's grounded
+        // position inside the platform's footprint, near its top face.
+        bool PlayerOnMyPlatform()
+        {
+            if (player == null || platformBelow == null || !player.IsGrounded) return false;
+            Bounds bounds = platformBelow.bounds;
+            Vector3 p = player.transform.position;
+            if (p.x < bounds.min.x || p.x > bounds.max.x) return false;
+            if (p.z < bounds.min.z || p.z > bounds.max.z) return false;
+            // Near the TOP face only - grounded on a platform below a bridge must not
+            // read as sharing the bridge.
+            return p.y >= bounds.max.y - 1f && p.y <= bounds.max.y + 4f;
+        }
+
+        // Detection: the radius, OR the shared platform. Once a player is detected the
+        // enemy stays ON them (no more wandering - see the Wandering state) until they are
+        // genuinely gone: off the platform AND outside the radius.
+        bool PlayerDetected()
+        {
+            if (player == null) return false;
+            if (PlayerOnMyPlatform()) return true;
+            Vector3 toPlayer = player.transform.position - body.position;
+            return toPlayer.sqrMagnitude <= detectionRadius * detectionRadius;
+        }
+
         // Grounded prey within range, at roughly this height - airborne players are safe,
         // which is the whole rhythm of the game. The HUNTER variant drops both caveats:
         // anyone inside the radius is fair game, airborne included.
@@ -517,10 +552,11 @@ namespace KineticEnergy.Level
             Vector3 toPlayer = player.transform.position - body.position;
             if (attackAirbornePlayers)
             {
-                return toPlayer.sqrMagnitude <= detectionRadius * detectionRadius;
+                return PlayerOnMyPlatform() || toPlayer.sqrMagnitude <= detectionRadius * detectionRadius;
             }
             if (!player.IsGrounded) return false;
             if (Mathf.Abs(toPlayer.y) > 4f) return false;
+            if (PlayerOnMyPlatform()) return true;
             toPlayer.y = 0f;
             return toPlayer.sqrMagnitude <= detectionRadius * detectionRadius;
         }
