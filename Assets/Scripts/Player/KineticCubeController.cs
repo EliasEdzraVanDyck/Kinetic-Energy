@@ -442,6 +442,10 @@ namespace KineticEnergy.Player
         // firing), and whether an aim opened inside the window is holding gravity off.
         float poundWindowTimer;
         float poundPendingRefund;
+        // Whether the open window came from an actual POUND. A wall crash opens the same
+        // window to claim the same energy boost, but earns none of the pound's other
+        // affordances - it must not open the aim pre-charged or hold gravity off.
+        bool poundWindowFromPound;
         float poundBoostExtra;
         bool poundAimHoldingGravityOff;
 
@@ -1509,21 +1513,26 @@ namespace KineticEnergy.Player
                 landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
                 MidairAimOpened?.Invoke();
 
-                // An aim opened inside the post-ground-pound window claims the boost extra
-                // and starts FULLY charged - everything the tank can pay, instantly - with
-                // gravity held off for the whole aim.
+                // An aim opened inside the window claims the boost extra. A POUND's window
+                // additionally starts the aim FULLY charged - everything the tank can pay,
+                // instantly - with gravity held off for the whole aim. A wall crash's
+                // window claims the energy and nothing else: the dial starts at zero and is
+                // built by hand like any other midair aim.
                 if (poundWindowTimer > 0f)
                 {
                     PayPoundBoostedRefund();
-                    // The flag must be up BEFORE the ceiling is computed - SpendableEnergy
-                    // keys off it to drop the grounded reserve. Computing the ceiling first
-                    // (the old order) held the reserve back, so the aim didn't always start
-                    // with ALL current energy.
-                    poundAimHoldingGravityOff = true;
-                    rb.useGravity = false;
-                    // Starts charged with ALL current energy (boost included) - the pound
-                    // aim spends the whole tank, no grounded reserve (see SpendableEnergy).
-                    chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
+                    if (poundWindowFromPound)
+                    {
+                        // The flag must be up BEFORE the ceiling is computed - SpendableEnergy
+                        // keys off it to drop the grounded reserve. Computing the ceiling first
+                        // (the old order) held the reserve back, so the aim didn't always start
+                        // with ALL current energy.
+                        poundAimHoldingGravityOff = true;
+                        rb.useGravity = false;
+                        // Starts charged with ALL current energy (boost included) - the pound
+                        // aim spends the whole tank, no grounded reserve (see SpendableEnergy).
+                        chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
+                    }
                 }
             }
 
@@ -2518,8 +2527,9 @@ namespace KineticEnergy.Player
             // Breakable crack panes never refund energy - they exist to be smashed through,
             // not farmed. NoRefundSurface marks other farm-proof surfaces the same way
             // (the economy scene's big floor, under its refund-boosted variants).
-            if (surface == null || (surface.GetComponentInParent<BreakableCrackWall>() == null
-                && surface.GetComponentInParent<NoRefundSurface>() == null))
+            bool refundAllowed = surface == null || (surface.GetComponentInParent<BreakableCrackWall>() == null
+                && surface.GetComponentInParent<NoRefundSurface>() == null);
+            if (refundAllowed)
             {
                 RefundEnergyForCrash();
             }
@@ -2534,8 +2544,24 @@ namespace KineticEnergy.Player
                 nonStickyReleaseTimer = 0f;
                 rb.useGravity = true;
                 poundWindowTimer = groundPoundSlowDuration;
+                poundWindowFromPound = true;
                 lastLaunchWasPound = false;
                 lastLaunchEnergySpent = 0f;
+            }
+            // Slamming into a WALL earns the pound's bargain too: the launch that put you
+            // there is banked as a pending boost, and opening the midair aim inside the
+            // window pays it at groundPoundBoostMultiplier, exactly as the pound's does.
+            // A wall stick leaves the cube not-grounded, so the aim already runs through
+            // the midair path where that claim lives - only the window was missing.
+            //
+            // Same steepness line the wall-crash launch allowance uses, so "too steep to
+            // stand on" means one thing throughout. Surfaces that pay no refund grant no
+            // boost either: the whole bonus is measured against a refund that never came.
+            else if (!groundingCrash && refundAllowed)
+            {
+                poundWindowTimer = groundPoundSlowDuration;
+                poundPendingRefund = lastLaunchEnergySpent;
+                poundWindowFromPound = false; // the boost only - no free dial, no held gravity
             }
 
             flightEnergySpent = 0f; // consumed by the refund above - the next flight starts fresh
