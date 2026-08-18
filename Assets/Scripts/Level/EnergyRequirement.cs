@@ -19,6 +19,8 @@ namespace KineticEnergy.Level
         public Renderer targetRenderer;
         [Tooltip("Build a row of small cubes above the object - one per 20% - so the requirement can be COUNTED rather than only colour-matched. OFF by default: the floating row reads as clutter in the world. The meter's own tick carries the same information.")]
         public bool buildTickMarks = false;
+        [Tooltip("Add the tier's HDR emission on top of its colour. OFF by default: an intensity above 1 pushes the colour past white and blooms out, so the object stops matching the flat tier colour the meter shows - and matching those two IS the read. Turn on only if the glow ramp matters more than the match.")]
+        public bool addEmission = false;
         [Tooltip("World metres between the target's top and the tick row.")]
         public float tickHeight = 0.35f;
 
@@ -63,7 +65,7 @@ namespace KineticEnergy.Level
 
             // The glow: set once on the renderer's own material instance. Colour writes by
             // the components above touch _BaseColor only, so the emission persists.
-            if (targetRenderer != null)
+            if (addEmission && targetRenderer != null)
             {
                 emissiveMaterial = targetRenderer.material;
                 emissiveMaterial.EnableKeyword("_EMISSION");

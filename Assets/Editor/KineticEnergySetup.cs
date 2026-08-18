@@ -2307,6 +2307,37 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: requirement tick marks cleared OK (" + cleared + " objects)");
         }
 
+        // Diagnostic: for every tiered enemy, what colour SHOULD it wear when vulnerable,
+        // and is the component that applies it actually able to run?
+        [MenuItem("Tools/Kinetic Energy/Validate Enemy Tier Colours")]
+        public static void ValidateEnemyTierColours()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest3.unity", OpenSceneMode.Single);
+
+            foreach (EnergyRequirement requirement in UnityEngine.Object.FindObjectsByType<EnergyRequirement>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                Enemy enemy = requirement.GetComponent<Enemy>();
+                if (enemy == null) continue;
+
+                EnergyTierPalette.Tier tier = requirement.palette != null
+                    ? requirement.palette.TierFor(requirement.requirementPercent) : null;
+
+                Renderer bodyRenderer = enemy.GetComponentInChildren<Renderer>();
+
+                Debug.Log("ENEMYCOLOUR " + requirement.name
+                    + " requires=" + requirement.requirementPercent
+                    + " reqEnabled=" + requirement.enabled
+                    + " reqGOActive=" + requirement.gameObject.activeSelf
+                    + " tierHex=" + (tier != null ? "#" + ColorUtility.ToHtmlStringRGB(tier.baseColor) : "NULL")
+                    + " emission=" + (tier != null ? tier.emissionIntensity.ToString() : "-")
+                    + " serializedVulnerable=#" + ColorUtility.ToHtmlStringRGB(enemy.vulnerableColor)
+                    + " killWindow=" + enemy.killWindow
+                    + " targetRenderer=" + (requirement.targetRenderer != null ? requirement.targetRenderer.name : "NULL")
+                    + " bodyRenderer=" + (bodyRenderer != null ? bodyRenderer.name : "NULL")
+                    + " sameRenderer=" + (requirement.targetRenderer == bodyRenderer));
+            }
+        }
+
         // Hands the meter the tier palette, so the fill can report which 20% band the tank
         // is in. Touches nothing else on the meter.
         [MenuItem("Tools/Kinetic Energy/Wire Meter Tier Palette")]

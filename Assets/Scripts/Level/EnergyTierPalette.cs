@@ -37,12 +37,14 @@ namespace KineticEnergy.Level
         // covers. This is the counterpart of TierFor - charge to exactly what an
         // interactable demands and this returns that interactable's own tier, so the charge
         // bar's colour and the target's colour become the same colour at the moment the
-        // launch becomes lethal. Below the cheapest tier it reports the cheapest, since
-        // there is nothing lower to show.
+        // launch becomes lethal. Below the cheapest tier it reports NULL - a sub-20% charge
+        // affords nothing, and showing the teal anyway made 0-19% and 20-39% read as the
+        // same band (direct report). The caller shows its own neutral colour instead, so
+        // every 20% step has a distinct look: neutral, then one tier colour each.
         public Tier TierAfforded(float fraction)
         {
             if (tiers == null || tiers.Length == 0) return null;
-            Tier best = tiers[0];
+            Tier best = null;
             for (int i = 0; i < tiers.Length; i++)
             {
                 if (fraction * 100f >= tiers[i].percent - 0.0001f) best = tiers[i];
