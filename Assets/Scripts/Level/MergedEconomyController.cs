@@ -56,6 +56,8 @@ namespace KineticEnergy.Level
         [Tooltip("How far down the combo meter moves so its circle clears the energy meter.")]
         public float comboMeterDropPixels = 44f;
         public Color comboMeterColor = new Color(1f, 0.62f, 0.1f);
+        [Tooltip("The combo meter's frame - its outline and block dividers. A mid grey rather than the old white: it has to separate from BOTH the empty meter behind it (near-black backdrop, so 'no energy') and the scene's flat clear colour, without reading as another lit-up value.")]
+        public Color comboFrameColor = new Color(0.62f, 0.62f, 0.66f, 0.9f);
         [Tooltip("The xN circle's colour while NO combo is running - the circle and its value stay visible at all times, grey until a chain starts.")]
         public Color comboIdleColor = new Color(0.55f, 0.55f, 0.55f, 0.9f);
         [Header("C/D - Dual-launch refunds")]
@@ -776,6 +778,24 @@ namespace KineticEnergy.Level
             }
         }
 
+        // The combo meter's structural lines - outline and block dividers - only need to
+        // read as STRUCTURE. White made them compete with the lit fills for attention; a
+        // mid grey sits clear of both the near-black empty meter and the scene's clear
+        // colour while never looking like a value in its own right. Only this meter is
+        // touched: the energy meter's own frame is left exactly as tuned.
+        void PaintComboFrame(KineticEnergy.Player.EnergyMeterController meter)
+        {
+            foreach (Image image in meter.GetComponentsInChildren<Image>(true))
+            {
+                string n = image.name;
+                if (n == "Outline" || n == "PremiumOutline"
+                    || n.StartsWith("Divider") || n.StartsWith("PremiumDivider"))
+                {
+                    image.color = comboFrameColor;
+                }
+            }
+        }
+
         void SetupComboMeter()
         {
             var meter = ComboDisplayMeter;
@@ -791,6 +811,7 @@ namespace KineticEnergy.Level
                     defaultSlowMeterPosition = slowMeterRoot.anchoredPosition;
                     slowMeterRoot.anchoredPosition = defaultSlowMeterPosition + new Vector2(0f, -comboMeterDropPixels);
                 }
+                PaintComboFrame(meter);
                 BuildComboCircle(meter);
             }
         }

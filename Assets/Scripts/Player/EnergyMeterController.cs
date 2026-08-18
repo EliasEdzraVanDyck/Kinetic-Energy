@@ -148,29 +148,25 @@ namespace KineticEnergy.Player
             return premiumEnergyFill;
         }
 
-        [Tooltip("The shared blackbody band palette. The ENERGY fill wears the band the current energy level falls in - the same lookup the interactables use for their requirement, so affordability is read by comparing temperature. Empty = the fill keeps its own colour.")]
+        [Tooltip("The shared blackbody band palette, used for the CHARGE bar's heat ramp.")]
         public KineticEnergy.Level.EnergyBandPalette bandPalette;
 
-        // The meter half of the core rule: meter colour = the band the CURRENT energy
-        // falls in, through the SAME GetBand the interactables use, so the two can never
-        // drift apart. Hard-edged - the colour SNAPS at each boundary, never lerps; the
-        // discrete jump is the signal. Flat and unlit on the HUD by nature (UI Image),
-        // which is exactly the treatment split that separates it from the emissive world
-        // objects wearing the same hues.
-        public void SetEnergyTint(float tankFraction)
+        [Tooltip("The tank's own colour, in every state. Deliberately OFF the heat ramp: the energy bar answers 'how much have I got', which is the ceiling on what a charge can reach - it is the backdrop the hot charge bar is read against, not a competitor for the same language.")]
+        public Color energyColor = new Color(0.3f, 0.65f, 1f);
+
+        // The tank reads BLUE at all times - idle, and while aiming where it marks the
+        // maximum the charge can climb to. Only the charge bar runs the heat ramp, so the
+        // two never compete: cool bar = what you have, hot bar = what this launch spends.
+        public void SetEnergyTint()
         {
-            if (bandPalette == null) return;
-            KineticEnergy.Level.EnergyBandPalette.Band band = bandPalette.GetBand(tankFraction);
-            if (band == null) return;
+            // Kept in step so releasing a launch lock restores this rather than whatever
+            // colour happened to be showing when the lock started.
+            normalEnergyColor = energyColor;
+            if (!lockActive && energyFillImage != null) energyFillImage.color = energyColor;
 
-            // Kept in step so releasing a launch lock restores the CURRENT band rather
-            // than whatever colour happened to be showing when the lock started.
-            normalEnergyColor = band.baseColor;
-            if (!lockActive && energyFillImage != null) energyFillImage.color = band.baseColor;
-
-            // Both halves of the same tank: one continuous temperature across the seam.
+            // Both halves of the same tank read as one bar across the segment seam.
             Image premiumEnergy = ResolvePremiumEnergyFill();
-            if (premiumEnergy != null) premiumEnergy.color = band.baseColor;
+            if (premiumEnergy != null) premiumEnergy.color = energyColor;
         }
 
         // The CHARGE bar - the slice this launch is about to spend - runs the same band

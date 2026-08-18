@@ -1113,11 +1113,9 @@ namespace KineticEnergy.Player
             {
                 energyMeter.SetVisible(!infiniteEnergy);
                 energyMeter.SetEnergy(energyFraction);
-                // The meter half of the band rule: the fill wears the band the CURRENT
-                // energy falls in, so "can I afford that?" is a temperature comparison
-                // against the aimed object. Raw tank fraction - the band is a fact about
-                // the tank, not about how a meter variant lays out its blocks.
-                energyMeter.SetEnergyTint(energyFraction);
+                // The tank stays blue in every state - it is the ceiling the hot charge bar
+                // is read against, never a rival for the same heat language.
+                energyMeter.SetEnergyTint();
                 energyMeter.SetLaunchLocked(launchLockTimer > 0f);
                 bool charging = isAiming || holdChargeDirection != HoldChargeDirection.None || airAiming;
                 energyMeter.SetCharge(ChargeFraction(), charging);
