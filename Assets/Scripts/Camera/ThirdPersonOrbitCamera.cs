@@ -93,11 +93,13 @@ namespace KineticEnergy.Camera
 
         [Header("Gamepad Speed")]
         // Direct feedback: the stick camera should be a bit quicker than baseline - +20%
-        // grounded, +10% airborne. Mouse/WASD input never touches these.
+        // grounded, and airborne raised again by 15% on top of its old +10% (1.1 -> 1.265),
+        // since midair is where the camera has the most ground to cover. Mouse/WASD input
+        // never touches these.
         [Tooltip("Gamepad look speed multiplier while the player is GROUNDED.")]
         [Range(0.5f, 2f)] public float gamepadGroundedSpeedMultiplier = 1.2f;
         [Tooltip("Gamepad look speed multiplier while the player is AIRBORNE (flights and midair aim).")]
-        [Range(0.5f, 2f)] public float gamepadAirborneSpeedMultiplier = 1.1f;
+        [Range(0.5f, 2f)] public float gamepadAirborneSpeedMultiplier = 1.265f;
 
         // Fed per frame by KineticCubeController - the gamepad multipliers key off it.
         bool playerGrounded;
