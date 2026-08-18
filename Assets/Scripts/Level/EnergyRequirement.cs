@@ -27,6 +27,8 @@ namespace KineticEnergy.Level
         public bool showPercentLabel = true;
         [Tooltip("World metres the number sits above the pip row.")]
         public float labelRise = 0.42f;
+        [Tooltip("Material the pips are drawn with. MUST be set: primitives default to the built-in Standard material, whose shader is not part of URP and is stripped from builds - the pips then render solid magenta in a build while looking fine in the editor.")]
+        public Material pipMaterial;
 
         public float RequirementFraction => requirementPercent / 100f;
         public Color TierColor { get; private set; } = Color.white;
@@ -139,6 +141,10 @@ namespace KineticEnergy.Level
                 tick.transform.localPosition = new Vector3((i - (count - 1) * 0.5f) * spacing, 0f, 0f);
                 tick.transform.localScale = Vector3.one * size;
                 Renderer tickRenderer = tick.GetComponent<Renderer>();
+                // The primitive's own default material is the built-in Standard one, which
+                // URP cannot render and the build strips - swap it for the wired asset
+                // BEFORE tinting, then .material instances a per-pip copy to colour.
+                if (pipMaterial != null) tickRenderer.sharedMaterial = pipMaterial;
                 tickRenderer.material.color = band.baseColor; // flat, like everything else
                 tickRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             }

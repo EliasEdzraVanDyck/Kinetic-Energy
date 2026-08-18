@@ -2338,6 +2338,92 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
+        // BUILD FIX: the requirement pips and the % labels rendered solid magenta in a
+        // player build while looking correct in the editor - the signature of a shader
+        // that exists in the editor but is stripped from the build.
+        //
+        // Two causes, both from creating visuals at RUNTIME:
+        //   - GameObject.CreatePrimitive assigns the built-in Default-Material (Standard
+        //     shader). URP cannot render it and nothing references it, so it is stripped.
+        //   - TextMesh draws through the built-in font's material; its shader is only
+        //     included if something forces it in.
+        // Fixed by giving the pips a real project material (a scene reference is never
+        // stripped) and by naming the font shader in Always Included Shaders.
+        [MenuItem("Tools/Kinetic Energy/Fix Runtime Visual Materials")]
+        public static void FixRuntimeVisualMaterials()
+        {
+            // Unlit: the pips ARE their colour - no lighting should shift the band hue.
+            Material pip = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/EnergyPipMaterial.mat");
+            if (pip == null)
+            {
+                Shader unlit = Shader.Find("Universal Render Pipeline/Unlit");
+                if (unlit == null) throw new Exception("KineticEnergySetup: URP/Unlit shader not found.");
+                pip = SaveMaterialAsset(new Material(unlit), "EnergyPipMaterial");
+            }
+
+            // NOT DONE HERE: forcing the built-in font's shader into Always Included
+            // Shaders. GUI/Text Shader lives in 'unity default resources' and is flagged
+            // HideFlags.DontSave, so listing it makes the player build try to include an
+            // asset that must never be included - the build FAILS outright ("Failed to
+            // write file: .../unity_builtin_extra"), and Unity skips the shader anyway.
+            // TextMesh pulls that material in by itself; it needs no help.
+
+            string[] scenes =
+            {
+                "Assets/Scenes/LevelElementsTest3.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            };
+            foreach (string scenePath in scenes)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                int wired = 0;
+                foreach (EnergyRequirement requirement in UnityEngine.Object.FindObjectsByType<EnergyRequirement>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    requirement.pipMaterial = pip;
+                    EditorUtility.SetDirty(requirement);
+                    wired++;
+                }
+                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: " + scenePath + " - pip material wired to " + wired + " interactables");
+            }
+            AssetDatabase.SaveAssets();
+        }
+
+        // Diagnostic: what the controls sheet ACTUALLY imported as, versus what the rect
+        // asks the canvas to draw it at.
+        [MenuItem("Tools/Kinetic Energy/Validate Controls Image")]
+        public static void ValidateControlsImage()
+        {
+            const string texturePath = "Assets/Textures/ControlsSheet.png";
+            Texture2D tex = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
+            Sprite sprite = AssetDatabase.LoadAssetAtPath<Sprite>(texturePath);
+            TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+
+            Debug.Log("CTRLIMG texture=" + (tex != null ? tex.width + "x" + tex.height + " format=" + tex.format + " mips=" + tex.mipmapCount + " filter=" + tex.filterMode : "NULL"));
+            Debug.Log("CTRLIMG sprite=" + (sprite != null ? sprite.rect.width + "x" + sprite.rect.height + " ppu=" + sprite.pixelsPerUnit : "NULL"));
+            if (importer != null)
+            {
+                Debug.Log("CTRLIMG importer maxSize=" + importer.maxTextureSize
+                    + " compression=" + importer.textureCompression
+                    + " type=" + importer.textureType
+                    + " npot=" + importer.npotScale);
+            }
+
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/PauseSystem.prefab");
+            if (prefab != null)
+            {
+                Transform img = FindDeep(prefab.transform, "ControlsImage");
+                if (img != null)
+                {
+                    RectTransform rect = img.GetComponent<RectTransform>();
+                    Debug.Log("CTRLIMG rect=" + rect.sizeDelta.x + "x" + rect.sizeDelta.y
+                        + " (canvas draws this many UI units; scale 1.0 = that many screen pixels)");
+                }
+            }
+        }
+
         // Puts the authored controls sheet on the pause menu's Controls screen: the image
         // replaces the generated body TEXT, which said the same thing in a far less
         // readable way. Edited IN PLACE on the prefab (recreating it would reset every
@@ -2348,15 +2434,24 @@ namespace KineticEnergy.EditorSetup
             const string texturePath = "Assets/Textures/ControlsSheet.png";
             TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
             if (importer == null) throw new Exception("KineticEnergySetup: " + texturePath + " missing - copy the controls sheet in first.");
-            if (importer.textureType != TextureImporterType.Sprite)
-            {
-                importer.textureType = TextureImporterType.Sprite;
-                importer.spriteImportMode = SpriteImportMode.Single;
-                importer.mipmapEnabled = false;           // UI at native size - mips only blur it
-                importer.maxTextureSize = 2048;           // the sheet is 1536 wide; no downscale
-                importer.textureCompression = TextureImporterCompression.Uncompressed; // text stays crisp
-                importer.SaveAndReimport();
-            }
+            // Re-applied every run: these are the settings the sheet NEEDS, and getting
+            // them wrong is invisible in the meta but obvious on screen.
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteImportMode = SpriteImportMode.Single;
+            importer.maxTextureSize = 4096;               // never cap the sheet
+            importer.npotScale = TextureImporterNPOTScale.None;
+            importer.textureCompression = TextureImporterCompression.Uncompressed; // fine text, no blocks
+            // MIPMAPS ON, trilinear. The panel draws the sheet at 1180x787 UI units from a
+            // 1536x1024 source - it is MINIFIED, not shown at native size. Sampling a
+            // dense text image below its native size with no mips aliases hard: strokes
+            // drop pixels and break up, which reads exactly as "pixelated". Mips give the
+            // GPU a properly filtered smaller version to sample instead. (The first pass
+            // turned them off on the assumption the sheet was drawn 1:1 - it is not.)
+            importer.mipmapEnabled = true;
+            importer.mipmapFilter = TextureImporterMipFilter.KaiserFilter; // sharper mips than box
+            importer.filterMode = FilterMode.Trilinear;
+            importer.anisoLevel = 4;                      // holds up when the panel is scaled down
+            importer.SaveAndReimport();
             Sprite sheet = AssetDatabase.LoadAssetAtPath<Sprite>(texturePath);
             if (sheet == null) throw new Exception("KineticEnergySetup: " + texturePath + " did not import as a Sprite.");
 
