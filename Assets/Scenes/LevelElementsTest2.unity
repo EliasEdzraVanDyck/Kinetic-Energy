@@ -6917,18 +6917,58 @@ MonoBehaviour:
   totalLossSafetyTriggerFraction: 0.4
   totalLossSafetyCeilingFraction: 0.4
   introKey: levelelements
-  introText: "LEVEL ELEMENTS TEST\n\nA straight run along one axis, introducing one
-    element at a time. Pause > Sections jumps straight to any of them - you respawn
-    there while you keep testing it.\n\n1 - BASICS: plain platforms.\n\n2 - MOVING
-    PLATFORMS: one slides sideways, one rides up and down. While you aim, a blue
-    arrow shows where the platform will be when your shot lands.\n\n3 - ROTATING
-    WALLS: sticky faces that keep turning. \n\n4 - LASERS: gates that blink on and
-    off. Cross while they are turned off.\n\n5 - GROUND ENEMIES: they wander their
-    platform and leap at you when you are nearby.\n\n6 - TURRETS: fixed wall enemies
-    that also shoot on sight.\n\n7 - FLYING ENEMIES: they drift over the gaps and
-    shoot on sight.\n\nFALLING: if the combo window runs out while you are in the
-    air, the aim is cut short and you fall down. Keep landing before the meter empties.\n\nPress
-    any button to start."
+  introText: 'LEVEL ELEMENTS TEST
+
+
+    A straight run along one axis, introducing
+    one element at a time. Pause > Sections jumps straight to any of them - you respawn
+    there while you keep testing it.
+
+
+    1 - BASICS: plain platforms.
+
+
+    2 -
+    MOVING PLATFORMS: while you aim, a ghost of the platform and a blue arrow show
+    where it will be when your shot lands.
+
+
+    3 - ROTATING WALLS: sticky faces
+    that keep turning. Land on one and it carries you round with it.
+
+
+    4 - LASERS:
+    gates that blink on and off. Cross while they are turned off - touching a beam
+    knocks you back and drains energy.
+
+
+    5 - HUNTERS: they leap at you from a
+    distance, even in midair, and dodge launches aimed at them. They show red when
+    you can''t attack them. If they miss an attack, it leaves them open to be killed.
+    They display purple then and can''t dodge.
+
+
+    6 - TURRETS: fixed wall enemies
+    that fire a burst of two shots, then cool down. The yellow flash is their wind
+    up warning.
+
+
+    7 - FLYERS: they hang forward with a pulsing spot on their
+    back, that spot is the only spot where you can kill them. Hit them anywhere else
+    and they are knocked out for a while.
+
+
+    CHECKPOINTS: the blue button on each
+    section pad. Ground pound on it or crasht steeply from above, to activate.
+
+
+    FALLING:
+    if the combo window runs out while you are in the air, the aim is cut short and
+    you fall down. Keep landing before the meter empties.
+
+
+    Press any button
+    to start.'
   safetyTriggerFraction: 0.4
   safetyCeilingFraction: 0.4
   regenPerSecond: 0.12
@@ -11615,72 +11655,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1519307346}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
---- !u!1 &1544285681
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1544285682}
-  - component: {fileID: 1544285684}
-  - component: {fileID: 1544285683}
-  m_Layer: 0
-  m_Name: ElementsFinish
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1544285682
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1544285681}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 805.19995, y: 0.5, z: 0}
-  m_LocalScale: {x: 2.3578, y: 0.40497, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 1572411157}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1544285683
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1544285681}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c8b480fdac373864d98219f0790880cf, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.WinOnFinish
---- !u!65 &1544285684
-BoxCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1544285681}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 1
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Size: {x: 6, y: 6, z: 12}
-  m_Center: {x: 0, y: 0, z: 0}
 --- !u!1 &1572411156
 GameObject:
   m_ObjectHideFlags: 0
@@ -11743,7 +11717,6 @@ Transform:
   - {fileID: 1519307347}
   - {fileID: 1114026552}
   - {fileID: 820260883}
-  - {fileID: 1544285682}
   - {fileID: 861374170}
   - {fileID: 1690982748}
   - {fileID: 1581824097}
@@ -11761,6 +11734,7 @@ Transform:
   - {fileID: 1868993612}
   - {fileID: 1224942083}
   - {fileID: 1657612235}
+  - {fileID: 1832585572}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1581824096
@@ -14209,6 +14183,80 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1827444431}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!1001 &1832585571
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 1572411157}
+    m_Modifications:
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 15
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 15
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 805.19995
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5869154712841297001, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+      propertyPath: m_Name
+      value: ElementsFinish
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+--- !u!4 &1832585572 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 4046642018360076211, guid: 43463fb3282321747819c0e28ab8d944, type: 3}
+  m_PrefabInstance: {fileID: 1832585571}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &1868993611
 GameObject:
   m_ObjectHideFlags: 0

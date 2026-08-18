@@ -2288,6 +2288,193 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Checkpoint button prefab updated in place OK");
         }
 
+        // The element scenes' finish was a bare, invisible trigger built inline - nothing to
+        // see and nothing to reuse. This makes it a proper prefab with a green see-through
+        // body, and swaps the loose objects for instances at their existing placement.
+        //
+        // Deliberately its OWN prefab rather than a change to FinishTrigger.prefab, which
+        // Levels 3-10 use with FinishLineNextScene - giving that one a visual would alter
+        // every one of them.
+        [MenuItem("Tools/Kinetic Energy/Create Finish Volume Prefab")]
+        public static void CreateFinishVolumePrefab()
+        {
+            string path = PrefabFolder + "/FinishVolume.prefab";
+            Material finishMat = MakeTransparentMaterial("FinishVolumeMaterial", new Color(0.25f, 0.95f, 0.45f, 0.3f));
+
+            if (AssetDatabase.LoadAssetAtPath<GameObject>(path) == null)
+            {
+                GameObject seed = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                seed.name = "FinishVolume";
+                PrefabUtility.SaveAsPrefabAsset(seed, path);
+                UnityEngine.Object.DestroyImmediate(seed);
+            }
+
+            // Edited IN PLACE from here on, so any instances keep their overrides bound.
+            GameObject root = PrefabUtility.LoadPrefabContents(path);
+            try
+            {
+                BoxCollider box = root.GetComponent<BoxCollider>();
+                if (box == null) box = root.AddComponent<BoxCollider>();
+                box.isTrigger = true; // flown THROUGH - it must never stop a launch
+
+                Renderer bodyRenderer = root.GetComponent<Renderer>();
+                if (bodyRenderer != null)
+                {
+                    bodyRenderer.sharedMaterial = finishMat;
+                    bodyRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                }
+                if (root.GetComponent<WinOnFinish>() == null) root.AddComponent<WinOnFinish>();
+
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: FinishVolume prefab ready OK");
+        }
+
+        // Diagnostic: reports the finish volume's real state in both element scenes.
+        [MenuItem("Tools/Kinetic Energy/Validate Finish Volumes")]
+        public static void ValidateFinishVolumes()
+        {
+            foreach (string scenePath in new[]
+            {
+                "Assets/Scenes/LevelElementsTest.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                foreach (WinOnFinish finish in UnityEngine.Object.FindObjectsByType<WinOnFinish>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    BoxCollider box = finish.GetComponent<BoxCollider>();
+                    Renderer bodyRenderer = finish.GetComponent<Renderer>();
+                    Vector3 worldSize = box != null ? Vector3.Scale(box.size, finish.transform.lossyScale) : Vector3.zero;
+                    Debug.Log("FINISHCHECK " + System.IO.Path.GetFileNameWithoutExtension(scenePath)
+                        + " name=" + finish.name
+                        + " prefabInstance=" + PrefabUtility.IsPartOfPrefabInstance(finish.gameObject)
+                        + " pos=" + finish.transform.position
+                        + " lossyScale=" + finish.transform.lossyScale
+                        + " triggerWorldSize=" + worldSize
+                        + " isTrigger=" + (box != null && box.isTrigger)
+                        + " renderer=" + (bodyRenderer != null ? bodyRenderer.sharedMaterial.name : "NONE"));
+                }
+            }
+        }
+
+        [MenuItem("Tools/Kinetic Energy/Give Element Finishes A Visual")]
+        public static void GiveElementFinishesAVisual()
+        {
+            CreateFinishVolumePrefab();
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/FinishVolume.prefab");
+
+            foreach (string scenePath in new[]
+            {
+                "Assets/Scenes/LevelElementsTest.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                int swapped = 0;
+                foreach (WinOnFinish finish in UnityEngine.Object.FindObjectsByType<WinOnFinish>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (PrefabUtility.IsPartOfPrefabInstance(finish.gameObject)) continue; // already done
+
+                    Transform old = finish.transform;
+                    BoxCollider oldBox = finish.GetComponent<BoxCollider>();
+                    // The cube IS the trigger, so the old collider's box becomes the scale -
+                    // the volume the player passes through stays exactly the same size.
+                    Vector3 worldSize = oldBox != null
+                        ? Vector3.Scale(oldBox.size, old.lossyScale)
+                        : old.lossyScale;
+
+                    GameObject replacement = (GameObject)PrefabUtility.InstantiatePrefab(prefab, old.parent);
+                    replacement.name = old.name;
+                    replacement.transform.SetPositionAndRotation(old.position, old.rotation);
+                    replacement.transform.localScale = worldSize;
+
+                    UnityEngine.Object.DestroyImmediate(finish.gameObject);
+                    swapped++;
+                }
+
+                if (swapped > 0) EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: " + scenePath + " - " + swapped + " finish volumes given a visual");
+            }
+            AssetDatabase.SaveAssets();
+        }
+
+        // Rewrites the intro/BuildInfo text in both element scenes. They describe DIFFERENT
+        // casts now - plain enemies in one, hunters and weak-spot flyers in the other - so
+        // each gets its own text rather than a shared one that would be wrong for both.
+        [MenuItem("Tools/Kinetic Energy/Update Element Scene Intro Text")]
+        public static void UpdateElementSceneIntroText()
+        {
+            const string shared =
+                "LEVEL ELEMENTS TEST\n\n" +
+                "A straight run along one axis, introducing one element at a time. " +
+                "Pause > Sections jumps straight to any of them - you respawn there while you keep testing it.\n\n" +
+                "1 - BASICS: plain platforms.\n\n" +
+                "2 - MOVING PLATFORMS: one slides sideways, one rides up and down. While you aim, a ghost " +
+                "of the platform and a blue arrow show where it will be when your shot lands - aim at the ghost.\n\n" +
+                "3 - ROTATING WALLS: sticky faces that keep turning. Land on one and it carries you round with it.\n\n" +
+                "4 - LASERS: gates that blink on and off. Cross while they are turned off - touching a beam " +
+                "knocks you back and drains energy rather than killing you.\n\n";
+
+            const string checkpointsAndFalling =
+                "CHECKPOINTS: the blue button on each section pad. Ground pound it, or land on it steeply " +
+                "from above, to claim it - it sinks in and turns green while every other checkpoint pops back " +
+                "up. That is where you respawn until you claim another, and a claimed button stops blocking " +
+                "your launches. Sections you have already passed stay cleared: their enemies do not come back.\n\n" +
+                "COLOURS: red means an enemy cannot be killed right now, purple means it can, and a yellow " +
+                "flash means an attack is coming.\n\n" +
+                "FALLING: if the combo window runs out while you are in the air, the aim is cut short and you " +
+                "fall down. Keep landing before the meter empties.\n\n" +
+                "Press any button to start.";
+
+            string plainText = shared +
+                "5 - GROUND ENEMIES: they wander their platform and leap at you when you are nearby. " +
+                "Any launch kills them, so they stay purple.\n\n" +
+                "6 - TURRETS: fixed wall enemies that fire a BURST of three shots, then cool down. " +
+                "The yellow flash is your warning; each shot leads where you are going.\n\n" +
+                "7 - FLYING ENEMIES: they drift over the gaps and shoot on sight.\n\n" +
+                checkpointsAndFalling;
+
+            string variantText = shared +
+                "5 - HUNTERS: they leap at you from range, even in midair, and dodge shots aimed at them. " +
+                "Red while dangerous - the only way in is to survive a leap: a MISSED attack leaves them " +
+                "purple and rooted to the spot, unable to dodge. Land the punish before it wears off. " +
+                "If their attack connects, they get no such opening.\n\n" +
+                "6 - TURRETS: fixed wall enemies that fire a BURST of three shots, then cool down. " +
+                "The yellow flash is your warning; each shot leads where you are going.\n\n" +
+                "7 - WEAK SPOT FLYERS: they hang nose-down so the pulsing golden spot on their back faces " +
+                "upward - that spot is the ONLY thing that kills them. Hit them anywhere else and they are " +
+                "staggered instead, slumping forward for a second with the spot presented: come back around " +
+                "and take it. They pause after every shot and steer around the walls they patrol.\n\n" +
+                checkpointsAndFalling;
+
+            ApplyIntroText("Assets/Scenes/LevelElementsTest.unity", plainText);
+            ApplyIntroText("Assets/Scenes/LevelElementsTest2.unity", variantText);
+            AssetDatabase.SaveAssets();
+        }
+
+        static void ApplyIntroText(string scenePath, string text)
+        {
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) return;
+            EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+            MergedEconomyController economy = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
+            if (economy == null) throw new Exception("KineticEnergySetup: " + scenePath + " has no MergedEconomy.");
+            economy.introText = text;
+            EditorUtility.SetDirty(economy);
+
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+            EditorSceneManager.SaveOpenScenes();
+            Debug.Log("KineticEnergySetup: intro text updated in " + scenePath);
+        }
+
         // Swaps the FLYING-ENEMY and TURRET sections along the course: each section's whole
         // contents (pad, spawn, checkpoint and every element in it) is shifted by the offset
         // between the two section anchors, so their internal layout - including anything
