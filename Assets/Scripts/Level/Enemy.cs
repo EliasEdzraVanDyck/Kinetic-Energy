@@ -226,12 +226,10 @@ namespace KineticEnergy.Level
                 {
                     float pulse = Mathf.PingPong(Time.unscaledTime * 2.5f, 0.4f);
                     bodyRenderer.material.color = Color.Lerp(vulnerableColor, Color.white, pulse);
-                    vulnerablePulseActive = true;
                 }
                 else
                 {
                     bodyRenderer.material.color = IdleColor;
-                    vulnerablePulseActive = false;
                 }
             }
 
@@ -331,7 +329,6 @@ namespace KineticEnergy.Level
         Rigidbody playerBody;
         bool dodgeScheduled;      // the player fired AT this enemy - hop is booked
         float scheduledDodgeTimer; // real seconds until that hop (impact time minus lead)
-        bool vulnerablePulseActive;
 
         [Tooltip("How far below itself the enemy looks for ground. Must comfortably exceed the biggest drop in the level: anything further down is invisible to it, and a drop it cannot see reads as empty void.")]
         public float groundProbeDistance = 60f;
