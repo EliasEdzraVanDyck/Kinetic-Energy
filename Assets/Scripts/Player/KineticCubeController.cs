@@ -537,6 +537,20 @@ namespace KineticEnergy.Player
         // Economy-variant harness hooks (EconomyVariantController) - read-only state plus
         // one guarded energy mutator, so the harness never reaches into private fields.
         public float LastLaunchEnergySpent => lastLaunchEnergySpent;
+
+        float crashEnergySpent;
+        int crashEnergySpentFrame = -1;
+
+        // What the launch that is arriving RIGHT NOW paid, for anything gating on a price
+        // from inside its own collision callback. Script order between two OnCollisionEnter
+        // handlers is undefined, so this survives either order: read before RegisterCrash
+        // runs, the live figure is still standing; read after, the frame-stamped copy is.
+        // The stamp is what keeps a previous crash's (possibly larger) spend from leaking
+        // into this one.
+        public float ArrivalEnergySpent => crashEnergySpentFrame == Time.frameCount
+            ? Mathf.Max(lastLaunchEnergySpent, crashEnergySpent)
+            : lastLaunchEnergySpent;
+
         public Vector3 LastPredictedLanding => lastPredictedLanding;
         public bool HasValidPredictedLanding => hasValidPredictedLanding;
         // The landing FACE's normal - the scatter ring lies flat against it.
@@ -1094,6 +1108,9 @@ namespace KineticEnergy.Player
             {
                 energyMeter.SetVisible(!infiniteEnergy);
                 energyMeter.SetEnergy(energyFraction);
+                // RAW tank fraction: the band the bar reports is a fact about the tank, not
+                // about how a particular meter variant happens to lay its blocks out.
+                energyMeter.SetEnergyTint(energyFraction);
                 energyMeter.SetLaunchLocked(launchLockTimer > 0f);
                 bool charging = isAiming || holdChargeDirection != HoldChargeDirection.None || airAiming;
                 energyMeter.SetCharge(ChargeFraction(), charging);
@@ -1111,10 +1128,16 @@ namespace KineticEnergy.Player
                 {
                     aimedRequirement = lastPredictedLandingSource.GetComponentInParent<KineticEnergy.Level.EnergyRequirement>();
                 }
+                // Exactly what a launch fired this instant would pay - the same figure the
+                // gates on the far end compare against (see lastLaunchEnergySpent).
+                float projectedSpend = energyCostPerFullCharge > 0f
+                    ? Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge)
+                    : SpendableEnergy();
                 energyMeter.SetRequirementTick(
                     aimedRequirement != null ? aimedRequirement.RequirementFraction : 0f,
                     aimedRequirement != null ? aimedRequirement.TierColor : Color.white,
-                    aimedRequirement != null);
+                    aimedRequirement != null,
+                    projectedSpend);
             }
 
             if (slowdownMeter != null)
@@ -2403,6 +2426,11 @@ namespace KineticEnergy.Player
             LastCrashSurface = surface;
             LastCrashRefund = 0f; // stamped by RefundEnergyForCrash when a payout happens
             LastCrashWasPound = lastLaunchWasPound; // still true here; the bounce clears it below
+            // What this arrival PAID, frame-stamped before the pound branch below zeroes the
+            // running figure. Anything reading the spend from its own OnCollisionEnter (the
+            // checkpoint buttons) races this method - see ArrivalEnergySpent.
+            crashEnergySpent = lastLaunchEnergySpent;
+            crashEnergySpentFrame = Time.frameCount;
 
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
