@@ -161,10 +161,9 @@ namespace KineticEnergy.Level
         float windowRemaining;
         bool chainInFlight;
         Transform launchSurface;
-        // Every surface this run has stood on or landed on - see the revisit rule in
-        // OnCrash. Cleared on respawn, so a fresh attempt meets fresh ground.
-        readonly System.Collections.Generic.HashSet<Transform> visitedSurfaces
-            = new System.Collections.Generic.HashSet<Transform>();
+        // The single most recent surface stood on or landed on - the memory is exactly one
+        // deep, so only an immediate return is denied the chain. Cleared on respawn.
+        Transform lastTouchedSurface;
 
         // C/D/E flight bookkeeping: the opening launch's spend and the summed midair
         // relaunch spends of the CURRENT flight - the landing pays from both.
@@ -492,9 +491,9 @@ namespace KineticEnergy.Level
                         Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
                 {
                     launchSurface = hit.collider.transform;
-                    // Standing on it counts as having been there, so the platform you
-                    // started the run on is already "visited" the first time you come back.
-                    visitedSurfaces.Add(launchSurface);
+                    // Standing on it counts as touching it, so the platform the run STARTS
+                    // on is already the remembered one the first time you hop off and back.
+                    lastTouchedSurface = launchSurface;
                 }
             }
             else
@@ -525,6 +524,10 @@ namespace KineticEnergy.Level
             // chain; the ledger closes since the wash already returned the flight's spend.
             if (controller.LastCrashWasPound)
             {
+                // Still the last thing touched, even though the pound is exempt from the
+                // returned-to-the-same-object rule (the classic slam back onto your own
+                // takeoff platform has to keep counting).
+                if (controller.LastCrashSurface != null) lastTouchedSurface = controller.LastCrashSurface.transform;
                 flightOpen = false;
                 comboCount++;
                 if (comboStepPerLevel > 0f)
@@ -537,26 +540,19 @@ namespace KineticEnergy.Level
                 return;
             }
 
-            // The one landing that never COUNTS: back on the very object this launch
-            // took off from (no self-hops - and the big floor is just another object
-            // under this rule now, not a blanket exclusion). The refund just granted is
-            // taken back and the chain neither grows nor refreshes.
-            Collider crashSurface = controller.LastCrashSurface;
-            if (crashSurface != null && launchSurface != null && crashSurface.transform == launchSurface)
-            {
-                if (controller.LastCrashRefund > 0f) controller.AddEnergy(-controller.LastCrashRefund);
-                chainInFlight = false;
-                flightOpen = false;
-                return;
-            }
-
-            // GROUND YOU HAVE ALREADY STOOD ON pays the launch back and nothing more: the
+            // THE OBJECT YOU JUST CAME FROM pays the launch back and nothing more: the
             // pipeline's multiplied refund is taken back and replaced with exactly what the
-            // shot cost, so retreading is free but never profitable. The window refreshes -
-            // the run keeps breathing while you reposition - but the chain LEVEL holds
-            // where it is, so no amount of bouncing between two known platforms builds a
-            // multiplier. HashSet.Add doubles as the test: false means "seen before".
-            if (crashSurface != null && !visitedSurfaces.Add(crashSurface.transform))
+            // shot cost, so returning is free but never profitable. The window refreshes -
+            // the run keeps breathing while you reposition - but the chain LEVEL holds where
+            // it is, so bouncing between two platforms never builds a multiplier.
+            //
+            // The memory is exactly one deep: only the PREVIOUS surface is compared, so a
+            // platform revisited later in the run counts again as a fresh link. This covers
+            // the old no-self-hop case too - hopping straight back onto your own takeoff
+            // object is landing on the last thing you touched - so that rule is folded in
+            // here rather than kept as a separate, harsher branch.
+            Collider crashSurface = controller.LastCrashSurface;
+            if (crashSurface != null && crashSurface.transform == lastTouchedSurface)
             {
                 if (controller.LastCrashRefund > 0f) controller.AddEnergy(-controller.LastCrashRefund);
                 // "Exactly what it cost to get here" is the whole flight's spend wherever
@@ -571,6 +567,10 @@ namespace KineticEnergy.Level
                 windowRemaining = comboWindowSeconds;
                 return;
             }
+
+            // A genuinely NEW surface from here on - remembered as the one place a landing
+            // may not immediately return to.
+            if (crashSurface != null) lastTouchedSurface = crashSurface.transform;
 
             // C/D and E are the SOLE payers of landing refunds. The zeroed multipliers
             // silence the ordinary pipeline, but the POUND WASH pays through its own
@@ -689,7 +689,7 @@ namespace KineticEnergy.Level
             // The tank was just reset by the controller - clear the run state without the
             // revoke penalty, and restart the regen display from the fresh tank.
             ResetCombo(revoke: false);
-            visitedSurfaces.Clear(); // a fresh attempt meets fresh ground
+            lastTouchedSurface = null; // a fresh attempt meets fresh ground
             safetyActive = false;
             regenPool = 0f;
             flightOpen = false;

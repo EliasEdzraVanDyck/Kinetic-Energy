@@ -1113,9 +1113,6 @@ namespace KineticEnergy.Player
             {
                 energyMeter.SetVisible(!infiniteEnergy);
                 energyMeter.SetEnergy(energyFraction);
-                // RAW tank fraction: the band the bar reports is a fact about the tank, not
-                // about how a particular meter variant happens to lay its blocks out.
-                energyMeter.SetEnergyTint(energyFraction);
                 energyMeter.SetLaunchLocked(launchLockTimer > 0f);
                 bool charging = isAiming || holdChargeDirection != HoldChargeDirection.None || airAiming;
                 energyMeter.SetCharge(ChargeFraction(), charging);
@@ -1134,15 +1131,16 @@ namespace KineticEnergy.Player
                     aimedRequirement = lastPredictedLandingSource.GetComponentInParent<KineticEnergy.Level.EnergyRequirement>();
                 }
                 // Exactly what a launch fired this instant would pay - the same figure the
-                // gates on the far end compare against (see lastLaunchEnergySpent).
+                // gates on the far end compare against (see lastLaunchEnergySpent), so the
+                // band the charge bar reports is directly comparable to a requirement.
                 float projectedSpend = energyCostPerFullCharge > 0f
                     ? Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge)
                     : SpendableEnergy();
+                energyMeter.SetChargeTint(projectedSpend, charging);
                 energyMeter.SetRequirementTick(
                     aimedRequirement != null ? aimedRequirement.RequirementFraction : 0f,
                     aimedRequirement != null ? aimedRequirement.TierColor : Color.white,
-                    aimedRequirement != null,
-                    projectedSpend);
+                    aimedRequirement != null);
             }
 
             if (slowdownMeter != null)

@@ -111,64 +111,39 @@ namespace KineticEnergy.Player
         [System.NonSerialized] public float displaySpan = 1f;
         RectTransform premiumRect; // the tall segment, when this meter variant has one
 
-        [Tooltip("Tier palette the fill is coloured from: 0-19% wears the first tier's colour, 20-39% the second, and so on. Empty = the fill keeps its own colour.")]
+        [Tooltip("Tier palette the CHARGE bar is coloured from while charging: a charge of 0-19% of the tank wears the first tier's colour, 20-39% the second, and so on. Empty = the charge bar keeps its own colour.")]
         public KineticEnergy.Level.EnergyTierPalette tierPalette;
 
-        // The bar's own colour reports which 20% band the tank is sitting in, so the tier
-        // you can currently afford is readable without aiming at anything. Fed the RAW tank
-        // fraction - not the display-scaled one the fills use.
-        public void SetEnergyTint(float tankFraction)
+        // Only the CHARGE - the slice this launch is about to spend - carries the tier
+        // language, and only while it is being built. The tank's own fills keep their
+        // standing meaning at all times: yellow is energy you have, orange is the boost
+        // riding on top. Fed the charge in TANK units, so the band it reports is directly
+        // comparable to what an interactable demands.
+        public void SetChargeTint(float chargeTankFraction, bool charging)
         {
-            if (tierPalette == null || tierPalette.tiers == null || tierPalette.tiers.Length == 0) return;
-
-            int band = Mathf.Clamp(Mathf.FloorToInt(Mathf.Clamp01(tankFraction) * 5f), 0, tierPalette.tiers.Length - 1);
-            Color banded = tierPalette.tiers[band].baseColor;
-
-            // Kept in step so releasing a launch lock restores the CURRENT band rather than
-            // whatever colour happened to be showing when the lock started.
-            normalEnergyColor = banded;
-            if (!lockActive && energyFillImage != null) energyFillImage.color = banded;
-            // On the split meters most of the range is drawn by the tall segment's own fill,
-            // so the bar would otherwise only ever show the first two bands.
-            if (premiumRect != null)
+            if (chargeFillImage == null) return;
+            if (!chargeColorCaptured)
             {
-                Transform premiumFill = premiumRect.Find("PremiumBoostFill");
-                Image premiumImage = premiumFill != null ? premiumFill.GetComponent<Image>() : null;
-                if (premiumImage != null) premiumImage.color = banded;
+                normalChargeColor = chargeFillImage.color;
+                chargeColorCaptured = true;
             }
+
+            if (!charging || tierPalette == null || tierPalette.tiers == null || tierPalette.tiers.Length == 0)
+            {
+                chargeFillImage.color = normalChargeColor;
+                return;
+            }
+
+            int band = Mathf.Clamp(Mathf.FloorToInt(Mathf.Clamp01(chargeTankFraction) * 5f), 0, tierPalette.tiers.Length - 1);
+            chargeFillImage.color = tierPalette.tiers[band].baseColor;
         }
 
-        // projectedSpend = what the launch would actually pay if fired right now. The CHARGE
-        // bar - the one that grows while you hold - turns the tier's colour the instant that
-        // spend covers the requirement, so the answer to "is this enough?" is the colour of
-        // the bar you are already watching, not a number to compare. The tick stays as the
-        // exact threshold, and the two agree by construction: the blue turns as it passes it.
-        public void SetRequirementTick(float fraction, Color color, bool visible, float projectedSpend)
+        // The threshold marker itself. The charge bar's own colour is handled by
+        // SetChargeTint - the two meet when the growing charge reaches this tick and turns
+        // the tier's colour, which is the whole read: length says how far, colour says which
+        // tier, and the tick says where the line is.
+        public void SetRequirementTick(float fraction, Color color, bool visible)
         {
-            if (chargeFillImage != null)
-            {
-                if (!chargeColorCaptured)
-                {
-                    normalChargeColor = chargeFillImage.color;
-                    chargeColorCaptured = true;
-                }
-                if (!visible)
-                {
-                    chargeFillImage.color = normalChargeColor;
-                }
-                else
-                {
-                    // The bar wears the REQUIREMENT'S colour the whole time it is aimed at,
-                    // so the tier is readable before the charge gets there; it just sits
-                    // darkened until the spend actually covers the price, then snaps to
-                    // full strength. Colour = what this costs, brightness = can I pay it.
-                    bool affordable = projectedSpend >= Mathf.Clamp01(fraction) - 0.0001f;
-                    chargeFillImage.color = affordable
-                        ? color
-                        : new Color(color.r * 0.4f, color.g * 0.4f, color.b * 0.4f, color.a);
-                }
-            }
-
             if (requirementTick == null)
             {
                 if (energyFillImage == null) return;
