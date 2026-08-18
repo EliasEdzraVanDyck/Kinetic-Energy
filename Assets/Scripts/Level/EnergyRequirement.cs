@@ -45,9 +45,28 @@ namespace KineticEnergy.Level
         // disambiguator, since both share the white-hot band.
         bool Flickers => requirementPercent >= 100;
 
+        // The advertised requirement is READ OFF the gate that enforces it, so the display
+        // can never disagree with the price: retune a kill fraction in the inspector and
+        // the pips, the number, the band colour and the meter tick all follow.
+        void SyncRequirementFromGate()
+        {
+            SizedEnemy sized = GetComponent<SizedEnemy>();
+            FlyingEnemy anyFlyer = GetComponent<FlyingEnemy>();
+            TurretEnemy anyTurret = GetComponent<TurretEnemy>();
+            Checkpoint anyCheckpoint = GetComponent<Checkpoint>();
+
+            float fraction = -1f;
+            if (sized != null) fraction = sized.ConfiguredKillFraction;
+            else if (anyFlyer != null) fraction = anyFlyer.minKillEnergyFraction;
+            else if (anyTurret != null) fraction = anyTurret.minKillEnergyFraction;
+            else if (anyCheckpoint != null) fraction = anyCheckpoint.minActivationEnergyFraction;
+            if (fraction >= 0f) requirementPercent = Mathf.RoundToInt(fraction * 100f);
+        }
+
         void Start()
         {
             if (palette == null) return;
+            SyncRequirementFromGate();
             band = palette.GetBand(RequirementFraction);
             if (band == null) return;
             TierColor = band.baseColor;
@@ -91,13 +110,14 @@ namespace KineticEnergy.Level
             bandMaterial.color = band.baseColor * (0.86f + 0.14f * noise);
         }
 
-        // The countable read: one pip per band ORDINAL (band 3 = three pips), centred above
-        // the target. Colour is the fast approximate read; pips are the exact one - bands 4
-        // and 5 sit close in hue, so counting is what keeps them unambiguous.
+        // The countable read: one pip per 10% of the requirement (60% = six pips), centred
+        // above the target. Colour is the fast approximate read; pips are the exact one -
+        // and because the requirement is synced off the enforcing gate, the count follows
+        // any retune automatically.
         void BuildTickMarks()
         {
             if (targetRenderer == null || palette == null) return;
-            int count = Mathf.Clamp(palette.BandIndex(band), 1, 5);
+            int count = Mathf.Clamp(Mathf.RoundToInt(requirementPercent / 10f), 1, 10);
 
             // UNPARENTED, deliberately. Parented, the row inherited the target's lossy
             // scale - a checkpoint scaled up in the scene, or a large sized enemy, blew the

@@ -7019,7 +7019,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &955590617
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -7525,20 +7525,20 @@ MonoBehaviour:
 
     7 - FLYERS: they hang forward with a pulsing spot on their
     back, that spot is the only spot where you can kill them. Hit them anywhere else
-    and they are knocked out for a while.
+    and they are knocked out for a while. Afterwhich you land on their back and can
+    ground pound them.
 
 
-    CHECKPOINTS: the blue button on each
-    section pad. Ground pound on it or crasht steeply from above, to activate.
+    CHECKPOINTS: the blue button on each section pad. Ground
+    pound on it or crasht steeply from above, to activate.
 
 
-    FALLING:
-    if the combo window runs out while you are in the air, the aim is cut short and
-    you fall down. Keep landing before the meter empties.
+    FALLING: if the
+    combo window runs out while you are in the air, the aim is cut short and you
+    fall down. Keep landing before the meter empties.
 
 
-    Press any button
-    to start.'
+    Press any button to start.'
   safetyTriggerFraction: 0.4
   safetyCeilingFraction: 0.4
   regenPerSecond: 0.12

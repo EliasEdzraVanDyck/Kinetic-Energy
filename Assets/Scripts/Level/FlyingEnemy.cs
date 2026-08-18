@@ -57,6 +57,10 @@ namespace KineticEnergy.Level
         public float stunLeanDegrees = 80f;
         [Tooltip("Seconds it hangs motionless after surviving a launch: no drifting, turning, winding up or firing. This is the opening to line the weak spot up.")]
         public float stunSeconds = 1f;
+        [Tooltip("Body colour while stunned - blue, clearly apart from the active red.")]
+        public Color stunColor = new Color(0.2f, 0.45f, 1f);
+        [Tooltip("Seconds before the stun ends during which the body BLINKS between the stun blue and the active red - the warning that it is about to wake up.")]
+        public float stunBlinkSeconds = 0.4f;
 
         [Header("Projectile")]
         public float projectileSpeed = 26f;
@@ -116,6 +120,19 @@ namespace KineticEnergy.Level
             {
                 stunRemaining -= dt;
                 body.MoveRotation(stunRotation);
+                if (bodyRenderer != null)
+                {
+                    // Blue for the whole stun; in the final stretch it BLINKS blue<->red
+                    // (unscaled time, so the tell keeps flashing through bullet-time),
+                    // then hands back the rest colour the moment the stun expires.
+                    if (stunRemaining <= 0f) bodyRenderer.material.color = restColor;
+                    else if (stunRemaining <= stunBlinkSeconds)
+                    {
+                        bool showRed = Mathf.FloorToInt(Time.unscaledTime * 8f) % 2 == 0;
+                        bodyRenderer.material.color = showRed ? restColor : stunColor;
+                    }
+                    else bodyRenderer.material.color = stunColor;
+                }
                 return;
             }
 
@@ -224,6 +241,11 @@ namespace KineticEnergy.Level
         void FaceTowards(Vector3 point, float dt)
         {
             Vector3 look = point - body.position;
+            // FLATTENED before the look rotation: the hunch is the body's ONE pitch. With
+            // the vertical component left in, flying down toward a waypoint stacked the
+            // descent's own tilt on top of the hunch (and climbing subtracted from it), so
+            // the lean visibly deepened and shallowed with the travel direction.
+            look.y = 0f;
             if (look.sqrMagnitude < 0.001f) return;
             Quaternion target = Quaternion.LookRotation(look.normalized, Vector3.up)
                 * Quaternion.Euler(hunchPitchDegrees, 0f, 0f);
@@ -327,7 +349,7 @@ namespace KineticEnergy.Level
             stunRotation = Quaternion.LookRotation(heading.normalized, Vector3.up)
                 * Quaternion.Euler(stunLeanDegrees, 0f, 0f);
 
-            if (bodyRenderer != null) bodyRenderer.material.color = restColor; // drop any windup flash
+            if (bodyRenderer != null) bodyRenderer.material.color = stunColor; // stunned reads BLUE from the first frame
         }
 
         public void ResetToSpawn()

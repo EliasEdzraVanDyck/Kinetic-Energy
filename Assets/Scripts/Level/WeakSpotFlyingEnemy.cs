@@ -8,6 +8,8 @@ namespace KineticEnergy.Level
     {
         [Tooltip("The back cube's collider - the ONLY spot a launch can kill through.")]
         public Collider weakSpot;
+        [Tooltip("The kill collider is grown by this factor at boot - the VISUAL stays its authored size, only the forgiving hitbox around it grows. 1 = exactly the visual.")]
+        public float weakSpotColliderScale = 1.35f;
 
         [Header("Weak spot tell")]
         // The spot is ALWAYS the kill window on this enemy, so unlike the hunter - whose
@@ -26,6 +28,14 @@ namespace KineticEnergy.Level
         void Awake()
         {
             if (weakSpot == null) return;
+            // The hitbox alone grows - the collider's own size fields, never the transform,
+            // so the rendered cube keeps its authored look while the kill window around it
+            // is more forgiving. Awake runs once per instance, so no double-growth.
+            if (weakSpotColliderScale > 1.0001f)
+            {
+                if (weakSpot is BoxCollider box) box.size *= weakSpotColliderScale;
+                else if (weakSpot is SphereCollider sphere) sphere.radius *= weakSpotColliderScale;
+            }
             spotRenderer = weakSpot.GetComponent<Renderer>();
             if (spotRenderer == null) spotRenderer = weakSpot.GetComponentInChildren<Renderer>();
             // Reading .material instances a per-renderer copy, so the shared weak-spot

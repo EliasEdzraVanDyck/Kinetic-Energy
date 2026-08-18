@@ -132,8 +132,8 @@ MonoBehaviour:
   pauseRange: {x: 0.4, y: 1.5}
   detectionRadius: 20
   windUpSeconds: 0.6
-  recoverSeconds: 1
-  attackCooldown: 2.5
+  recoverSeconds: 1.2
+  attackCooldown: 2
   attackLaunchSpeed: 48
   attackFlightTimeRange: {x: 0.15, y: 0.5}
   attackArcHeight: 1.5
@@ -147,6 +147,8 @@ MonoBehaviour:
   attackAirbornePlayers: 1
   returnLaunchToPlatform: 1
   platformSearchRadius: 60
+  returnToHomePlatform: 1
+  homeLaunchRetrySeconds: 1.5
   dodgePlayerLaunches: 1
   dodgeTriggerRadius: 17
   dodgeLeadSeconds: 0.4

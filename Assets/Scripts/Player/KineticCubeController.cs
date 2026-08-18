@@ -560,6 +560,14 @@ namespace KineticEnergy.Player
             : lastLaunchEnergySpent;
 
         public Vector3 LastPredictedLanding => lastPredictedLanding;
+        // The collider the predicted landing terminates ON - what the player is aiming AT.
+        public Collider PredictedLandingSource => lastPredictedLandingSource;
+        // What the aimed launch would spend if fired right now, as a tank fraction - THE
+        // affordability figure: the crash gates, the meter's charge tint and the preview's
+        // enemy verdict all compare exactly this.
+        public float ProjectedLaunchSpend => energyCostPerFullCharge > 0f
+            ? Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge)
+            : SpendableEnergy();
         public bool HasValidPredictedLanding => hasValidPredictedLanding;
         // The landing FACE's normal - the scatter ring lies flat against it.
         public Vector3 LastPredictedLandingNormal => lastPredictedLandingNormal;
@@ -2124,6 +2132,8 @@ namespace KineticEnergy.Player
 
         void FixedUpdate()
         {
+            UpdateIgnoredCheckpointButton();
+
             // Freeze the cube for the whole duration of any aim/charge (and while crash-
             // stuck) - continuously, not just on the opening frame, so gravity can't sag an
             // airborne aim downward tick by tick. Only the midair first-person AIM's freeze
@@ -2396,7 +2406,35 @@ namespace KineticEnergy.Player
                         {
                             flyer.OnHitByLaunch();
                         }
-                        else flyer.OnLaunchSurvived();
+                        else
+                        {
+                            flyer.OnLaunchSurvived();
+                            // The staggered flyer is a PERCH: the hit places the player on
+                            // top of it, standing centred on the WEAK SPOT for the stun's
+                            // duration - the same cube the follow-up shot has to hit, so
+                            // the perch doubles as the aiming reference. Both position
+                            // writes plus the interpolation cycle: autoSyncTransforms is
+                            // off, and the interpolated render pose must not blend across
+                            // a teleport.
+                            WeakSpotFlyingEnemy weakSpotFlyer = flyer as WeakSpotFlyingEnemy;
+                            Collider flyerBody = weakSpotFlyer != null && weakSpotFlyer.weakSpot != null
+                                ? weakSpotFlyer.weakSpot
+                                : flyer.GetComponent<Collider>();
+                            if (flyerBody == null) flyerBody = flyer.GetComponentInChildren<Collider>();
+                            if (flyerBody != null)
+                            {
+                                float halfHeight = boxCollider != null ? boxCollider.bounds.extents.y : 0.5f;
+                                Vector3 perch = new Vector3(
+                                    flyerBody.bounds.center.x,
+                                    flyerBody.bounds.max.y + halfHeight + 0.05f,
+                                    flyerBody.bounds.center.z);
+                                transform.position = perch;
+                                rb.position = perch;
+                                RigidbodyInterpolation interpolationMode = rb.interpolation;
+                                rb.interpolation = RigidbodyInterpolation.None;
+                                rb.interpolation = interpolationMode;
+                            }
+                        }
                     }
                     else if (launchSpend >= turret.minKillEnergyFraction - 0.0001f) turret.OnHitByLaunch();
                 }
@@ -2454,11 +2492,76 @@ namespace KineticEnergy.Player
         // did (the checkpoint button's steepness test).
         public Vector3 PreCollisionVelocity => velocityBeforePhysicsStep;
 
+        // The checkpoint button the player may currently phase through. An UNPRESSED button
+        // stands proud of its frame, and a grounded aim right beside it kept clipping the
+        // takeoff: the launch struck the button's side the moment it fired. So while the
+        // player is grounded and aiming, the button at their feet stops colliding - and the
+        // exemption HOLDS through the launch itself, until the next crash re-arms it.
+        Collider ignoredCheckpointButton;
+
+        void SetIgnoredCheckpointButton(Collider button)
+        {
+            if (ignoredCheckpointButton == button) return;
+            if (ignoredCheckpointButton != null && boxCollider != null && ignoredCheckpointButton.enabled)
+            {
+                Physics.IgnoreCollision(boxCollider, ignoredCheckpointButton, false);
+            }
+            ignoredCheckpointButton = button;
+            if (ignoredCheckpointButton != null && boxCollider != null)
+            {
+                Physics.IgnoreCollision(boxCollider, ignoredCheckpointButton, true);
+            }
+        }
+
+        void UpdateIgnoredCheckpointButton()
+        {
+            if (isGrounded && IsAimingOrCharging)
+            {
+                // The button at the player's feet: a short box around the cube, so a button
+                // beside it (stood on the frame, aiming past the protruding button) counts
+                // just like one directly underfoot.
+                Vector3 reach = (boxCollider != null ? boxCollider.bounds.extents : Vector3.one * 0.5f)
+                    + new Vector3(0.35f, 0.7f, 0.35f);
+                foreach (Collider candidate in Physics.OverlapBox(transform.position, reach,
+                    transform.rotation, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                {
+                    Checkpoint checkpoint = candidate.GetComponentInParent<Checkpoint>();
+                    if (checkpoint != null && checkpoint.buttonCollider == candidate)
+                    {
+                        SetIgnoredCheckpointButton(candidate);
+                        return;
+                    }
+                }
+                // No button found: keep any active exemption - mid-launch the cube has
+                // usually already left the box while still beside the button.
+            }
+            else if (isGrounded && !hasLaunched)
+            {
+                SetIgnoredCheckpointButton(null); // settled and not aiming: collide normally
+            }
+            else if (ignoredCheckpointButton != null)
+            {
+                // Airborne: the exemption lasts only until the cube is genuinely CLEAR of
+                // the button, then collisions re-arm mid-flight. Holding it until the next
+                // crash broke the checkpoints outright: the natural press is to stand
+                // BESIDE the button, aim, and slam down onto it - and that aim's own
+                // exemption was still active at the landing, so the press never registered.
+                Bounds clearance = ignoredCheckpointButton.bounds;
+                clearance.Expand(1.2f);
+                if (boxCollider != null && !clearance.Intersects(boxCollider.bounds))
+                {
+                    SetIgnoredCheckpointButton(null);
+                }
+            }
+        }
+
         void RegisterCrash(Vector3 contactNormal, float crashSpeed, Collider surface)
         {
             // A NonStickSurface never registers as a crash at all - no freeze, no refund;
             // physics carries the cube onward.
             if (surface != null && surface.GetComponentInParent<NonStickSurface>() != null) return;
+
+            SetIgnoredCheckpointButton(null); // arrival anywhere re-arms button collisions
 
             LastCrashSurface = surface;
             LastCrashRefund = 0f; // stamped by RefundEnergyForCrash when a payout happens
@@ -2734,6 +2837,12 @@ namespace KineticEnergy.Player
 
             if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
             {
+                // The spend this aim would commit if fired now - the exact figure the
+                // enemy kill gates compare on the crash, so the preview's verdict on an
+                // aimed enemy and the actual outcome cannot disagree.
+                landingPreview.SetProjectedSpend(energyCostPerFullCharge > 0f
+                    ? Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge)
+                    : SpendableEnergy());
                 landingPreview.SetLandingPoint(lineStart, landingPoint, trajectoryBuffer, stepCount, didLand,
                     lastPredictedLandingNormal, lastPredictedLandingSource, blockedByStuckSurface);
             }

@@ -47,6 +47,16 @@ namespace KineticEnergy.Level
         // Read by the crash pipeline: the minimum launch-energy fraction a kill needs.
         public override float MinKillEnergyFraction => killEnergyFraction;
 
+        // The same figure straight from the serialized class config - valid BEFORE Start
+        // has run (killEnergyFraction is only assigned there), which is what display code
+        // with an undefined Start order has to read.
+        public float ConfiguredKillFraction => sizeClass switch
+        {
+            EnemySizeClass.Small => smallKillEnergyFraction,
+            EnemySizeClass.Large => largeKillEnergyFraction,
+            _ => mediumKillEnergyFraction,
+        };
+
         protected override void Start()
         {
             // The class's twist is applied BEFORE the base wiring runs, so everything

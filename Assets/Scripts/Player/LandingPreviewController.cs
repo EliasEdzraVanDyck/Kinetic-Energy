@@ -205,12 +205,18 @@ namespace KineticEnergy.Player
         bool LandingIsSuccessful(Collider landing, Vector3 normal)
         {
             if (landing == null) return false;
-            // An ENEMY is a TARGET, not a surface. Hitting one is the whole point, so it
-            // reads valid from any angle and on any face - the up-facing rule below would
-            // otherwise call a side-on hit a failed landing.
-            if (landing.GetComponentInParent<Enemy>() != null) return true;
-            if (landing.GetComponentInParent<FlyingEnemy>() != null) return true;
-            if (landing.GetComponentInParent<TurretEnemy>() != null) return true;
+            // An ENEMY is a TARGET, not a surface - valid from any angle and on any face,
+            // the up-facing rule below never applies. But only if the launch being aimed
+            // can actually PAY the kill: under the enemy's minimum spend the hit bounces
+            // off and punishes, which is a failed landing and reads red like one. The
+            // spend judged here is the same figure the crash gates compare (see the
+            // controller's projectedLaunchSpend).
+            Enemy enemy = landing.GetComponentInParent<Enemy>();
+            if (enemy != null) return projectedSpend >= enemy.MinKillEnergyFraction - 0.0001f;
+            FlyingEnemy flyer = landing.GetComponentInParent<FlyingEnemy>();
+            if (flyer != null) return projectedSpend >= flyer.minKillEnergyFraction - 0.0001f;
+            TurretEnemy turret = landing.GetComponentInParent<TurretEnemy>();
+            if (turret != null) return projectedSpend >= turret.minKillEnergyFraction - 0.0001f;
             if (landing.GetComponentInParent<DamageWalls>() != null) return false;
             if (landing.GetComponentInParent<DeathWall>() != null) return false;
             if (landing.GetComponentInParent<StickySurface>() != null) return true;
@@ -295,6 +301,12 @@ namespace KineticEnergy.Player
         // SPOT, which doesn't exist then, so it hides; the trail still shows the arc, since
         // "here's the path, and it lands nowhere" is still meaningful. landingNormal orients
         // the marker flush against the landing face (wall, floor, ceiling alike).
+        // What the aimed launch would spend if fired right now, as a tank fraction - set
+        // by the controller alongside every SetLandingPoint, judged against enemy kill
+        // prices in LandingIsSuccessful.
+        float projectedSpend = 1f;
+        public void SetProjectedSpend(float spend) => projectedSpend = spend;
+
         public void SetLandingPoint(Vector3 lineStart, Vector3 landingPoint, Vector3[] trajectory, int trajectoryCount, bool didLand, Vector3 landingNormal = default, Collider landingCollider = null, bool aimBlocked = false)
         {
             // Outcome colour: judged on real landings; a lost landing keeps its colour

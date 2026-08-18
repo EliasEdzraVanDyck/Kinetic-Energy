@@ -117,6 +117,9 @@ namespace KineticEnergy.Level
 
         // Is a player launch lethal to this enemy at this instant? Each kill window makes
         // a different moment the punishable one, and the colour follows whichever it is.
+        // An aim pointed at this enemy changes NOTHING here: the kill window is earned by
+        // the enemy's own behaviour (a missed attack, a telegraph), never by being aimed
+        // at - the preview's green judges energy only, not this window.
         bool KillableNow => killWindow switch
         {
             EnemyKillWindow.WhileCoolingDown => vulnerableTimer > 0f,
@@ -958,12 +961,9 @@ namespace KineticEnergy.Level
         // Whether a launch hitting RIGHT NOW would kill - read by the crash pipeline.
         // The windows map onto the enemy's own tells: the windup flash and the post-
         // attack vulnerability pulse.
-        public bool CanBeKilledByLaunch => killWindow switch
-        {
-            EnemyKillWindow.WhileCoolingDown => vulnerableTimer > 0f,
-            EnemyKillWindow.WhileWindingUp => state == EnemyState.WindingUp,
-            _ => true,
-        };
+        // Mirrors KillableNow exactly (colour and gameplay must never disagree), the
+        // lethal-aim window included.
+        public bool CanBeKilledByLaunch => KillableNow;
 
         // The minimum launch-energy fraction a kill requires (on top of the kill window).
         // The base enemy asks nothing; the sized variants raise it per class, and the
