@@ -2288,6 +2288,91 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Checkpoint button prefab updated in place OK");
         }
 
+        // Swaps the FLYING-ENEMY and TURRET sections along the course: each section's whole
+        // contents (pad, spawn, checkpoint and every element in it) is shifted by the offset
+        // between the two section anchors, so their internal layout - including anything
+        // moved by hand - is carried across intact. The section list is reordered and
+        // renumbered to match, and the Sections screen rebuilt from it.
+        [MenuItem("Tools/Kinetic Energy/Swap Flying And Turret Sections")]
+        public static void SwapFlyingAndTurretSections()
+        {
+            string[] flyingObjects =
+            {
+                "6 - Flying enemiesPad", "6 - Flying enemiesSpawn", "6 - Flying enemiesCheckpoint",
+                "FlyStep1", "FlyStep2", "ElementsFlyer1", "ElementsFlyer2", "ElementsFlyer3",
+                "FlySideWallA", "FlySideWallB", "FlySideWallC",
+            };
+            string[] turretObjects =
+            {
+                "7 - TurretsPad", "7 - TurretsSpawn", "7 - TurretsCheckpoint",
+                "TurretRun1", "TurretRun2", "TurretWallLeft", "TurretWallRight",
+                "ElementsTurret1", "ElementsTurret2",
+            };
+
+            foreach (string scenePath in new[]
+            {
+                "Assets/Scenes/LevelElementsTest.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                GameObject flyingAnchor = GameObject.Find("6 - Flying enemiesSpawn");
+                GameObject turretAnchor = GameObject.Find("7 - TurretsSpawn");
+                if (flyingAnchor == null || turretAnchor == null)
+                {
+                    Debug.Log("KineticEnergySetup: " + scenePath + " - no flying/turret pair to swap, skipped");
+                    continue;
+                }
+
+                // Measured BEFORE anything moves - the two anchors trade places exactly.
+                Vector3 delta = turretAnchor.transform.position - flyingAnchor.transform.position;
+                MoveNamedObjects(flyingObjects, delta);
+                MoveNamedObjects(turretObjects, -delta);
+
+                LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
+                if (sections != null)
+                {
+                    int flyingIndex = -1, turretIndex = -1;
+                    for (int i = 0; i < sections.sections.Length; i++)
+                    {
+                        string label = sections.sections[i] != null ? sections.sections[i].label : "";
+                        if (label.Contains("Flying")) flyingIndex = i;
+                        else if (label.Contains("Turret")) turretIndex = i;
+                    }
+                    if (flyingIndex >= 0 && turretIndex >= 0)
+                    {
+                        // The list is read in course order, so the entries swap places and
+                        // take the OTHER one's number with them.
+                        (sections.sections[flyingIndex], sections.sections[turretIndex])
+                            = (sections.sections[turretIndex], sections.sections[flyingIndex]);
+                        sections.sections[flyingIndex].label = (flyingIndex + 1) + " - Turrets";
+                        sections.sections[turretIndex].label = (turretIndex + 1) + " - Flying enemies";
+                        EditorUtility.SetDirty(sections);
+                        RebuildSectionsScreenButtons(sections);
+                    }
+                }
+
+                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: " + scenePath + " - flying and turret sections swapped (offset "
+                    + delta.x.ToString("F1") + " on x)");
+            }
+            AssetDatabase.SaveAssets();
+        }
+
+        static void MoveNamedObjects(string[] names, Vector3 delta)
+        {
+            foreach (string name in names)
+            {
+                GameObject go = GameObject.Find(name);
+                if (go == null) continue;
+                go.transform.position += delta; // children (shells, weak spots) ride along
+                EditorUtility.SetDirty(go);
+            }
+        }
+
         // The turret's flash colour is serialized on its prefab from an older build, so a
         // code default cannot reach it - written here to the ground hunter's warning yellow.
         [MenuItem("Tools/Kinetic Energy/Match Turret Telegraph To Hunter")]

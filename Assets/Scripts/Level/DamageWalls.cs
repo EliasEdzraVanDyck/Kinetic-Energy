@@ -35,17 +35,26 @@ namespace KineticEnergy.Level
             // The player's respawn also resets every (surviving) enemy to its original
             // position - ground and flying alike - and clears live projectiles, so a
             // retry faces the level as it started.
-            foreach (Enemy enemy in Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include))
+            //
+            // EXCEPT where a section index owns the level: it revives only the enemies from
+            // the active section onward, so ground you have already cleared stays cleared.
+            // Doing it here as well would blanket-revive them and undo exactly that, so the
+            // decision is handed over (it listens for PlayerRespawned below).
+            bool sectionsOwnRespawns = Object.FindAnyObjectByType<LevelSectionController>() != null;
+            if (!sectionsOwnRespawns)
             {
-                enemy.ResetToSpawn();
-            }
-            foreach (FlyingEnemy flyer in Object.FindObjectsByType<FlyingEnemy>(FindObjectsInactive.Include))
-            {
-                flyer.ResetToSpawn();
-            }
-            foreach (TurretEnemy turret in Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include))
-            {
-                turret.ResetToSpawn();
+                foreach (Enemy enemy in Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include))
+                {
+                    enemy.ResetToSpawn();
+                }
+                foreach (FlyingEnemy flyer in Object.FindObjectsByType<FlyingEnemy>(FindObjectsInactive.Include))
+                {
+                    flyer.ResetToSpawn();
+                }
+                foreach (TurretEnemy turret in Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include))
+                {
+                    turret.ResetToSpawn();
+                }
             }
             foreach (EnemyProjectile projectile in Object.FindObjectsByType<EnemyProjectile>(FindObjectsInactive.Exclude))
             {
