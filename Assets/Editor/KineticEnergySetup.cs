@@ -2308,6 +2308,10 @@ namespace KineticEnergy.EditorSetup
                 flyer.turnSpeed = 4.8f;
                 // A full second sitting still after the shot: the committed, readable beat.
                 flyer.postFireHoldSeconds = 1f;
+                // It patrols among the section's floating walls, so it has to steer around
+                // them rather than drifting through.
+                flyer.avoidObstacles = true;
+                flyer.obstacleClearance = 3.5f;
                 EditorUtility.SetDirty(flyer);
 
                 PrefabUtility.SaveAsPrefabAsset(root, path);

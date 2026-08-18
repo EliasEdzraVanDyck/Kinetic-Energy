@@ -2314,7 +2314,14 @@ namespace KineticEnergy.Player
                     }
                     // Weak-spot flyers only die to a hit ON their back cube; the base
                     // flyer allows every collider.
-                    else if (flyer != null) { if (flyer.LaunchKillAllowedFor(collision.collider)) flyer.OnHitByLaunch(); }
+                    // A hit anywhere but the killing spot STAGGERS the flyer instead of
+                    // doing nothing - it hangs there slumped forward for a moment, which
+                    // is the opening to come back around onto its weak spot.
+                    else if (flyer != null)
+                    {
+                        if (flyer.LaunchKillAllowedFor(collision.collider)) flyer.OnHitByLaunch();
+                        else flyer.OnLaunchSurvived();
+                    }
                     else turret.OnHitByLaunch();
                 }
                 return;

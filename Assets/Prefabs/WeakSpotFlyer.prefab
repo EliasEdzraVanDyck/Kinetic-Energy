@@ -134,10 +134,15 @@ MonoBehaviour:
   windUpSeconds: 0.8
   attackCooldown: 1.5
   windUpColor: {r: 1, g: 0.25, b: 0.15, a: 1}
-  hunchPitchDegrees: 18
+  hunchPitchDegrees: 12
   turnSpeed: 4.8
   postFireHoldSeconds: 1
-  projectileSpeed: 26
+  avoidObstacles: 1
+  obstacleClearance: 3.5
+  targetAttempts: 10
+  stunLeanDegrees: 75
+  stunSeconds: 1.8
+  projectileSpeed: 30
   projectileLifetimeSeconds: 10
   projectileKnockback: 16
   projectileEnergyDrain: 0.1
@@ -145,6 +150,9 @@ MonoBehaviour:
   projectileScale: {x: 0.35, y: 0.6, z: 0.35}
   projectileColor: {r: 0.9, g: 0.1, b: 0.08, a: 1}
   weakSpot: {fileID: 2158824410075985085}
+  pulseColor: {r: 1, g: 1, b: 1, a: 1}
+  pulseSpeed: 2.5
+  pulseAmount: 0.45
 --- !u!1 &6435922311813363651
 GameObject:
   m_ObjectHideFlags: 0
@@ -173,8 +181,8 @@ Transform:
   m_GameObject: {fileID: 6435922311813363651}
   serializedVersion: 2
   m_LocalRotation: {x: -0.62301064, y: -0, z: -0, w: 0.78221333}
-  m_LocalPosition: {x: -0.030000003, y: 0.34000006, z: -0.44}
-  m_LocalScale: {x: 0.678315, y: 0.27045125, z: 1.2467668}
+  m_LocalPosition: {x: -0.03, y: 0.31, z: -0.44}
+  m_LocalScale: {x: 0.5398098, y: 0.27045125, z: 1.1370763}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 3680240098601536331}

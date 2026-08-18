@@ -44,6 +44,20 @@ namespace KineticEnergy.Level
         [Tooltip("Seconds after firing during which it neither moves nor turns - a committed, readable pause the player can punish.")]
         public float postFireHoldSeconds = 0f;
 
+        [Header("Obstacle avoidance")]
+        [Tooltip("ON: wander targets are only accepted where there is clear air, and a drift that would carry it into something turns away instead. Needed wherever the flyer patrols among walls rather than open sky.")]
+        public bool avoidObstacles = false;
+        [Tooltip("Clear space a wander target needs around it, in world units.")]
+        public float obstacleClearance = 3.5f;
+        [Tooltip("Candidate points tried before it gives up and simply holds station this pause.")]
+        public int targetAttempts = 10;
+
+        [Header("Survived-hit stagger")]
+        [Tooltip("Degrees the flyer pitches NOSE-DOWN while staggered - slumping forward swings its back (and the weak spot on it) up to face the player.")]
+        public float stunLeanDegrees = 80f;
+        [Tooltip("Seconds it hangs motionless after surviving a launch: no drifting, turning, winding up or firing. This is the opening to line the weak spot up.")]
+        public float stunSeconds = 1f;
+
         [Header("Projectile")]
         public float projectileSpeed = 26f;
         public float projectileLifetimeSeconds = 6f;
@@ -67,6 +81,8 @@ namespace KineticEnergy.Level
         Vector3 spawnPoint;
         Vector3 currentTarget;
         float postFireHoldRemaining;
+        float stunRemaining;
+        Quaternion stunRotation = Quaternion.identity;
         float pauseRemaining;
         FlyerState state = FlyerState.Patrol;
         float stateTimer;
@@ -93,6 +109,15 @@ namespace KineticEnergy.Level
         {
             float dt = WorldMotionTime.FixedDeltaTime;
             if (cooldownRemaining > 0f) cooldownRemaining -= dt;
+
+            // Staggered by a hit it survived: hangs exactly where it was, slumped forward,
+            // doing nothing at all until it shakes it off.
+            if (stunRemaining > 0f)
+            {
+                stunRemaining -= dt;
+                body.MoveRotation(stunRotation);
+                return;
+            }
 
             switch (state)
             {
@@ -140,18 +165,56 @@ namespace KineticEnergy.Level
             }
             else
             {
-                body.MovePosition(position + toTarget / distance * step);
+                Vector3 nextPosition = position + toTarget / distance * step;
+                // Even a clear destination can have a wall across the way to it - the drift
+                // is checked step by step, and it re-picks rather than sliding into one.
+                if (avoidObstacles && !HasRoomAt(nextPosition, BodyRadius + 0.5f))
+                {
+                    PickNewTarget();
+                    return;
+                }
+                body.MovePosition(nextPosition);
                 FaceTowards(currentTarget, dt);
             }
         }
 
         void PickNewTarget()
         {
-            Vector3 offset = Random.insideUnitSphere;
-            currentTarget = spawnPoint + new Vector3(
-                offset.x * flyRadius,
-                offset.y * flyRadius * verticalRadiusFactor,
-                offset.z * flyRadius);
+            int attempts = avoidObstacles ? Mathf.Max(targetAttempts, 1) : 1;
+            for (int attempt = 0; attempt < attempts; attempt++)
+            {
+                Vector3 offset = Random.insideUnitSphere;
+                Vector3 candidate = spawnPoint + new Vector3(
+                    offset.x * flyRadius,
+                    offset.y * flyRadius * verticalRadiusFactor,
+                    offset.z * flyRadius);
+
+                if (!avoidObstacles || HasRoomAt(candidate, obstacleClearance))
+                {
+                    currentTarget = candidate;
+                    return;
+                }
+            }
+            // Boxed in on every try - hold station rather than pick a spot inside a wall.
+            currentTarget = body != null ? body.position : transform.position;
+        }
+
+        float BodyRadius => transform.localScale.x * 0.5f;
+
+        // Clear air at a point? Its own body, the player and other flyers do not count as
+        // obstacles - only the level's geometry, which is what it must not drift into.
+        bool HasRoomAt(Vector3 point, float radius)
+        {
+            foreach (Collider hit in Physics.OverlapSphere(point, radius,
+                         Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                if (hit == null) continue;
+                if (hit.transform == transform || hit.transform.IsChildOf(transform)) continue;
+                if (hit.GetComponentInParent<KineticCubeController>() != null) continue;
+                if (hit.GetComponentInParent<FlyingEnemy>() != null) continue;
+                return false;
+            }
+            return true;
         }
 
         // Turning is only ever toward where it is GOING (while patrolling) or toward the
@@ -242,6 +305,28 @@ namespace KineticEnergy.Level
             gameObject.SetActive(false);
         }
 
+        // A launch that connected but NOT on a killing spot. The flyer is knocked out of
+        // whatever it was doing and left hanging, slumped forward - which is the whole
+        // point: the slump rolls its back uppermost, presenting the weak spot for the
+        // follow-up shot instead of leaving the player to chase a moving target.
+        public void OnLaunchSurvived()
+        {
+            stunRemaining = stunSeconds;
+            state = FlyerState.Patrol;
+            stateTimer = 0f;
+            pauseRemaining = 0f;
+            postFireHoldRemaining = 0f;
+
+            // Slumps from wherever it was already pointing, keeping its heading.
+            Vector3 heading = body.rotation * Vector3.forward;
+            heading.y = 0f;
+            if (heading.sqrMagnitude < 0.001f) heading = Vector3.forward;
+            stunRotation = Quaternion.LookRotation(heading.normalized, Vector3.up)
+                * Quaternion.Euler(stunLeanDegrees, 0f, 0f);
+
+            if (bodyRenderer != null) bodyRenderer.material.color = restColor; // drop any windup flash
+        }
+
         public void ResetToSpawn()
         {
             transform.position = spawnPoint;
@@ -250,6 +335,7 @@ namespace KineticEnergy.Level
             pauseRemaining = 0f;
             cooldownRemaining = 0f;
             postFireHoldRemaining = 0f;
+            stunRemaining = 0f;
             if (bodyRenderer != null) bodyRenderer.material.color = restColor;
             PickNewTarget();
             gameObject.SetActive(true);
