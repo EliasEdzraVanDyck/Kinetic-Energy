@@ -177,7 +177,20 @@ namespace KineticEnergy.Level
             }
         }
 
-        // Unparented rows do not die with their object, so they are cleaned up by hand.
+        // Unparented rows do not follow their object's lifecycle, so the whole of it is
+        // mirrored by hand. A killed enemy is DEACTIVATED rather than destroyed (it is
+        // revived on respawn), so without this its pips and number were left hanging in
+        // mid-air over an empty platform. Enable/Disable covers the kill and the revival;
+        // Destroy covers the scene teardown.
+        void SetRowsVisible(bool visible)
+        {
+            if (tickRoot != null) tickRoot.gameObject.SetActive(visible);
+            if (labelTransform != null) labelTransform.gameObject.SetActive(visible);
+        }
+
+        void OnEnable() => SetRowsVisible(true);   // no-ops before Start builds them
+        void OnDisable() => SetRowsVisible(false);
+
         void OnDestroy()
         {
             if (tickRoot != null) Destroy(tickRoot.gameObject);
