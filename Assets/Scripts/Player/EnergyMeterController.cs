@@ -154,6 +154,29 @@ namespace KineticEnergy.Player
         [Tooltip("The tank's own colour, in every state. Deliberately OFF the heat ramp: the energy bar answers 'how much have I got', which is the ceiling on what a charge can reach - it is the backdrop the hot charge bar is read against, not a competitor for the same language.")]
         public Color energyColor = new Color(0.3f, 0.65f, 1f);
 
+        [Tooltip("The meter's frame - outline and block dividers. A mid grey rather than white: structure has to separate from BOTH the empty meter behind it and the scene's flat clear colour without reading as another lit-up value. Every meter uses this, so the energy and combo bars match by construction.")]
+        public Color frameColor = new Color(0.62f, 0.62f, 0.66f, 0.9f);
+
+        void Awake()
+        {
+            PaintFrame();
+        }
+
+        // Structure only - never a fill. Applied by each meter to itself, so there is one
+        // grey across the HUD instead of per-meter copies drifting apart.
+        public void PaintFrame()
+        {
+            foreach (Image image in GetComponentsInChildren<Image>(true))
+            {
+                string n = image.name;
+                if (n == "Outline" || n == "PremiumOutline"
+                    || n.StartsWith("Divider") || n.StartsWith("PremiumDivider"))
+                {
+                    image.color = frameColor;
+                }
+            }
+        }
+
         // The tank reads BLUE at all times - idle, and while aiming where it marks the
         // maximum the charge can climb to. Only the charge bar runs the heat ramp, so the
         // two never compete: cool bar = what you have, hot bar = what this launch spends.

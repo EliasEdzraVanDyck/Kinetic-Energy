@@ -23,6 +23,10 @@ namespace KineticEnergy.Level
         public bool buildTickMarks = true;
         [Tooltip("World metres between the target's top and the pip row.")]
         public float tickHeight = 0.35f;
+        [Tooltip("Print the requirement as a number above the pips. Sized enemies already print their own, so they skip this.")]
+        public bool showPercentLabel = true;
+        [Tooltip("World metres the number sits above the pip row.")]
+        public float labelRise = 0.42f;
 
         public float RequirementFraction => requirementPercent / 100f;
         public Color TierColor { get; private set; } = Color.white;
@@ -30,6 +34,7 @@ namespace KineticEnergy.Level
         EnergyBandPalette.Band band;
         Material bandMaterial;
         Transform tickRoot;
+        Transform labelTransform;
         float flickerSeed;
         // Enemies paint their own body every frame (red when untouchable, the band colour
         // while punishable), so this component must not fight them for the material.
@@ -71,6 +76,7 @@ namespace KineticEnergy.Level
             if (targetRenderer != null) bandMaterial = targetRenderer.material;
 
             if (buildTickMarks) BuildTickMarks();
+            if (showPercentLabel) BuildPercentLabel();
         }
 
         void Update()
@@ -93,8 +99,12 @@ namespace KineticEnergy.Level
             if (targetRenderer == null || palette == null) return;
             int count = Mathf.Clamp(palette.BandIndex(band), 1, 5);
 
+            // UNPARENTED, deliberately. Parented, the row inherited the target's lossy
+            // scale - a checkpoint scaled up in the scene, or a large sized enemy, blew the
+            // pips up with it and skewed them on non-uniform scales, so they no longer read
+            // as a fixed-size row. LateUpdate carries the position and facing instead, and
+            // OnDestroy takes the row with the object.
             tickRoot = new GameObject("RequirementTicks").transform;
-            tickRoot.SetParent(transform, false);
             Bounds bounds = targetRenderer.bounds;
             tickRoot.position = new Vector3(bounds.center.x, bounds.max.y + tickHeight, bounds.center.z);
 
@@ -114,19 +124,64 @@ namespace KineticEnergy.Level
             }
         }
 
+        // The exact read, next to the pips' countable one: the requirement as a number.
+        // Sized enemies print their own, so this only fills the gap on everything else -
+        // checkpoints above all, which had no figure on them at all.
+        void BuildPercentLabel()
+        {
+            if (GetComponent<SizedEnemy>() != null) return; // already prints its own
+
+            GameObject go = new GameObject("RequirementLabel");
+            TextMesh label = go.AddComponent<TextMesh>();
+            label.text = requirementPercent + "%";
+            label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.fontSize = 64;
+            label.characterSize = 0.045f;
+            label.anchor = TextAnchor.LowerCenter;
+            label.alignment = TextAlignment.Center;
+            label.color = band.baseColor;
+            MeshRenderer meshRenderer = go.GetComponent<MeshRenderer>();
+            if (label.font != null) meshRenderer.sharedMaterial = label.font.material;
+            // Unparented for the same reason as the pips: no inherited scale, ever.
+            labelTransform = go.transform;
+        }
+
         void LateUpdate()
         {
-            // The row faces the camera and rides the target (enemies move and scale).
-            if (tickRoot == null || targetRenderer == null) return;
+            if (targetRenderer == null) return;
+
+            // Both rows ride the target and face the camera. Because neither is parented,
+            // their size is fixed in world units no matter how the target is scaled.
             Bounds bounds = targetRenderer.bounds;
-            tickRoot.position = new Vector3(bounds.center.x, bounds.max.y + tickHeight, bounds.center.z);
             UnityEngine.Camera cam = UnityEngine.Camera.main;
-            if (cam != null)
+
+            if (tickRoot != null)
             {
-                Vector3 look = tickRoot.position - cam.transform.position;
-                look.y = 0f;
-                if (look.sqrMagnitude > 0.001f) tickRoot.rotation = Quaternion.LookRotation(look);
+                tickRoot.position = new Vector3(bounds.center.x, bounds.max.y + tickHeight, bounds.center.z);
+                if (cam != null)
+                {
+                    Vector3 look = tickRoot.position - cam.transform.position;
+                    look.y = 0f;
+                    if (look.sqrMagnitude > 0.001f) tickRoot.rotation = Quaternion.LookRotation(look);
+                }
             }
+
+            if (labelTransform != null)
+            {
+                labelTransform.position = new Vector3(
+                    bounds.center.x, bounds.max.y + tickHeight + labelRise, bounds.center.z);
+                if (cam != null)
+                {
+                    labelTransform.rotation = Quaternion.LookRotation(labelTransform.position - cam.transform.position);
+                }
+            }
+        }
+
+        // Unparented rows do not die with their object, so they are cleaned up by hand.
+        void OnDestroy()
+        {
+            if (tickRoot != null) Destroy(tickRoot.gameObject);
+            if (labelTransform != null) Destroy(labelTransform.gameObject);
         }
     }
 }

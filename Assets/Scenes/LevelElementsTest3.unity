@@ -231,17 +231,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8530265}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
---- !u!114 &10355537 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 4254180087099713556, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
-  m_PrefabInstance: {fileID: 1705644757122319326}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
 --- !u!1 &13632773
 GameObject:
   m_ObjectHideFlags: 0
@@ -491,6 +480,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 37435431}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &61114272
 GameObject:
   m_ObjectHideFlags: 0
@@ -696,7 +687,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -758,10 +749,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 85698905}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 652889645}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &88527882
 GameObject:
   m_ObjectHideFlags: 0
@@ -967,7 +962,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -1029,10 +1024,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 112416466}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &115047563
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1124,6 +1123,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 115047565}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &151897999
 GameObject:
   m_ObjectHideFlags: 0
@@ -1184,7 +1185,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -1246,10 +1247,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 151897999}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 652889645}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &154984610
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1490,6 +1495,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 211711868}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1001 &222969840
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1577,6 +1584,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 222969842}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &239252044
 GameObject:
   m_ObjectHideFlags: 0
@@ -1637,7 +1646,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -1699,10 +1708,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 239252044}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &253245768
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1753,7 +1766,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 2545519900125239685, guid: 024e1d66df65fd14cb67d0b55a249709, type: 3}
       propertyPath: minKillEnergyFraction
-      value: 0.8
+      value: 0.4
       objectReference: {fileID: 0}
     - target: {fileID: 4929895264920863702, guid: 024e1d66df65fd14cb67d0b55a249709, type: 3}
       propertyPath: m_Name
@@ -1789,11 +1802,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4bb85edb745e7824fb295a2af95e7e9d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.EnergyRequirement
-  requirementPercent: 80
+  requirementPercent: 40
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 253245770}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &254650961
 GameObject:
   m_ObjectHideFlags: 0
@@ -1854,7 +1869,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -1916,10 +1931,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 254650961}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &265204942
 GameObject:
   m_ObjectHideFlags: 0
@@ -1980,7 +1999,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -2042,10 +2061,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 265204942}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 652889645}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &280265656
 GameObject:
   m_ObjectHideFlags: 0
@@ -2137,7 +2160,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -2199,10 +2222,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 287379829}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &305680348
 GameObject:
   m_ObjectHideFlags: 0
@@ -2438,7 +2465,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -2500,10 +2527,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 355259984}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &359498380
 GameObject:
   m_ObjectHideFlags: 0
@@ -2742,6 +2773,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 363222345}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &368315525
 GameObject:
   m_ObjectHideFlags: 0
@@ -2962,7 +2995,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -3024,10 +3057,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 409453701}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 652889645}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &410385693
 GameObject:
   m_ObjectHideFlags: 0
@@ -3185,7 +3222,7 @@ GameObject:
   - component: {fileID: 413818779}
   - component: {fileID: 413818778}
   - component: {fileID: 413818777}
-  - component: {fileID: 413818776}
+  - component: {fileID: 413818781}
   m_Layer: 0
   m_Name: DamageShell_1P
   m_TagString: Untagged
@@ -3193,19 +3230,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &413818776
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 413818775}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 652889645}
 --- !u!23 &413818777
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -3231,7 +3255,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -3299,6 +3323,23 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1657612235}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &413818781
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 413818775}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &431391795
 GameObject:
   m_ObjectHideFlags: 0
@@ -3523,6 +3564,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 436884721}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &448985954
 GameObject:
   m_ObjectHideFlags: 0
@@ -3583,7 +3626,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -3645,10 +3688,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 448985954}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &463638634
 GameObject:
   m_ObjectHideFlags: 0
@@ -4229,7 +4276,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -4291,10 +4338,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 536038956}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &548912274
 GameObject:
   m_ObjectHideFlags: 0
@@ -4438,6 +4489,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 556159084}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &593743014
 GameObject:
   m_ObjectHideFlags: 0
@@ -4498,7 +4551,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -4560,10 +4613,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 593743014}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &645746552
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -4768,7 +4825,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -4830,10 +4887,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 660035930}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &671955817
 GameObject:
   m_ObjectHideFlags: 0
@@ -4894,7 +4955,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -4956,10 +5017,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 671955817}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &688156287
 GameObject:
   m_ObjectHideFlags: 0
@@ -5099,7 +5164,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -5161,10 +5226,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 694227193}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &702586130
 GameObject:
   m_ObjectHideFlags: 0
@@ -5225,7 +5294,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -5287,10 +5356,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 702586130}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &731370352
 GameObject:
   m_ObjectHideFlags: 0
@@ -5351,7 +5424,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -5413,10 +5486,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 731370352}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 652889645}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &769380486
 GameObject:
   m_ObjectHideFlags: 0
@@ -5477,7 +5554,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -5539,10 +5616,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 769380486}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &798814067
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -6151,7 +6232,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -6213,10 +6294,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 841619275}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &853305663
 GameObject:
   m_ObjectHideFlags: 0
@@ -6522,7 +6607,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -6584,10 +6669,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 856791146}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 652889645}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &861374169
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -6844,7 +6933,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -6906,10 +6995,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 878743373}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &964986931
 GameObject:
   m_ObjectHideFlags: 0
@@ -7504,6 +7597,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 1048913791}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &1059980512
 GameObject:
   m_ObjectHideFlags: 0
@@ -7564,7 +7659,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -7626,10 +7721,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1059980512}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1073354829
 GameObject:
   m_ObjectHideFlags: 0
@@ -7690,7 +7789,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -7752,10 +7851,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1073354829}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1082916896
 GameObject:
   m_ObjectHideFlags: 0
@@ -7933,7 +8036,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 2545519900125239685, guid: 024e1d66df65fd14cb67d0b55a249709, type: 3}
       propertyPath: minKillEnergyFraction
-      value: 0.8
+      value: 0.4
       objectReference: {fileID: 0}
     - target: {fileID: 4929895264920863702, guid: 024e1d66df65fd14cb67d0b55a249709, type: 3}
       propertyPath: m_Name
@@ -7969,11 +8072,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4bb85edb745e7824fb295a2af95e7e9d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.EnergyRequirement
-  requirementPercent: 80
+  requirementPercent: 40
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 1109618773}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &1113005917
 GameObject:
   m_ObjectHideFlags: 0
@@ -8342,61 +8447,61 @@ MonoBehaviour:
   - label: 7 - Flying enemies
     spawnPoint: {fileID: 1724729917}
   hazards:
-  - {fileID: 694227198}
-  - {fileID: 1975706712}
-  - {fileID: 1427246735}
-  - {fileID: 1445751004}
-  - {fileID: 1984598988}
-  - {fileID: 1300004245}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
   - {fileID: 338313856}
-  - {fileID: 671955822}
-  - {fileID: 1383823102}
-  - {fileID: 1512451260}
-  - {fileID: 1980350959}
-  - {fileID: 355259989}
-  - {fileID: 1660186069}
-  - {fileID: 287379834}
-  - {fileID: 2002284342}
-  - {fileID: 254650966}
-  - {fileID: 409453706}
-  - {fileID: 413818776}
-  - {fileID: 151898004}
-  - {fileID: 85698910}
-  - {fileID: 1073354834}
-  - {fileID: 660035935}
-  - {fileID: 1209586625}
-  - {fileID: 702586135}
-  - {fileID: 1966859996}
-  - {fileID: 10355537}
-  - {fileID: 1059980517}
-  - {fileID: 239252049}
-  - {fileID: 1133848334}
-  - {fileID: 1510976989}
-  - {fileID: 593743019}
-  - {fileID: 1446442936}
-  - {fileID: 1140314805}
-  - {fileID: 841619280}
-  - {fileID: 112416471}
-  - {fileID: 769380491}
-  - {fileID: 878743378}
-  - {fileID: 1207960978}
-  - {fileID: 1376968238}
-  - {fileID: 731370357}
-  - {fileID: 1256482028}
-  - {fileID: 536038961}
-  - {fileID: 1181101469}
-  - {fileID: 2064216750}
-  - {fileID: 1260623468}
-  - {fileID: 1732370058}
-  - {fileID: 448985959}
-  - {fileID: 265204947}
-  - {fileID: 1680983680}
-  - {fileID: 1709861335}
-  - {fileID: 2112756967}
-  - {fileID: 1627707859}
-  - {fileID: 856791151}
-  - {fileID: 1773365669}
-  - {fileID: 1675906524}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
   startingSection: 0
 --- !u!4 &1132250275
 Transform:
@@ -8473,7 +8578,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -8535,10 +8640,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1133848329}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1137445125
 GameObject:
   m_ObjectHideFlags: 0
@@ -8744,7 +8853,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -8806,10 +8915,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1140314800}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1181101464
 GameObject:
   m_ObjectHideFlags: 0
@@ -8870,7 +8983,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -8932,10 +9045,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1181101464}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1207960973
 GameObject:
   m_ObjectHideFlags: 0
@@ -8996,7 +9113,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -9058,10 +9175,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1207960973}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1209586620
 GameObject:
   m_ObjectHideFlags: 0
@@ -9122,7 +9243,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -9184,10 +9305,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1209586620}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1222165656
 GameObject:
   m_ObjectHideFlags: 0
@@ -9775,17 +9900,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1243782336}
   m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
---- !u!114 &1256482028 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 680065814260410395, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
-  m_PrefabInstance: {fileID: 1705644757122319326}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
 --- !u!1 &1260623463
 GameObject:
   m_ObjectHideFlags: 0
@@ -9846,7 +9960,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -9908,10 +10022,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1260623463}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &1297155053
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -10024,6 +10142,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 1297155055}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &1300004240
 GameObject:
   m_ObjectHideFlags: 0
@@ -10084,7 +10204,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -10146,10 +10266,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1300004240}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &1337861636
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -10791,7 +10915,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -10853,10 +10977,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1376968233}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 652889645}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1383823097
 GameObject:
   m_ObjectHideFlags: 0
@@ -10917,7 +11045,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -10979,10 +11107,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1383823097}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 652889645}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!4 &1390655526 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3346844743383728620, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
@@ -11048,7 +11180,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -11110,10 +11242,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1427246730}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1445750999
 GameObject:
   m_ObjectHideFlags: 0
@@ -11174,7 +11310,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -11236,10 +11372,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1445750999}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1446442931
 GameObject:
   m_ObjectHideFlags: 0
@@ -11300,7 +11440,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -11362,10 +11502,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1446442931}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 652889645}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1457202608
 GameObject:
   m_ObjectHideFlags: 0
@@ -11855,7 +11999,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -11917,10 +12061,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1510976984}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1512451255
 GameObject:
   m_ObjectHideFlags: 0
@@ -11981,7 +12129,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -12043,10 +12191,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1512451255}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1519307346
 GameObject:
   m_ObjectHideFlags: 0
@@ -12431,7 +12583,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -12493,10 +12645,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1627707854}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1651834358
 GameObject:
   m_ObjectHideFlags: 0
@@ -12800,7 +12956,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -12862,10 +13018,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1660186064}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1668980948
 GameObject:
   m_ObjectHideFlags: 0
@@ -12996,17 +13156,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.StickySurface
   sticky: 0
---- !u!114 &1675906524 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 6167466269769339709, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
-  m_PrefabInstance: {fileID: 1705644757122319326}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
 --- !u!1001 &1680695752
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -13119,6 +13268,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 1680695754}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &1680983675
 GameObject:
   m_ObjectHideFlags: 0
@@ -13179,7 +13330,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -13241,10 +13392,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1680983675}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1690982747
 GameObject:
   m_ObjectHideFlags: 0
@@ -13466,7 +13621,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -13528,10 +13683,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1709861330}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1713634272
 GameObject:
   m_ObjectHideFlags: 0
@@ -14074,7 +14233,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -14136,10 +14295,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1732370053}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1765021168
 GameObject:
   m_ObjectHideFlags: 0
@@ -14183,7 +14346,7 @@ GameObject:
   - component: {fileID: 1773365672}
   - component: {fileID: 1773365671}
   - component: {fileID: 1773365670}
-  - component: {fileID: 1773365669}
+  - component: {fileID: 1773365674}
   m_Layer: 0
   m_Name: DamageShell_Edge0P
   m_TagString: Untagged
@@ -14191,19 +14354,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1773365669
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1773365668}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
 --- !u!23 &1773365670
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -14229,7 +14379,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -14297,6 +14447,23 @@ Transform:
   m_Children: []
   m_Father: {fileID: 861374170}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1773365674
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1773365668}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1776664523
 GameObject:
   m_ObjectHideFlags: 0
@@ -14629,6 +14796,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 1812660444}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1001 &1823251933
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -14720,6 +14889,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 1823251935}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &1827444431
 GameObject:
   m_ObjectHideFlags: 0
@@ -15316,7 +15487,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -15378,10 +15549,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1966859991}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1975706707
 GameObject:
   m_ObjectHideFlags: 0
@@ -15442,7 +15617,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -15504,10 +15679,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1975706707}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1980350954
 GameObject:
   m_ObjectHideFlags: 0
@@ -15568,7 +15747,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -15630,10 +15809,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1980350954}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &1984598983
 GameObject:
   m_ObjectHideFlags: 0
@@ -15694,7 +15877,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -15756,21 +15939,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 1984598983}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
---- !u!114 &2002284342 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 4199413445946578846, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
-  m_PrefabInstance: {fileID: 1705644757122319326}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1 &2031075675
 GameObject:
   m_ObjectHideFlags: 0
@@ -15964,7 +16140,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -16026,10 +16202,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 2064216745}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &2090753727
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -16142,6 +16322,8 @@ MonoBehaviour:
   targetRenderer: {fileID: 2090753729}
   buildTickMarks: 1
   tickHeight: 0.35
+  showPercentLabel: 1
+  labelRise: 0.42
 --- !u!1 &2107311544
 GameObject:
   m_ObjectHideFlags: 0
@@ -16328,7 +16510,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 15dcc43e4c6579345b9415d130d43c81, type: 2}
+  - {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -16390,10 +16572,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 2112756962}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ecc3349ff257d04faa7abc7bb5276c5, type: 3}
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.DamageWalls
-  respawnPoint: {fileID: 548912275}
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &1705644757122319326
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -16410,6 +16596,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: SpinWall1
       objectReference: {fileID: 0}
+    - target: {fileID: 3193041547062044951, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
     - target: {fileID: 3346844743383728620, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
       propertyPath: m_LocalPosition.x
       value: 246.99208
@@ -16450,6 +16640,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 3591424918104036817, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
     - target: {fileID: 4199413445946578846, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
       propertyPath: respawnPoint
       value: 
@@ -16462,11 +16656,123 @@ PrefabInstance:
       propertyPath: respawnPoint
       value: 
       objectReference: {fileID: 548912275}
-    m_RemovedComponents: []
+    - target: {fileID: 7400669376603757535, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
+    - target: {fileID: 8089127788693619078, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 40972f7fc5469e0468cdac937a54a8f9, type: 2}
+    m_RemovedComponents:
+    - {fileID: 680065814260410395, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+    - {fileID: 6167466269769339709, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+    - {fileID: 4254180087099713556, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+    - {fileID: 4199413445946578846, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 5827113745321105796, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1705644757122319334}
+    - targetCorrespondingSourceObject: {fileID: 2225026553347365318, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1705644757122319333}
+    - targetCorrespondingSourceObject: {fileID: 5283687311163360315, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1705644757122319332}
+    - targetCorrespondingSourceObject: {fileID: 8382081976772317976, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1705644757122319331}
   m_SourcePrefab: {fileID: 100100000, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+--- !u!1 &1705644757122319327 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 8382081976772317976, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+  m_PrefabInstance: {fileID: 1705644757122319326}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &1705644757122319328 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 5283687311163360315, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+  m_PrefabInstance: {fileID: 1705644757122319326}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &1705644757122319329 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 2225026553347365318, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+  m_PrefabInstance: {fileID: 1705644757122319326}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &1705644757122319330 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 5827113745321105796, guid: 2502efb08b84ba74c9daf23248455869, type: 3}
+  m_PrefabInstance: {fileID: 1705644757122319326}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &1705644757122319331
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1705644757122319327}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
+--- !u!114 &1705644757122319332
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1705644757122319328}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
+--- !u!114 &1705644757122319333
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1705644757122319329}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
+--- !u!114 &1705644757122319334
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1705644757122319330}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b9cc8d295de0994f8de9c9715cb4884, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.LaserHazard
+  knockbackForce: 16.5
+  energyDrain: 0.1
+  launchLockSeconds: 0.5
+  retriggerDelay: 0.6
+  upwardBias: 0.35
 --- !u!1001 &3630934622718649233
 PrefabInstance:
   m_ObjectHideFlags: 0

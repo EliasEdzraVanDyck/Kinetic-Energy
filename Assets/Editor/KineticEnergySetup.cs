@@ -3150,6 +3150,137 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
+        // Ridge tuning, matched to the laser gates so the two hazards teach one lesson.
+        static void AddRidgeHazard(GameObject slab)
+        {
+            DamageWalls lethal = slab.GetComponent<DamageWalls>();
+            if (lethal != null) UnityEngine.Object.DestroyImmediate(lethal);
+
+            LaserHazard hazard = slab.GetComponent<LaserHazard>();
+            if (hazard == null) hazard = slab.AddComponent<LaserHazard>();
+            hazard.knockbackForce = 16.5f;
+            hazard.energyDrain = 0.1f;
+            hazard.launchLockSeconds = 0.5f;
+            hazard.retriggerDelay = 0.6f;
+            hazard.upwardBias = 0.35f;
+        }
+
+        // One hazard, one look: the ridges and the laser beams now behave identically
+        // (LaserHazard), so they share the beams' material outright - and that shared
+        // material is ORANGE. Also drops the turret price to 40% and re-stamps the band
+        // palette asset, whose serialized colours predate the brightness pull-down.
+        [MenuItem("Tools/Kinetic Energy/Retune Hazards And Bands")]
+        public static void RetuneHazardsAndBands()
+        {
+            // The shared hazard colour. Editing this material IS the intent here - it is
+            // what both hazards wear - so the never-overwrite rule does not apply.
+            Material beam = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/LaserBeamMaterial.mat");
+            if (beam != null)
+            {
+                beam.color = new Color(0.95f, 0.42f, 0.08f);
+                EditorUtility.SetDirty(beam);
+            }
+            else Debug.LogWarning("KineticEnergySetup: LaserBeamMaterial missing - shells cannot share it.");
+
+            // The band palette asset holds its own copy of the ramp, so the dimmed bands 4
+            // and 5 have to be written to it, not just to the class defaults.
+            EnergyBandPalette palette = EnsureBandPalette();
+            EnergyBandPalette defaults = ScriptableObject.CreateInstance<EnergyBandPalette>();
+            palette.bands = defaults.bands;
+            UnityEngine.Object.DestroyImmediate(defaults);
+            EditorUtility.SetDirty(palette);
+
+            string[] scenes =
+            {
+                "Assets/Scenes/LevelElementsTest3.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            };
+
+            foreach (string scenePath in scenes)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                int shells = 0;
+                foreach (Transform t in UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (!t.name.StartsWith("DamageShell")) continue;
+                    Renderer renderer = t.GetComponent<Renderer>();
+                    if (renderer != null && beam != null)
+                    {
+                        renderer.sharedMaterial = beam;
+                        EditorUtility.SetDirty(t.gameObject);
+                        shells++;
+                    }
+                }
+
+                // Turrets drop from 80% to 40% - both the gate that decides the kill and
+                // the requirement that advertises it, or the object would lie about itself.
+                int turrets = 0;
+                foreach (TurretEnemy turret in UnityEngine.Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    turret.minKillEnergyFraction = 0.4f;
+                    EditorUtility.SetDirty(turret);
+                    EnergyRequirement requirement = turret.GetComponent<EnergyRequirement>();
+                    if (requirement != null)
+                    {
+                        requirement.requirementPercent = 40;
+                        EditorUtility.SetDirty(requirement);
+                    }
+                    turrets++;
+                }
+
+                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: " + scenePath + " - " + shells + " shells on beam material, " + turrets + " turrets at 40%");
+            }
+            AssetDatabase.SaveAssets();
+
+            // The ridge material this replaces is now unreferenced.
+            AssetDatabase.DeleteAsset(MaterialFolder + "/DamageRidgeMaterial.mat");
+        }
+
+        // Converts the ridges already standing in a scene: they were built lethal, and the
+        // rim of a platform should cost you a bite of tank rather than the run. Also gives
+        // them their own material - with the hazard shader flattened to Unlit, the floor
+        // and the ridges had nothing but lighting to tell them apart, and unlit surfaces
+        // have no lighting. Separation is now in the colour itself.
+        [MenuItem("Tools/Kinetic Energy/Retune Damage Ridges")]
+        public static void RetuneDamageRidges()
+        {
+            // The ridges wear the LASER's material: one behaviour, one look. Its orange
+            // also keeps them clear of the damage floor's deep 0.535,0.148,0.133 red.
+            Material ridgeMaterial = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/LaserBeamMaterial.mat");
+
+            string[] scenes =
+            {
+                "Assets/Scenes/LevelElementsTest3.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            };
+
+            foreach (string scenePath in scenes)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                int converted = 0;
+                foreach (Transform t in UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (!t.name.StartsWith("DamageShell")) continue;
+                    AddRidgeHazard(t.gameObject);
+                    Renderer renderer = t.GetComponent<Renderer>();
+                    if (renderer != null) renderer.sharedMaterial = ridgeMaterial;
+                    EditorUtility.SetDirty(t.gameObject);
+                    converted++;
+                }
+
+                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: " + scenePath + " - " + converted + " damage ridges retuned OK");
+            }
+            AssetDatabase.SaveAssets();
+        }
+
         static void CreateDamageSlab(Transform parent, string name, Vector3 localPosition, Vector3 localScale, Transform respawnPoint, Material material)
         {
             GameObject slab = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -3161,10 +3292,13 @@ namespace KineticEnergy.EditorSetup
             slab.GetComponent<Renderer>().sharedMaterial = material;
             // SOLID, not a trigger: the aim preview only mirrors solid geometry, so a
             // trigger shell would be invisible to the landing prediction and the cursor
-            // would read a lethal face as a safe green landing.
+            // would read a hazardous face as a safe green landing.
             slab.GetComponent<BoxCollider>().isTrigger = false;
-            DamageWalls damage = slab.AddComponent<DamageWalls>();
-            damage.respawnPoint = respawnPoint;
+            // Ridges HURT, they do not kill: the same bargain the laser gates make - a
+            // mistimed run costs a chunk of tank and your position, not the whole attempt.
+            // The damage FLOOR keeps DamageWalls; clipping a platform's rim should not read
+            // the same as falling out of the level.
+            AddRidgeHazard(slab);
             EditorUtility.SetDirty(slab);
         }
 

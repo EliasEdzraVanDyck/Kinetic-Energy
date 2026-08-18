@@ -36,8 +36,11 @@ namespace KineticEnergy.Level
             new Band { name = "ember",         minPercent = 0,  maxPercent = 19,  baseColor = new Color(1f, 0.420f, 0.169f), emissionIntensity = 1.0f }, // #FF6B2B
             new Band { name = "amber",         minPercent = 20, maxPercent = 39,  baseColor = new Color(1f, 0.584f, 0f),     emissionIntensity = 2.0f }, // #FF9500
             new Band { name = "golden yellow", minPercent = 40, maxPercent = 59,  baseColor = new Color(1f, 0.800f, 0.122f), emissionIntensity = 3.5f }, // #FFCC1F
-            new Band { name = "pale gold",     minPercent = 60, maxPercent = 79,  baseColor = new Color(1f, 0.914f, 0.659f), emissionIntensity = 5.5f }, // #FFE9A8
-            new Band { name = "white-hot",     minPercent = 80, maxPercent = 100, baseColor = Color.white,                   emissionIntensity = 9.0f }, // #FFFFFF
+            // Bands 4 and 5 pulled DOWN from #FFE9A8 / pure white - at full brightness they
+            // glared against everything else on screen. Lightness still climbs across all
+            // five (0.78 -> 0.85 -> 0.94), which is the ordering the whole ramp rests on.
+            new Band { name = "pale gold",     minPercent = 60, maxPercent = 79,  baseColor = new Color(0.949f, 0.851f, 0.561f), emissionIntensity = 5.5f }, // #F2D98F
+            new Band { name = "white-hot",     minPercent = 80, maxPercent = 100, baseColor = new Color(1f, 0.941f, 0.800f),     emissionIntensity = 9.0f }, // #FFF0CC
         };
 
         // THE one lookup, used by the meter and the interactables alike so the two can
