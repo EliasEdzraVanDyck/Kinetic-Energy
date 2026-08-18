@@ -2288,6 +2288,27 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Checkpoint button prefab updated in place OK");
         }
 
+        // The turret's flash colour is serialized on its prefab from an older build, so a
+        // code default cannot reach it - written here to the ground hunter's warning yellow.
+        [MenuItem("Tools/Kinetic Energy/Match Turret Telegraph To Hunter")]
+        public static void MatchTurretTelegraphToHunter()
+        {
+            string path = PrefabFolder + "/TurretEnemy.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(path);
+            try
+            {
+                TurretEnemy turret = root.GetComponent<TurretEnemy>();
+                if (turret == null) throw new Exception("KineticEnergySetup: TurretEnemy prefab has no TurretEnemy component.");
+                turret.windUpColor = new Color(1f, 0.93f, 0.32f);
+                turret.pulseSpeed = 6f;
+                EditorUtility.SetDirty(turret);
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: turret telegraph matched to the hunter OK");
+        }
+
         // Tunes the weak-spot flyer's posture and turning. COMPONENT VALUES ONLY - the
         // model (the body, and the hand-placed weak spot on it) is not touched: the hunch
         // is a rotation the flyer holds while flying, not a change to how it is built.
@@ -2313,6 +2334,14 @@ namespace KineticEnergy.EditorSetup
                 flyer.avoidObstacles = true;
                 flyer.obstacleClearance = 3.5f;
                 EditorUtility.SetDirty(flyer);
+
+                // A slower, steadier beacon - this tell never switches off, so a quick
+                // flicker reads as noise rather than as "aim here".
+                if (flyer is WeakSpotFlyingEnemy weakSpotFlyer)
+                {
+                    weakSpotFlyer.pulseSpeed = 1.6f;
+                    EditorUtility.SetDirty(weakSpotFlyer);
+                }
 
                 PrefabUtility.SaveAsPrefabAsset(root, path);
             }

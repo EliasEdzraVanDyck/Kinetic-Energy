@@ -13,11 +13,18 @@ namespace KineticEnergy.Level
         [Header("Attack")]
         [Tooltip("The player inside this range (any direction) triggers a shot.")]
         public float detectionRadius = 26f;
-        [Tooltip("Seconds of warning flash before the shot fires.")]
+        [Tooltip("Seconds of warning flash before the burst starts.")]
         public float windUpSeconds = 0.7f;
-        [Tooltip("Cooldown between shots, in world-motion seconds.")]
+        [Tooltip("Shots fired per burst.")]
+        public int shotsPerBurst = 3;
+        [Tooltip("Seconds from the FIRST shot of a burst to the last. The shots are spread evenly across it, so raising the shot count packs them tighter rather than lengthening the burst.")]
+        public float burstSeconds = 0.6f;
+        [Tooltip("Cooldown after a whole burst, in world-motion seconds.")]
         public float attackCooldown = 2.2f;
-        public Color windUpColor = new Color(1f, 0.35f, 0.1f); // same flash as the ground enemy
+        [Tooltip("Colour flashed during the windup - the ground hunter's warning yellow, so an incoming attack reads the same whatever is firing it.")]
+        public Color windUpColor = new Color(1f, 0.93f, 0.32f);
+        [Tooltip("Pulses per second of the windup flash. Matches the ground hunter's rate: a turret has no vulnerable state to signal, so this flash means one thing only - an attack is coming.")]
+        public float pulseSpeed = 6f;
 
         [Header("Projectile")]
         public float projectileSpeed = 26f;
@@ -36,6 +43,9 @@ namespace KineticEnergy.Level
         Color restColor;
 
         bool windingUp;
+        bool bursting;
+        int shotsLeftInBurst;
+        float nextShotTimer;
         float stateTimer;
         float cooldownRemaining;
 
@@ -52,6 +62,16 @@ namespace KineticEnergy.Level
             float dt = WorldMotionTime.FixedDeltaTime;
             if (cooldownRemaining > 0f) cooldownRemaining -= dt;
 
+            // Mid-burst: the shots walk out on their own spacing. The colour is held SOLID
+            // rather than flashing - exactly as the hunter goes solid once it commits.
+            // Blinking is the warning; once the shots are leaving, the warning is over.
+            if (bursting)
+            {
+                nextShotTimer -= dt;
+                if (nextShotTimer <= 0f) FireOneShot();
+                return;
+            }
+
             if (!windingUp)
             {
                 if (cooldownRemaining <= 0f && PlayerInRange())
@@ -63,12 +83,46 @@ namespace KineticEnergy.Level
             }
 
             stateTimer -= dt;
-            if (bodyRenderer != null)
+            FlashWarning();
+            if (stateTimer <= 0f) BeginBurst();
+        }
+
+        void FlashWarning()
+        {
+            if (bodyRenderer == null) return;
+            float blink = Mathf.PingPong(Time.unscaledTime * pulseSpeed, 1f);
+            bodyRenderer.material.color = Color.Lerp(restColor, windUpColor, blink);
+        }
+
+        void BeginBurst()
+        {
+            windingUp = false;
+            bursting = true;
+            if (bodyRenderer != null) bodyRenderer.material.color = windUpColor; // committed - held solid
+            shotsLeftInBurst = Mathf.Max(shotsPerBurst, 1);
+            nextShotTimer = 0f; // the first shot leaves the instant the windup ends
+        }
+
+        // Spacing is derived so the whole burst spans burstSeconds however many shots it
+        // holds - a single-shot burst has nothing to space and simply fires.
+        float BurstShotInterval => shotsPerBurst > 1
+            ? Mathf.Max(burstSeconds, 0f) / (shotsPerBurst - 1)
+            : 0f;
+
+        void FireOneShot()
+        {
+            Fire();
+            shotsLeftInBurst--;
+            if (shotsLeftInBurst > 0)
             {
-                float blink = Mathf.PingPong(Time.unscaledTime * 7f, 1f);
-                bodyRenderer.material.color = Color.Lerp(restColor, windUpColor, blink);
+                nextShotTimer = BurstShotInterval;
+                return;
             }
-            if (stateTimer <= 0f) Fire();
+
+            // Burst spent - back to rest, and the cooldown covers the whole volley.
+            bursting = false;
+            cooldownRemaining = attackCooldown;
+            if (bodyRenderer != null) bodyRenderer.material.color = restColor;
         }
 
         bool PlayerInRange()
@@ -77,11 +131,10 @@ namespace KineticEnergy.Level
             return (player.transform.position - transform.position).sqrMagnitude <= detectionRadius * detectionRadius;
         }
 
+        // Launches ONE projectile and nothing else - ending the attack and starting the
+        // cooldown belong to the burst, which only finishes on its last shot.
         void Fire()
         {
-            windingUp = false;
-            cooldownRemaining = attackCooldown;
-            if (bodyRenderer != null) bodyRenderer.material.color = restColor;
             if (player == null) return;
 
             Vector3 intercept = EnemyProjectile.PredictIntercept(transform.position, player, playerBody, projectileSpeed);
@@ -103,6 +156,9 @@ namespace KineticEnergy.Level
         public void ResetToSpawn()
         {
             windingUp = false;
+            bursting = false;
+            shotsLeftInBurst = 0;
+            nextShotTimer = 0f;
             stateTimer = 0f;
             cooldownRemaining = 0f;
             if (bodyRenderer != null) bodyRenderer.material.color = restColor;

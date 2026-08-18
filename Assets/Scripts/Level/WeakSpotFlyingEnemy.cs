@@ -15,8 +15,8 @@ namespace KineticEnergy.Level
         // though: a pulse toward white says "this is what you hit".
         [Tooltip("Colour the weak spot pulses toward, so it reads as the vulnerable part at a glance.")]
         public Color pulseColor = Color.white;
-        [Tooltip("Pulses per second of the weak spot's tell.")]
-        public float pulseSpeed = 2.5f;
+        [Tooltip("Pulses per second of the weak spot's tell. Slower than the hunter's body pulse - this one never stops, so it reads as a steady beacon rather than an urgent flicker.")]
+        public float pulseSpeed = 1.6f;
         [Tooltip("How far toward the pulse colour it travels (0 = no tell, 1 = fully white at the peak).")]
         [Range(0f, 1f)] public float pulseAmount = 0.45f;
 
