@@ -17,8 +17,8 @@ namespace KineticEnergy.Level
         public EnergyTierPalette palette;
         [Tooltip("The renderer that shows the tier (an enemy body, the weak spot, a checkpoint button). Empty = this object's own renderer.")]
         public Renderer targetRenderer;
-        [Tooltip("Build the row of tick marks above the object - one mark per 20% - so the requirement can be COUNTED, not just colour-matched.")]
-        public bool buildTickMarks = true;
+        [Tooltip("Build a row of small cubes above the object - one per 20% - so the requirement can be COUNTED rather than only colour-matched. OFF by default: the floating row reads as clutter in the world. The meter's own tick carries the same information.")]
+        public bool buildTickMarks = false;
         [Tooltip("World metres between the target's top and the tick row.")]
         public float tickHeight = 0.35f;
 
@@ -28,6 +28,12 @@ namespace KineticEnergy.Level
         EnergyTierPalette.Tier tier;
         Material emissiveMaterial;
         Transform tickRoot;
+        // Set only for enemies that HAVE a kill window. The tier glow is then gated on it:
+        // the colour means "punishable right now", not "this thing costs 60%". Turrets and
+        // weak-spot flyers leave this null - they are punishable whenever you can reach
+        // them, so their tier never switches off.
+        Enemy vulnerabilityGate;
+        bool emissionLit;
 
         void Start()
         {
@@ -41,7 +47,13 @@ namespace KineticEnergy.Level
             // Component hooks first: these repaint through their own colour logic, so the
             // tier survives their per-tick colour writes.
             Enemy enemy = GetComponent<Enemy>();
-            if (enemy != null) enemy.vulnerableColor = tier.baseColor;
+            if (enemy != null)
+            {
+                enemy.vulnerableColor = tier.baseColor;
+                // A plain Always-window enemy is punishable whenever you reach it, so it
+                // needs no gate; the hunter windows do.
+                if (enemy.killWindow != EnemyKillWindow.Always) vulnerabilityGate = enemy;
+            }
             WeakSpotFlyingEnemy weakSpotFlyer = GetComponent<WeakSpotFlyingEnemy>();
             if (weakSpotFlyer != null) weakSpotFlyer.SetSpotTier(tier.baseColor);
             TurretEnemy turret = GetComponent<TurretEnemy>();
@@ -56,6 +68,7 @@ namespace KineticEnergy.Level
                 emissiveMaterial = targetRenderer.material;
                 emissiveMaterial.EnableKeyword("_EMISSION");
                 emissiveMaterial.SetColor("_EmissionColor", tier.baseColor * tier.emissionIntensity);
+                emissionLit = true;
             }
 
             if (buildTickMarks) BuildTickMarks();
@@ -63,9 +76,26 @@ namespace KineticEnergy.Level
 
         void Update()
         {
+            if (tier == null || emissiveMaterial == null) return;
+
+            // The glow IS the kill window on gated enemies. Outside it the body is plain
+            // red and unlit - so the tier colour never doubles as a nameplate, and lighting
+            // up is itself the tell that the enemy can be taken right now.
+            if (vulnerabilityGate != null)
+            {
+                bool lit = vulnerabilityGate.CanBeKilledByLaunch;
+                if (lit != emissionLit)
+                {
+                    emissionLit = lit;
+                    emissiveMaterial.SetColor("_EmissionColor",
+                        lit ? tier.baseColor * tier.emissionIntensity : Color.black);
+                }
+                if (!lit) return;
+            }
+
             // Only the TOP tier animates: a slow breath between its own glow and a
             // white-hot core - the one moving light in the scene reads at any distance.
-            if (tier == null || !tier.pulses || emissiveMaterial == null) return;
+            if (!tier.pulses) return;
             float wave = (Mathf.Sin(Time.unscaledTime * 2f) + 1f) * 0.5f;
             Color core = Color.Lerp(tier.baseColor, Color.white, wave * 0.7f);
             emissiveMaterial.SetColor("_EmissionColor", core * (tier.emissionIntensity * (0.8f + 0.4f * wave)));

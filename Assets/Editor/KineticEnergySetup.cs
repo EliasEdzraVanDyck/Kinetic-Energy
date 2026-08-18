@@ -2288,6 +2288,96 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Checkpoint button prefab updated in place OK");
         }
 
+        // The floating cube rows above each interactable read as clutter in the world -
+        // switched off on the instances that already have them serialized on.
+        [MenuItem("Tools/Kinetic Energy/Clear Requirement Tick Marks")]
+        public static void ClearRequirementTickMarks()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest3.unity", OpenSceneMode.Single);
+            int cleared = 0;
+            foreach (EnergyRequirement requirement in UnityEngine.Object.FindObjectsByType<EnergyRequirement>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (!requirement.buildTickMarks) continue;
+                requirement.buildTickMarks = false;
+                EditorUtility.SetDirty(requirement);
+                cleared++;
+            }
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+            EditorSceneManager.SaveOpenScenes();
+            Debug.Log("KineticEnergySetup: requirement tick marks cleared OK (" + cleared + " objects)");
+        }
+
+        // Hands the meter the tier palette, so the fill can report which 20% band the tank
+        // is in. Touches nothing else on the meter.
+        [MenuItem("Tools/Kinetic Energy/Wire Meter Tier Palette")]
+        public static void WireMeterTierPalette()
+        {
+            EnergyTierPalette palette = EnsureTierPalette();
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest3.unity", OpenSceneMode.Single);
+
+            int wired = 0;
+            KineticCubeController player = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>();
+            if (player != null && player.energyMeter != null)
+            {
+                player.energyMeter.tierPalette = palette;
+                EditorUtility.SetDirty(player.energyMeter);
+                wired++;
+            }
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+            EditorSceneManager.SaveOpenScenes();
+            Debug.Log("KineticEnergySetup: meter tier palette wired OK (" + wired + ")");
+        }
+
+        // Diagnostic: what the player's meter ACTUALLY looks like - which variant, how the
+        // blocks are split, and what span the economy thinks the main bar covers.
+        [MenuItem("Tools/Kinetic Energy/Validate Meter Geometry")]
+        public static void ValidateMeterGeometry()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest3.unity", OpenSceneMode.Single);
+
+            KineticCubeController player = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>();
+            if (player == null || player.energyMeter == null)
+            {
+                Debug.Log("METERCHECK no player or no energyMeter reference");
+                return;
+            }
+
+            EnergyMeterController meter = player.energyMeter;
+            Debug.Log("METERCHECK meterObject=" + meter.gameObject.name);
+
+            RectTransform body = meter.transform.Find("Body") as RectTransform;
+            if (body != null)
+            {
+                Debug.Log("METERCHECK body width=" + body.sizeDelta.x + " height=" + body.sizeDelta.y);
+                int activeDividers = 0;
+                Transform dividers = body.Find("MeterDividers");
+                if (dividers != null)
+                {
+                    foreach (Transform d in dividers)
+                    {
+                        if (d.gameObject.activeSelf) activeDividers++;
+                    }
+                }
+                Debug.Log("METERCHECK activeMainDividers=" + activeDividers + " (blocks=" + (activeDividers + 1) + ")");
+
+                RectTransform zone = body.Find("PremiumZone") as RectTransform;
+                if (zone == null) Debug.Log("METERCHECK premiumZone=NONE");
+                else
+                {
+                    int zoneDividers = 0;
+                    foreach (Transform d in zone)
+                    {
+                        if (d.name.StartsWith("PremiumDivider") && d.gameObject.activeSelf) zoneDividers++;
+                    }
+                    Debug.Log("METERCHECK premiumZone width=" + zone.sizeDelta.x + " height=" + zone.sizeDelta.y
+                        + " dividers=" + zoneDividers + " (blocks=" + (zoneDividers + 1) + ")");
+                }
+            }
+
+            MergedEconomyController economy = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>();
+            Debug.Log("METERCHECK economy=" + (economy != null ? economy.name : "NONE"));
+        }
+
         // Diagnostic: reports every energy-tier interactable in LevelElementsTest3.
         [MenuItem("Tools/Kinetic Energy/Validate Energy Tiers")]
         public static void ValidateEnergyTiers()

@@ -86,6 +86,10 @@ namespace KineticEnergy.Level
         public bool returnLaunchToPlatform = false;
         [Tooltip("How far around itself the enemy searches for a platform to return to.")]
         public float platformSearchRadius = 60f;
+        [Tooltip("Hop back to the platform this enemy booted on whenever it ends up standing on a different one. Its patrol is anchored to that platform, so a stray landing elsewhere would otherwise strand it there for the rest of the run.")]
+        public bool returnToHomePlatform = true;
+        [Tooltip("Seconds before another walk-home hop may be attempted, so a launch that falls short cannot spam.")]
+        public float homeLaunchRetrySeconds = 1.5f;
         [Tooltip("HUNTER: hop-dodge sideways when a launching player bears down on it.")]
         public bool dodgePlayerLaunches = false;
         [Tooltip("Outer awareness range - beyond this an incoming player is not considered at all.")]
@@ -125,6 +129,11 @@ namespace KineticEnergy.Level
 
         Vector3 spawnPoint;    // wander centre - re-centres wherever an attack lands
         Vector3 originalSpawn; // the scene position, immutable - respawns always come back here
+        // The platform standing under the enemy at BOOT. Unlike platformBelow (which follows
+        // it to wherever it lands) this never moves, so it stays the answer to "where do I
+        // belong". Null when the enemy booted over open air.
+        Collider homePlatform;
+        float homeLaunchCooldown;
         Collider platformBelow;
         Vector3 currentTarget;
         float pauseRemaining;
@@ -174,6 +183,7 @@ namespace KineticEnergy.Level
             if (Physics.Raycast(transform.position, Vector3.down, out RaycastHit hit, 5f))
             {
                 platformBelow = hit.collider;
+                homePlatform = hit.collider; // where it belongs, fixed for the whole run
             }
 
             PickNewTarget();
@@ -213,6 +223,7 @@ namespace KineticEnergy.Level
             if (cooldownRemaining > 0f) cooldownRemaining -= dt;
             if (dodgeCooldownRemaining > 0f) dodgeCooldownRemaining -= dt;
             if (vulnerableTimer > 0f) vulnerableTimer -= dt;
+            if (homeLaunchCooldown > 0f) homeLaunchCooldown -= dt;
 
             // The cooldown kill-window has a TELL: a soft white pulse for as long as the
             // enemy is punishable (the windup window's tell is the existing orange flash).
@@ -267,6 +278,8 @@ namespace KineticEnergy.Level
                         MoveGrounded(body.position, dt); // gravity settle only, no travel
                         break;
                     }
+                    // Standing on the wrong platform outranks patrolling it: go home first.
+                    if (TryHomePlatformLaunch()) break;
                     if (MoveGrounded(WanderStep(dt), dt)) break;
                     if (cooldownRemaining <= 0f && PlayerIsAttackable()) BeginWindUp();
                     break;
@@ -771,14 +784,21 @@ namespace KineticEnergy.Level
                 return true;
             }
 
-            // Same exact time-solved arc as the attack, with enough apex to clear the ledge.
-            state = EnemyState.Launching;
             returnLaunching = true; // one attempt per fall - the -40 reset is the backstop
+            BeginBallisticHop(best);
+            return true;
+        }
+
+        // The shared arc: a time-solved ballistic hop onto a point, with enough apex to
+        // clear the ledge in between. Used by the void recovery and the walk-home launch.
+        void BeginBallisticHop(Vector3 target)
+        {
+            state = EnemyState.Launching;
             if (bodyRenderer != null) bodyRenderer.material.color = IdleColor;
-            attackTarget = best;
+            attackTarget = target;
             fallVelocity = 0f;
 
-            Vector3 toTarget = best - body.position;
+            Vector3 toTarget = target - body.position;
             Vector3 flat = new Vector3(toTarget.x, 0f, toTarget.z);
             float range = Mathf.Max(flat.magnitude, 0.5f);
             float gravityStrength = Mathf.Abs(Physics.gravity.y);
@@ -790,6 +810,22 @@ namespace KineticEnergy.Level
             flightVelocity = flat / flightTime + Vector3.up * verticalSpeed;
             flightDuration = flightTime;
             flightElapsed = 0f;
+        }
+
+        // Knocked onto SOMEBODY ELSE'S ground - by a dodge, a missed attack, a shove - the
+        // enemy hops back to the platform it booted on. Its patrol belongs to that platform,
+        // so a stray landing elsewhere would otherwise leave it wandering the wrong ledge
+        // for the rest of the run. Only from a settled wander: never mid-attack, and never
+        // while vulnerable, since the punish window must stay a standing target.
+        bool TryHomePlatformLaunch()
+        {
+            if (!returnToHomePlatform || homePlatform == null) return false;
+            if (!groundedSinceSpawn || homeLaunchCooldown > 0f) return false;
+            if (platformBelow == homePlatform) return false;
+
+            homeLaunchCooldown = homeLaunchRetrySeconds;
+            lastFlightWasAttack = false; // a commute earns the player no punish window
+            BeginBallisticHop(originalSpawn);
             return true;
         }
 

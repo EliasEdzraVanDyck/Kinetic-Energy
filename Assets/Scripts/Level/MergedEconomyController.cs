@@ -161,6 +161,10 @@ namespace KineticEnergy.Level
         float windowRemaining;
         bool chainInFlight;
         Transform launchSurface;
+        // Every surface this run has stood on or landed on - see the revisit rule in
+        // OnCrash. Cleared on respawn, so a fresh attempt meets fresh ground.
+        readonly System.Collections.Generic.HashSet<Transform> visitedSurfaces
+            = new System.Collections.Generic.HashSet<Transform>();
 
         // C/D/E flight bookkeeping: the opening launch's spend and the summed midair
         // relaunch spends of the CURRENT flight - the landing pays from both.
@@ -488,6 +492,9 @@ namespace KineticEnergy.Level
                         Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
                 {
                     launchSurface = hit.collider.transform;
+                    // Standing on it counts as having been there, so the platform you
+                    // started the run on is already "visited" the first time you come back.
+                    visitedSurfaces.Add(launchSurface);
                 }
             }
             else
@@ -540,6 +547,28 @@ namespace KineticEnergy.Level
                 if (controller.LastCrashRefund > 0f) controller.AddEnergy(-controller.LastCrashRefund);
                 chainInFlight = false;
                 flightOpen = false;
+                return;
+            }
+
+            // GROUND YOU HAVE ALREADY STOOD ON pays the launch back and nothing more: the
+            // pipeline's multiplied refund is taken back and replaced with exactly what the
+            // shot cost, so retreading is free but never profitable. The window refreshes -
+            // the run keeps breathing while you reposition - but the chain LEVEL holds
+            // where it is, so no amount of bouncing between two known platforms builds a
+            // multiplier. HashSet.Add doubles as the test: false means "seen before".
+            if (crashSurface != null && !visitedSurfaces.Add(crashSurface.transform))
+            {
+                if (controller.LastCrashRefund > 0f) controller.AddEnergy(-controller.LastCrashRefund);
+                // "Exactly what it cost to get here" is the whole flight's spend wherever
+                // the harness is the sole payer (C/D and E silence the pipeline, so the
+                // earlier midair launches of a multi-hop flight would otherwise go unpaid);
+                // elsewhere the pipeline already settled each launch, so it is this one.
+                controller.AddEnergy((DualRefundMode || TotalLossMode) && flightOpen
+                    ? Mathf.Min(flightFirstSpend + flightMidairSpend, flightStartEnergy)
+                    : controller.ArrivalEnergySpent);
+                chainInFlight = false;
+                flightOpen = false;
+                windowRemaining = comboWindowSeconds;
                 return;
             }
 
@@ -660,6 +689,7 @@ namespace KineticEnergy.Level
             // The tank was just reset by the controller - clear the run state without the
             // revoke penalty, and restart the regen display from the fresh tank.
             ResetCombo(revoke: false);
+            visitedSurfaces.Clear(); // a fresh attempt meets fresh ground
             safetyActive = false;
             regenPool = 0f;
             flightOpen = false;
@@ -711,6 +741,10 @@ namespace KineticEnergy.Level
             if (energyMeter != null)
             {
                 float mainSpan = PremiumBoundary; // the meter variant's normal-block span
+                // Everything the meter draws by TANK fraction has to go through the same
+                // mapping as the fills above - the requirement tick included, or a 60%
+                // threshold lands where the bar reads 48%.
+                energyMeter.displaySpan = mainSpan;
                 float energy = controller.EnergyFraction;
                 bool charging = controller.IsAimingOrCharging;
                 float charge = controller.CurrentChargeFraction;

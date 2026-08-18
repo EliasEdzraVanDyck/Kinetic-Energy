@@ -104,8 +104,10 @@ namespace KineticEnergy.Level
         bool ArrivedSteeplyEnough(KineticCubeController player)
         {
             // The energy gate applies to EVERY arrival, the pound included - the pound
-            // waives the angle test, never the price.
-            if (player.LastLaunchEnergySpent < minActivationEnergyFraction - 0.0001f) return false;
+            // waives the angle test, never the price. ArrivalEnergySpent rather than
+            // LastLaunchEnergySpent: the player's own crash handler zeroes the latter on a
+            // pound, and whether it has already run when this fires is undefined.
+            if (player.ArrivalEnergySpent < minActivationEnergyFraction - 0.0001f) return false;
 
             if (player.LastCrashWasPound) return true;
             Vector3 approach = player.PreCollisionVelocity;
