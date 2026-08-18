@@ -2338,6 +2338,80 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
+        // Puts the authored controls sheet on the pause menu's Controls screen: the image
+        // replaces the generated body TEXT, which said the same thing in a far less
+        // readable way. Edited IN PLACE on the prefab (recreating it would reset every
+        // placed instance's overrides), and the title and Back button are left untouched.
+        [MenuItem("Tools/Kinetic Energy/Add Controls Image")]
+        public static void AddControlsImage()
+        {
+            const string texturePath = "Assets/Textures/ControlsSheet.png";
+            TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+            if (importer == null) throw new Exception("KineticEnergySetup: " + texturePath + " missing - copy the controls sheet in first.");
+            if (importer.textureType != TextureImporterType.Sprite)
+            {
+                importer.textureType = TextureImporterType.Sprite;
+                importer.spriteImportMode = SpriteImportMode.Single;
+                importer.mipmapEnabled = false;           // UI at native size - mips only blur it
+                importer.maxTextureSize = 2048;           // the sheet is 1536 wide; no downscale
+                importer.textureCompression = TextureImporterCompression.Uncompressed; // text stays crisp
+                importer.SaveAndReimport();
+            }
+            Sprite sheet = AssetDatabase.LoadAssetAtPath<Sprite>(texturePath);
+            if (sheet == null) throw new Exception("KineticEnergySetup: " + texturePath + " did not import as a Sprite.");
+
+            string prefabPath = PrefabFolder + "/PauseSystem.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                Transform panel = FindDeep(root.transform, "ControlsPanel");
+                if (panel == null) throw new Exception("KineticEnergySetup: ControlsPanel not found in PauseSystem.prefab.");
+
+                // The generated body text is what the sheet replaces - switched off rather
+                // than deleted, so PauseController's serialized reference stays intact.
+                Transform body = FindDeep(panel, "ControlsBody");
+                if (body != null) body.gameObject.SetActive(false);
+
+                Transform existing = panel.Find("ControlsImage");
+                GameObject imageGo = existing != null ? existing.gameObject : null;
+                if (imageGo == null)
+                {
+                    imageGo = new GameObject("ControlsImage", typeof(RectTransform));
+                    imageGo.transform.SetParent(panel, false);
+                }
+                Image image = imageGo.GetComponent<Image>();
+                if (image == null) image = imageGo.AddComponent<Image>();
+                image.sprite = sheet;
+                image.preserveAspect = true;               // never stretch the sheet
+                image.raycastTarget = false;               // must not eat clicks from Back
+
+                // Fills the panel with a margin, under the title and above the Back button.
+                RectTransform rect = imageGo.GetComponent<RectTransform>();
+                rect.anchorMin = new Vector2(0.5f, 0.5f);
+                rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.anchoredPosition = new Vector2(0f, -10f);
+                rect.sizeDelta = new Vector2(1180f, 787f); // the sheet's 1536x1024 ratio
+                // Behind the title/Back button in draw order, so they stay clickable and on top.
+                imageGo.transform.SetAsFirstSibling();
+
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+                Debug.Log("KineticEnergySetup: controls image added to the pause menu OK");
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+        }
+
+        // Breadth-first name lookup through an inactive hierarchy (Transform.Find only
+        // walks one level, and these panels are switched off in the prefab).
+        static Transform FindDeep(Transform parent, string name)
+        {
+            foreach (Transform child in parent.GetComponentsInChildren<Transform>(true))
+            {
+                if (child.name == name) return child;
+            }
+            return null;
+        }
+
         // The bottom-left section explainer: one HUD element per course section, text picked
         // by the section's label so the Test2/Test3 turret/flyer swap needs no special case.
         // The first section's text carries the controls primer. All of it hangs off the
