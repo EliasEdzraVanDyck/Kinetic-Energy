@@ -712,6 +712,10 @@ namespace KineticEnergy.Player
             // input - nothing below may run while the pause menu is up.
             if (paused)
             {
+                if (playerSounds.isPlaying)
+                {
+                    playerSounds.Stop();
+                }
                 justUnpaused = true;
                 return;
             }
@@ -833,6 +837,13 @@ namespace KineticEnergy.Player
             }
             else if (isGrounded && poundWindowTimer <= 0f)
             {
+                if (playerSounds.isPlaying && (playerSounds.clip == chargingLoopSound || playerSounds.clip == chargingSound))
+                {
+                    playerSounds.clip = flyingSound;
+                    playerSounds.loop = false;
+                    playerSounds.Stop();
+                }
+
                 // NOT during the post-pound window: the bounce hop is lower than the ground
                 // check, so the cube reads as grounded there - but a window aim must open
                 // the MIDAIR aim (which claims the boost), never the grounded one.
