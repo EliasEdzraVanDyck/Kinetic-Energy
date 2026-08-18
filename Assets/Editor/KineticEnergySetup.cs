@@ -3172,15 +3172,11 @@ namespace KineticEnergy.EditorSetup
         [MenuItem("Tools/Kinetic Energy/Retune Hazards And Bands")]
         public static void RetuneHazardsAndBands()
         {
-            // The shared hazard colour. Editing this material IS the intent here - it is
-            // what both hazards wear - so the never-overwrite rule does not apply.
+            // The shells wear the beams' own material, untouched - the laser red IS the
+            // hazard colour, and one behaviour reads as one look. Never recoloured here:
+            // it is hand-tuned, and this method only assigns it.
             Material beam = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/LaserBeamMaterial.mat");
-            if (beam != null)
-            {
-                beam.color = new Color(0.95f, 0.42f, 0.08f);
-                EditorUtility.SetDirty(beam);
-            }
-            else Debug.LogWarning("KineticEnergySetup: LaserBeamMaterial missing - shells cannot share it.");
+            if (beam == null) Debug.LogWarning("KineticEnergySetup: LaserBeamMaterial missing - shells cannot share it.");
 
             // The band palette asset holds its own copy of the ramp, so the dimmed bands 4
             // and 5 have to be written to it, not just to the class defaults.
@@ -3248,8 +3244,9 @@ namespace KineticEnergy.EditorSetup
         [MenuItem("Tools/Kinetic Energy/Retune Damage Ridges")]
         public static void RetuneDamageRidges()
         {
-            // The ridges wear the LASER's material: one behaviour, one look. Its orange
-            // also keeps them clear of the damage floor's deep 0.535,0.148,0.133 red.
+            // The ridges wear the LASER's material: one behaviour, one look. Its bright
+            // 0.95,0.08,0.05 also keeps them clear of the damage floor's much deeper
+            // 0.535,0.148,0.133, so the two hazards stay distinguishable.
             Material ridgeMaterial = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/LaserBeamMaterial.mat");
 
             string[] scenes =
