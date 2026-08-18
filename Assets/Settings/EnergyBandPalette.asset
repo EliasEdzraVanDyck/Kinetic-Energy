@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abfc99bd4492019409aa8f77760c1638, type: 3}
+  m_Name: EnergyBandPalette
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.EnergyBandPalette
+  bands:
+  - name: ember
+    minPercent: 0
+    maxPercent: 19
+    baseColor: {r: 1, g: 0.42, b: 0.169, a: 1}
+    emissionIntensity: 1
+  - name: amber
+    minPercent: 20
+    maxPercent: 39
+    baseColor: {r: 1, g: 0.584, b: 0, a: 1}
+    emissionIntensity: 2
+  - name: golden yellow
+    minPercent: 40
+    maxPercent: 59
+    baseColor: {r: 1, g: 0.8, b: 0.122, a: 1}
+    emissionIntensity: 3.5
+  - name: pale gold
+    minPercent: 60
+    maxPercent: 79
+    baseColor: {r: 1, g: 0.914, b: 0.659, a: 1}
+    emissionIntensity: 5.5
+  - name: white-hot
+    minPercent: 80
+    maxPercent: 100
+    baseColor: {r: 1, g: 1, b: 1, a: 1}
+    emissionIntensity: 9

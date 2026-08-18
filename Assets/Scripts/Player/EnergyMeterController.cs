@@ -101,8 +101,6 @@ namespace KineticEnergy.Player
         // which is what the half-second bullet-time aim window allows for. Built lazily,
         // hidden whenever nothing relevant is aimed at.
         UnityEngine.UI.Image requirementTick;
-        Color normalChargeColor;
-        bool chargeColorCaptured;
 
         // What TANK fraction the MAIN bar's width stands for. The premium meter variants
         // hand everything above this to a separate row of taller blocks - the 4+6 meter
@@ -111,76 +109,53 @@ namespace KineticEnergy.Player
         [System.NonSerialized] public float displaySpan = 1f;
         RectTransform premiumRect; // the tall segment, when this meter variant has one
 
-        // The tall segment draws the charge ABOVE the main bar's span - on the 4+6 meter
-        // that is everything past 40%, so most of the charge's travel. It has to carry the
-        // same colour as the main charge bar or the tier read dies at the segment seam.
-        Image premiumChargeFill;
-        Color normalPremiumChargeColor;
-        bool premiumChargeResolved;
+        // The tall segment's own energy fill - on the 4+6 meter it draws everything past
+        // 40%, so it has to carry the same band colour as the main fill or the temperature
+        // read dies at the segment seam.
+        Image premiumEnergyFill;
+        bool premiumEnergyResolved;
 
-        Image ResolvePremiumChargeFill()
+        Image ResolvePremiumEnergyFill()
         {
-            if (premiumChargeResolved) return premiumChargeFill;
-            premiumChargeResolved = true;
-            Transform body = chargeFillImage != null ? chargeFillImage.transform.parent : null;
+            if (premiumEnergyResolved) return premiumEnergyFill;
+            premiumEnergyResolved = true;
+            Transform body = energyFillImage != null ? energyFillImage.transform.parent : null;
             if (body == null) return null;
             if (premiumRect == null) premiumRect = body.Find("PremiumZone") as RectTransform;
-            Transform fill = premiumRect != null ? premiumRect.Find("PremiumChargeFill") : null;
-            if (fill != null)
-            {
-                premiumChargeFill = fill.GetComponent<Image>();
-                if (premiumChargeFill != null) normalPremiumChargeColor = premiumChargeFill.color;
-            }
-            return premiumChargeFill;
+            Transform fill = premiumRect != null ? premiumRect.Find("PremiumBoostFill") : null;
+            if (fill != null) premiumEnergyFill = fill.GetComponent<Image>();
+            return premiumEnergyFill;
         }
 
-        [Tooltip("Tier palette the CHARGE bar is coloured from while charging: a charge of 0-19% of the tank wears the first tier's colour, 20-39% the second, and so on. Empty = the charge bar keeps its own colour.")]
-        public KineticEnergy.Level.EnergyTierPalette tierPalette;
+        [Tooltip("The shared blackbody band palette. The ENERGY fill wears the band the current energy level falls in - the same lookup the interactables use for their requirement, so affordability is read by comparing temperature. Empty = the fill keeps its own colour.")]
+        public KineticEnergy.Level.EnergyBandPalette bandPalette;
 
-        // Only the CHARGE - the slice this launch is about to spend - carries the tier
-        // language, and only while it is being built. The tank's own fills keep their
-        // standing meaning at all times: yellow is energy you have, orange is the boost
-        // riding on top. Fed the charge in TANK units, so the band it reports is directly
-        // comparable to what an interactable demands.
-        public void SetChargeTint(float chargeTankFraction, bool charging)
+        // The meter half of the core rule: meter colour = the band the CURRENT energy
+        // falls in, through the SAME GetBand the interactables use, so the two can never
+        // drift apart. Hard-edged - the colour SNAPS at each boundary, never lerps; the
+        // discrete jump is the signal. Flat and unlit on the HUD by nature (UI Image),
+        // which is exactly the treatment split that separates it from the emissive world
+        // objects wearing the same hues.
+        public void SetEnergyTint(float tankFraction)
         {
-            if (chargeFillImage == null) return;
-            if (!chargeColorCaptured)
-            {
-                normalChargeColor = chargeFillImage.color;
-                chargeColorCaptured = true;
-            }
+            if (bandPalette == null) return;
+            KineticEnergy.Level.EnergyBandPalette.Band band = bandPalette.GetBand(tankFraction);
+            if (band == null) return;
 
-            Image premiumCharge = ResolvePremiumChargeFill();
+            // Kept in step so releasing a launch lock restores the CURRENT band rather
+            // than whatever colour happened to be showing when the lock started.
+            normalEnergyColor = band.baseColor;
+            if (!lockActive && energyFillImage != null) energyFillImage.color = band.baseColor;
 
-            if (!charging || tierPalette == null || tierPalette.tiers == null || tierPalette.tiers.Length == 0)
-            {
-                chargeFillImage.color = normalChargeColor;
-                if (premiumCharge != null) premiumCharge.color = normalPremiumChargeColor;
-                return;
-            }
-
-            // The tier this charge can AFFORD, not the band it sits in - so charging up to
-            // an enemy's price turns the bar that enemy's own colour, and "the bar matches
-            // the target" is the tell that the launch will kill.
-            KineticEnergy.Level.EnergyTierPalette.Tier afforded = tierPalette.TierAfforded(chargeTankFraction);
-            if (afforded == null)
-            {
-                chargeFillImage.color = normalChargeColor;
-                if (premiumCharge != null) premiumCharge.color = normalPremiumChargeColor;
-                return;
-            }
-            Color banded = afforded.baseColor;
-            chargeFillImage.color = banded;
-            // Both halves of the same bar: the charge reads as one continuous colour across
-            // the seam, so passing 40% is not mistaken for a change of meaning.
-            if (premiumCharge != null) premiumCharge.color = banded;
+            // Both halves of the same tank: one continuous temperature across the seam.
+            Image premiumEnergy = ResolvePremiumEnergyFill();
+            if (premiumEnergy != null) premiumEnergy.color = band.baseColor;
         }
 
-        // The threshold marker itself. The charge bar's own colour is handled by
-        // SetChargeTint - the two meet when the growing charge reaches this tick and turns
-        // the tier's colour, which is the whole read: length says how far, colour says which
-        // tier, and the tick says where the line is.
+        // The threshold marker: a thin line at the fraction an aimed-at interactable
+        // demands, in that band's colour - "do I have enough?" becomes a spatial
+        // comparison as well as a temperature one, which matters inside the 0.5s
+        // bullet-time aim window.
         public void SetRequirementTick(float fraction, Color color, bool visible)
         {
             if (requirementTick == null)

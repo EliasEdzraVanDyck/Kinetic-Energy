@@ -2319,8 +2319,8 @@ namespace KineticEnergy.EditorSetup
                 Enemy enemy = requirement.GetComponent<Enemy>();
                 if (enemy == null) continue;
 
-                EnergyTierPalette.Tier tier = requirement.palette != null
-                    ? requirement.palette.TierFor(requirement.requirementPercent) : null;
+                EnergyBandPalette.Band tier = requirement.palette != null
+                    ? requirement.palette.GetBand(requirement.requirementPercent / 100f) : null;
 
                 Renderer bodyRenderer = enemy.GetComponentInChildren<Renderer>();
 
@@ -2328,7 +2328,7 @@ namespace KineticEnergy.EditorSetup
                     + " requires=" + requirement.requirementPercent
                     + " reqEnabled=" + requirement.enabled
                     + " reqGOActive=" + requirement.gameObject.activeSelf
-                    + " tierHex=" + (tier != null ? "#" + ColorUtility.ToHtmlStringRGB(tier.baseColor) : "NULL")
+                    + " bandHex=" + (tier != null ? "#" + ColorUtility.ToHtmlStringRGB(tier.baseColor) : "NULL")
                     + " emission=" + (tier != null ? tier.emissionIntensity.ToString() : "-")
                     + " serializedVulnerable=#" + ColorUtility.ToHtmlStringRGB(enemy.vulnerableColor)
                     + " killWindow=" + enemy.killWindow
@@ -2338,25 +2338,55 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // Hands the meter the tier palette, so the fill can report which 20% band the tank
-        // is in. Touches nothing else on the meter.
-        [MenuItem("Tools/Kinetic Energy/Wire Meter Tier Palette")]
-        public static void WireMeterTierPalette()
+        // The one-shot migration to the blackbody band system: creates the band palette
+        // asset, rewires every EnergyRequirement in LevelElementsTest3 to it (the field's
+        // TYPE changed, so the old references died), turns the required pip rows back on,
+        // hands the meter the palette, and makes the DamageWall material a deep UNLIT red -
+        // the emissive/non-emissive split is what separates hazard red from band-1 ember.
+        [MenuItem("Tools/Kinetic Energy/Apply Energy Bands")]
+        public static void ApplyEnergyBands()
         {
-            EnergyTierPalette palette = EnsureTierPalette();
+            EnergyBandPalette palette = EnsureBandPalette();
+
+            // DamageWalls: same deep red, but UNLIT - hazards must not join the emissive
+            // heat ramp. Colour is preserved exactly; only the shader changes.
+            Material damageMaterial = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/DamageWallMaterial.mat");
+            if (damageMaterial != null)
+            {
+                Shader unlit = Shader.Find("Universal Render Pipeline/Unlit");
+                if (unlit != null && damageMaterial.shader != unlit)
+                {
+                    Color keep = damageMaterial.color;
+                    damageMaterial.shader = unlit;
+                    damageMaterial.color = keep;
+                    EditorUtility.SetDirty(damageMaterial);
+                }
+            }
+            else Debug.LogWarning("KineticEnergySetup: DamageWallMaterial not found at Assets/Materials - unlit switch skipped.");
+
             EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest3.unity", OpenSceneMode.Single);
+
+            int rewired = 0;
+            foreach (EnergyRequirement requirement in UnityEngine.Object.FindObjectsByType<EnergyRequirement>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                requirement.palette = palette;
+                requirement.buildTickMarks = true; // redundant encoding is REQUIRED now
+                EditorUtility.SetDirty(requirement);
+                rewired++;
+            }
 
             int wired = 0;
             KineticCubeController player = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>();
             if (player != null && player.energyMeter != null)
             {
-                player.energyMeter.tierPalette = palette;
+                player.energyMeter.bandPalette = palette;
                 EditorUtility.SetDirty(player.energyMeter);
                 wired++;
             }
             EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
             EditorSceneManager.SaveOpenScenes();
-            Debug.Log("KineticEnergySetup: meter tier palette wired OK (" + wired + ")");
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: energy bands applied OK (" + rewired + " interactables, " + wired + " meter)");
         }
 
         // Diagnostic: what the player's meter ACTUALLY looks like - which variant, how the
@@ -2438,15 +2468,15 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        const string TierPalettePath = "Assets/Settings/EnergyTierPalette.asset";
+        const string BandPalettePath = "Assets/Settings/EnergyBandPalette.asset";
 
-        static EnergyTierPalette EnsureTierPalette()
+        static EnergyBandPalette EnsureBandPalette()
         {
-            EnergyTierPalette palette = AssetDatabase.LoadAssetAtPath<EnergyTierPalette>(TierPalettePath);
+            EnergyBandPalette palette = AssetDatabase.LoadAssetAtPath<EnergyBandPalette>(BandPalettePath);
             if (palette != null) return palette;
             if (!AssetDatabase.IsValidFolder("Assets/Settings")) AssetDatabase.CreateFolder("Assets", "Settings");
-            palette = ScriptableObject.CreateInstance<EnergyTierPalette>();
-            AssetDatabase.CreateAsset(palette, TierPalettePath);
+            palette = ScriptableObject.CreateInstance<EnergyBandPalette>();
+            AssetDatabase.CreateAsset(palette, BandPalettePath);
             AssetDatabase.SaveAssets();
             return palette;
         }
@@ -2461,7 +2491,7 @@ namespace KineticEnergy.EditorSetup
             const string sourcePath = "Assets/Scenes/LevelElementsTest2.unity";
             const string targetPath = "Assets/Scenes/LevelElementsTest3.unity";
 
-            EnergyTierPalette palette = EnsureTierPalette();
+            EnergyBandPalette palette = EnsureBandPalette();
 
             // The sized family must BEHAVE like the hunters it replaces - stamped onto the
             // prefab (in place, so placed instances elsewhere keep their overrides).
@@ -2568,7 +2598,7 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: LevelElementsTest3 built OK (sized hunters + tiered requirements)");
         }
 
-        static void AddRequirement(GameObject target, int percent, EnergyTierPalette palette, Renderer shows)
+        static void AddRequirement(GameObject target, int percent, EnergyBandPalette palette, Renderer shows)
         {
             EnergyRequirement requirement = target.GetComponent<EnergyRequirement>();
             if (requirement == null) requirement = target.AddComponent<EnergyRequirement>();
