@@ -42,6 +42,20 @@ namespace KineticEnergy.Level
             spotRenderer.material.color = Color.Lerp(spotRestColor, pulseColor, pulse);
         }
 
+        // The energy-tier hook: recolours the SPOT (material and the pulse's rest colour
+        // together, so the beacon breathes around the tier colour rather than snapping
+        // back to the old gold).
+        public void SetSpotTier(Color tierColor)
+        {
+            if (spotRenderer == null && weakSpot != null)
+            {
+                spotRenderer = weakSpot.GetComponent<Renderer>();
+                if (spotRenderer == null) spotRenderer = weakSpot.GetComponentInChildren<Renderer>();
+            }
+            spotRestColor = tierColor;
+            if (spotRenderer != null) spotRenderer.material.color = tierColor;
+        }
+
         public override bool LaunchKillAllowedFor(Collider hitCollider)
         {
             if (weakSpot == null || hitCollider == null) return false;

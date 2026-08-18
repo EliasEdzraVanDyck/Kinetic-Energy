@@ -95,6 +95,42 @@ namespace KineticEnergy.Player
             if (energyFillImage != null) energyFillImage.fillAmount = Mathf.Clamp01(fraction);
         }
 
+        // The requirement tick: a thin vertical marker at the fraction an aimed-at
+        // interactable demands, in that tier's colour - "do I have enough?" becomes a
+        // spatial comparison against the fill edge instead of a colour-to-number lookup,
+        // which is what the half-second bullet-time aim window allows for. Built lazily,
+        // hidden whenever nothing relevant is aimed at.
+        UnityEngine.UI.Image requirementTick;
+
+        public void SetRequirementTick(float fraction, Color color, bool visible)
+        {
+            if (requirementTick == null)
+            {
+                if (energyFillImage == null) return;
+                Transform container = energyFillImage.transform.parent != null
+                    ? energyFillImage.transform.parent
+                    : energyFillImage.transform;
+                GameObject go = new GameObject("RequirementTick", typeof(RectTransform));
+                go.transform.SetParent(container, false);
+                requirementTick = go.AddComponent<UnityEngine.UI.Image>();
+                RectTransform rect = go.GetComponent<RectTransform>();
+                // Slightly taller than the bar, so it reads as a marker ON it, not a slice OF it.
+                rect.anchorMax = new Vector2(0f, 1.15f);
+                rect.anchorMin = new Vector2(0f, -0.15f);
+                rect.sizeDelta = new Vector2(3f, 0f);
+            }
+
+            requirementTick.gameObject.SetActive(visible);
+            if (!visible) return;
+
+            requirementTick.color = color;
+            RectTransform tickRect = requirementTick.rectTransform;
+            float clamped = Mathf.Clamp01(fraction);
+            tickRect.anchorMin = new Vector2(clamped, tickRect.anchorMin.y);
+            tickRect.anchorMax = new Vector2(clamped, tickRect.anchorMax.y);
+            tickRect.anchoredPosition = Vector2.zero;
+        }
+
         // Floors the DISPLAYED fill at 5% the instant charging starts, rather than growing
         // invisibly from literal zero - direct request: "it should start at a say 5 percent and
         // the longer you press it should move further right". Purely cosmetic - only this display

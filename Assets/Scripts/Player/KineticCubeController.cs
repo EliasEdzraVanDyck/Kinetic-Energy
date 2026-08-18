@@ -1091,6 +1091,19 @@ namespace KineticEnergy.Player
                 energyMeter.SetBonus(
                     energyFraction + poundPendingRefund * (groundPoundBoostMultiplier - 1f),
                     poundPendingRefund > 0f && poundWindowTimer > 0f);
+
+                // Aiming at something with an energy requirement marks its threshold on
+                // the meter, in the tier's colour - the display mapping is linear (every
+                // block is exactly 10%), so the raw fraction IS the bar position.
+                KineticEnergy.Level.EnergyRequirement aimedRequirement = null;
+                if (IsAimingOrCharging && hasValidPredictedLanding && lastPredictedLandingSource != null)
+                {
+                    aimedRequirement = lastPredictedLandingSource.GetComponentInParent<KineticEnergy.Level.EnergyRequirement>();
+                }
+                energyMeter.SetRequirementTick(
+                    aimedRequirement != null ? aimedRequirement.RequirementFraction : 0f,
+                    aimedRequirement != null ? aimedRequirement.TierColor : Color.white,
+                    aimedRequirement != null);
             }
 
             if (slowdownMeter != null)
@@ -2303,12 +2316,18 @@ namespace KineticEnergy.Player
                     // A hit anywhere but the killing spot STAGGERS the flyer instead of
                     // doing nothing - it hangs there slumped forward for a moment, which
                     // is the opening to come back around onto its weak spot.
+                    // Both may also demand a minimum spend (the energy-tier scenes): an
+                    // under-charged hit on the right spot staggers the flyer exactly like
+                    // a wrong-spot hit, and merely registers as a crash on a turret.
                     else if (flyer != null)
                     {
-                        if (flyer.LaunchKillAllowedFor(collision.collider)) flyer.OnHitByLaunch();
+                        if (flyer.LaunchKillAllowedFor(collision.collider) && launchSpend >= flyer.minKillEnergyFraction - 0.0001f)
+                        {
+                            flyer.OnHitByLaunch();
+                        }
                         else flyer.OnLaunchSurvived();
                     }
-                    else turret.OnHitByLaunch();
+                    else if (launchSpend >= turret.minKillEnergyFraction - 0.0001f) turret.OnHitByLaunch();
                 }
                 return;
             }

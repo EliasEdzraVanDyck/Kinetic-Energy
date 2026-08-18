@@ -147,6 +147,18 @@ namespace KineticEnergy.Level
                 projectileKnockback, projectileEnergyDrain, projectileLaunchLock);
         }
 
+        [Tooltip("Minimum launch-energy fraction a kill needs - a cheaper hit just registers as a crash. 0 = any launch kills.")]
+        [Range(0f, 1f)] public float minKillEnergyFraction = 0f;
+
+        // The energy-tier hook: repaints the turret's rest colour with the tier's, keeping
+        // the flash logic intact (it lerps from restColor, so the tell adapts too).
+        public void SetTier(Color tierColor)
+        {
+            if (bodyRenderer == null) bodyRenderer = GetComponentInChildren<Renderer>();
+            restColor = tierColor;
+            if (bodyRenderer != null && !windingUp && !bursting) bodyRenderer.material.color = tierColor;
+        }
+
         // Same kill/respawn contract as the other enemies.
         public void OnHitByLaunch()
         {

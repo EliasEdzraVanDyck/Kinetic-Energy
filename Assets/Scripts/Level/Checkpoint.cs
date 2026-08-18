@@ -26,6 +26,8 @@ namespace KineticEnergy.Level
         [Header("Activation")]
         [Tooltip("How steeply a landing must arrive to press the button: the dot of the incoming direction with straight DOWN. 1 = only dead vertical, 0.7 = within about 45 degrees of vertical. A ground pound always counts.")]
         [Range(0f, 1f)] public float minimumImpactSteepness = 0.7f;
+        [Tooltip("Minimum energy fraction the pressing launch must have SPENT - a cheaper arrival (pound included) bounces off without claiming. 0 = any launch presses.")]
+        [Range(0f, 1f)] public float minActivationEnergyFraction = 0f;
 
         [Header("Colours")]
         [Tooltip("The button while this checkpoint is NOT the active one.")]
@@ -101,10 +103,22 @@ namespace KineticEnergy.Level
         // pad leaves the button up however fast it was.
         bool ArrivedSteeplyEnough(KineticCubeController player)
         {
+            // The energy gate applies to EVERY arrival, the pound included - the pound
+            // waives the angle test, never the price.
+            if (player.LastLaunchEnergySpent < minActivationEnergyFraction - 0.0001f) return false;
+
             if (player.LastCrashWasPound) return true;
             Vector3 approach = player.PreCollisionVelocity;
             if (approach.sqrMagnitude < 0.01f) return false;
             return Vector3.Dot(approach.normalized, Vector3.down) >= minimumImpactSteepness;
+        }
+
+        // The energy-tier hook: the idle button wears the tier colour (pressed keeps its
+        // own green - "claimed" must stay one colour everywhere).
+        public void SetTier(Color tierColor)
+        {
+            idleColor = tierColor;
+            if (!claimed && buttonRenderer != null) buttonRenderer.material.color = tierColor;
         }
 
         public void SetClaimed(bool value)

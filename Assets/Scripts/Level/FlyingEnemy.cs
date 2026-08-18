@@ -296,6 +296,9 @@ namespace KineticEnergy.Level
 
         // ---------- Kill / respawn (same contract as the ground enemy) ----------
 
+        [Tooltip("Minimum launch-energy fraction a kill needs - a cheaper hit staggers instead. 0 = any launch kills.")]
+        [Range(0f, 1f)] public float minKillEnergyFraction = 0f;
+
         // Whether a launch crash on the given collider may kill this flyer. The base
         // flyer dies to any hit; the weak-spot variant only through its back cube.
         public virtual bool LaunchKillAllowedFor(Collider hitCollider) => true;

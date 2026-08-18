@@ -2288,6 +2288,175 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Checkpoint button prefab updated in place OK");
         }
 
+        // Diagnostic: reports every energy-tier interactable in LevelElementsTest3.
+        [MenuItem("Tools/Kinetic Energy/Validate Energy Tiers")]
+        public static void ValidateEnergyTiers()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest3.unity", OpenSceneMode.Single);
+
+            foreach (EnergyRequirement requirement in UnityEngine.Object.FindObjectsByType<EnergyRequirement>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                SizedEnemy sized = requirement.GetComponent<SizedEnemy>();
+                FlyingEnemy flyer = requirement.GetComponent<FlyingEnemy>();
+                TurretEnemy turret = requirement.GetComponent<TurretEnemy>();
+                Checkpoint checkpoint = requirement.GetComponent<Checkpoint>();
+
+                string gate =
+                    sized != null ? "size=" + sized.sizeClass + " killWindow=" + sized.killWindow + " dodge=" + sized.dodgePlayerLaunches
+                    : flyer != null ? "flyerMinKill=" + flyer.minKillEnergyFraction
+                    : turret != null ? "turretMinKill=" + turret.minKillEnergyFraction
+                    : checkpoint != null ? "checkpointMinEnergy=" + checkpoint.minActivationEnergyFraction
+                    : "?";
+
+                Debug.Log("TIERCHECK " + requirement.name
+                    + " x=" + requirement.transform.position.x.ToString("F0")
+                    + " requires=" + requirement.requirementPercent + "%"
+                    + " palette=" + (requirement.palette != null ? "OK" : "NULL")
+                    + " renderer=" + (requirement.targetRenderer != null ? requirement.targetRenderer.name : "NULL")
+                    + " " + gate);
+            }
+        }
+
+        const string TierPalettePath = "Assets/Settings/EnergyTierPalette.asset";
+
+        static EnergyTierPalette EnsureTierPalette()
+        {
+            EnergyTierPalette palette = AssetDatabase.LoadAssetAtPath<EnergyTierPalette>(TierPalettePath);
+            if (palette != null) return palette;
+            if (!AssetDatabase.IsValidFolder("Assets/Settings")) AssetDatabase.CreateFolder("Assets", "Settings");
+            palette = ScriptableObject.CreateInstance<EnergyTierPalette>();
+            AssetDatabase.CreateAsset(palette, TierPalettePath);
+            AssetDatabase.SaveAssets();
+            return palette;
+        }
+
+        // LevelElementsTest3: Test2's course, with the ENERGY-TIER language on every
+        // interactable. Sized hunters replace the plain ones (medium first, then a
+        // small+large pair), flyers cost 40%, turrets 80%, checkpoints 60% - each painted
+        // from the shared tier palette rather than its own colours.
+        [MenuItem("Tools/Kinetic Energy/Setup LevelElementsTest3")]
+        public static void SetupLevelElementsTest3()
+        {
+            const string sourcePath = "Assets/Scenes/LevelElementsTest2.unity";
+            const string targetPath = "Assets/Scenes/LevelElementsTest3.unity";
+
+            EnergyTierPalette palette = EnsureTierPalette();
+
+            // The sized family must BEHAVE like the hunters it replaces - stamped onto the
+            // prefab (in place, so placed instances elsewhere keep their overrides).
+            string sizedPath = PrefabFolder + "/SizedEnemy.prefab";
+            GameObject sizedRoot = PrefabUtility.LoadPrefabContents(sizedPath);
+            try
+            {
+                SizedEnemy sized = sizedRoot.GetComponent<SizedEnemy>();
+                if (sized == null) throw new Exception("KineticEnergySetup: SizedEnemy prefab has no SizedEnemy component.");
+
+                // "Behave exactly like the hunter" is taken literally: every field the Enemy
+                // BASE declares is copied straight off HunterEnemy.prefab, so the sized family
+                // shares the hunter's wind-up, recovery, cooldown, dodge geometry and colour
+                // language rather than an approximation of it. SizedEnemy's OWN fields (size
+                // class, the speed/knockback/scale multipliers, the kill fractions) are
+                // declared on the subclass and so are never touched.
+                Enemy hunter = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/HunterEnemy.prefab")
+                    ?.GetComponent<Enemy>();
+                if (hunter == null) throw new Exception("KineticEnergySetup: HunterEnemy prefab missing - cannot mirror its behaviour.");
+
+                var baseFields = typeof(Enemy).GetFields(System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.DeclaredOnly);
+                int copied = 0;
+                foreach (var field in baseFields)
+                {
+                    // Object references would point the sized prefab at the hunter's own
+                    // children; only the tuning values travel.
+                    if (typeof(UnityEngine.Object).IsAssignableFrom(field.FieldType)) continue;
+                    object mine = field.GetValue(sized);
+                    object theirs = field.GetValue(hunter);
+                    if (Equals(mine, theirs)) continue;
+                    field.SetValue(sized, theirs);
+                    copied++;
+                }
+                if (copied > 0)
+                {
+                    PrefabUtility.SaveAsPrefabAsset(sizedRoot, sizedPath);
+                    Debug.Log("KineticEnergySetup: SizedEnemy matched to hunter behaviour OK (" + copied + " fields)");
+                }
+            }
+            finally { PrefabUtility.UnloadPrefabContents(sizedRoot); }
+
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(targetPath) != null) AssetDatabase.DeleteAsset(targetPath);
+            if (!AssetDatabase.CopyAsset(sourcePath, targetPath))
+            {
+                throw new Exception("KineticEnergySetup: could not copy LevelElementsTest2 to LevelElementsTest3.");
+            }
+            AssetDatabase.Refresh();
+            EditorSceneManager.OpenScene(targetPath, OpenSceneMode.Single);
+
+            GameObject sizedPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(sizedPath);
+
+            // ---- Ground hunters -> the sized family ----
+            // First encountered (smallest x) = MEDIUM; the grouped pair = SMALL and LARGE.
+            var walkers = new List<Enemy>(UnityEngine.Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include, FindObjectsSortMode.None));
+            walkers.Sort((a, b) => a.transform.position.x.CompareTo(b.transform.position.x));
+            EnemySizeClass[] classes = { EnemySizeClass.Medium, EnemySizeClass.Small, EnemySizeClass.Large };
+            int[] classPercents = { 40, 20, 60 };
+            for (int i = 0; i < walkers.Count && i < classes.Length; i++)
+            {
+                Enemy old = walkers[i];
+                GameObject replacement = (GameObject)PrefabUtility.InstantiatePrefab(sizedPrefab, old.transform.parent);
+                replacement.name = old.name;
+                replacement.transform.SetPositionAndRotation(old.transform.position, old.transform.rotation);
+                SizedEnemy sizedInstance = replacement.GetComponent<SizedEnemy>();
+                sizedInstance.sizeClass = classes[i];
+                AddRequirement(replacement, classPercents[i], palette, replacement.GetComponentInChildren<Renderer>());
+                EditorUtility.SetDirty(sizedInstance);
+                UnityEngine.Object.DestroyImmediate(old.gameObject);
+            }
+
+            // ---- Flyers: at least 40% ----
+            foreach (WeakSpotFlyingEnemy flyerInstance in UnityEngine.Object.FindObjectsByType<WeakSpotFlyingEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                flyerInstance.minKillEnergyFraction = 0.4f;
+                Renderer spot = flyerInstance.weakSpot != null ? flyerInstance.weakSpot.GetComponent<Renderer>() : null;
+                AddRequirement(flyerInstance.gameObject, 40, palette, spot);
+                EditorUtility.SetDirty(flyerInstance);
+            }
+
+            // ---- Turrets: at least 80% ----
+            foreach (TurretEnemy turretInstance in UnityEngine.Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                turretInstance.minKillEnergyFraction = 0.8f;
+                AddRequirement(turretInstance.gameObject, 80, palette, turretInstance.GetComponentInChildren<Renderer>());
+                EditorUtility.SetDirty(turretInstance);
+            }
+
+            // ---- Checkpoints: at least 60% to claim ----
+            foreach (Checkpoint checkpointInstance in UnityEngine.Object.FindObjectsByType<Checkpoint>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                checkpointInstance.minActivationEnergyFraction = 0.6f;
+                Renderer button = checkpointInstance.buttonRenderer != null
+                    ? checkpointInstance.buttonRenderer
+                    : checkpointInstance.GetComponentInChildren<Renderer>();
+                AddRequirement(checkpointInstance.gameObject, 60, palette, button);
+                EditorUtility.SetDirty(checkpointInstance);
+            }
+
+            EnsureSceneInBuildSettings(targetPath);
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+            EditorSceneManager.SaveOpenScenes();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: LevelElementsTest3 built OK (sized hunters + tiered requirements)");
+        }
+
+        static void AddRequirement(GameObject target, int percent, EnergyTierPalette palette, Renderer shows)
+        {
+            EnergyRequirement requirement = target.GetComponent<EnergyRequirement>();
+            if (requirement == null) requirement = target.AddComponent<EnergyRequirement>();
+            requirement.requirementPercent = percent;
+            requirement.palette = palette;
+            requirement.targetRenderer = shows;
+            EditorUtility.SetDirty(requirement);
+        }
+
         // The element scenes' finish was a bare, invisible trigger built inline - nothing to
         // see and nothing to reuse. This makes it a proper prefab with a green see-through
         // body, and swaps the loose objects for instances at their existing placement.
