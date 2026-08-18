@@ -2338,6 +2338,99 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
+        // The bottom-left section explainer: one HUD element per course section, text picked
+        // by the section's label so the Test2/Test3 turret/flyer swap needs no special case.
+        // The first section's text carries the controls primer. All of it hangs off the
+        // component's single showHud checkbox.
+        [MenuItem("Tools/Kinetic Energy/Setup Section Intro HUD")]
+        public static void SetupSectionIntroHud()
+        {
+            string[] scenes =
+            {
+                "Assets/Scenes/LevelElementsTest3.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+            };
+
+            foreach (string scenePath in scenes)
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+                LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>();
+                if (sections == null)
+                {
+                    Debug.LogWarning("KineticEnergySetup: " + scenePath + " has no LevelSectionController - HUD skipped.");
+                    continue;
+                }
+
+                SectionIntroHud hud = UnityEngine.Object.FindAnyObjectByType<SectionIntroHud>();
+                if (hud == null)
+                {
+                    GameObject go = new GameObject("SectionIntroHud");
+                    hud = go.AddComponent<SectionIntroHud>();
+                }
+                hud.sections = sections;
+
+                bool sized = scenePath.Contains("Test3");
+                string[] texts = new string[sections.sections.Length];
+                for (int i = 0; i < sections.sections.Length; i++)
+                {
+                    texts[i] = SectionIntroTextFor(sections.sections[i].label, i == 0, sized);
+                }
+                hud.sectionTexts = texts;
+                EditorUtility.SetDirty(hud);
+
+                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: " + scenePath + " - section intro HUD wired OK (" + texts.Length + " sections)");
+            }
+        }
+
+        // Matched on label keywords, so section NUMBERING (which differs between the
+        // element scenes after the turret/flyer swap) never has to be special-cased.
+        static string SectionIntroTextFor(string label, bool isFirst, bool sizedEnemies)
+        {
+            string lower = (label ?? "").ToLowerInvariant();
+            string body;
+            if (lower.Contains("basic"))
+            {
+                body = "THE BASICS\nCharge a launch and release to fire. Midair, hold the aim button to slow time and re-aim - the scroll wheel or right stick dials the energy up and down. Ground pound with E / pad-West while airborne.\n\nCheckpoints are BUTTONS: press one with a steep landing or a ground pound, using at least 60% energy.";
+            }
+            else if (lower.Contains("moving"))
+            {
+                body = "MOVING PLATFORMS\nThe ghost copy shows where a platform will be WHEN YOU LAND. Aim at the ghost, not at the platform.";
+            }
+            else if (lower.Contains("rotating"))
+            {
+                body = "ROTATING WALLS\nThe broad faces are safe to land on and ride. The thin red edges knock you back and cost energy - time your launch through the gaps.";
+            }
+            else if (lower.Contains("laser"))
+            {
+                body = "LASERS\nBeams shove you back the way you came and drain energy. The dark columns are safe to land on.";
+            }
+            else if (lower.Contains("ground"))
+            {
+                body = sizedEnemies
+                    ? "SIZED HUNTERS\nTheir colour and the pips above them show the energy a kill needs: small 20%, medium 40%, large 60%. They dodge launches and only die while cooling down after an attack - when their body lights up in their colour."
+                    : "HUNTERS\nThey dodge your launches and attack even midair. They can only be killed while cooling down after an attack - when their body turns purple.";
+            }
+            else if (lower.Contains("fly"))
+            {
+                body = "WEAK-SPOT FLYERS\nOnly a hit on the marked back cube kills them" + (sizedEnemies ? " (at least 40% energy)" : "") + ". Anything else staggers them and knocks you back.";
+            }
+            else if (lower.Contains("turret"))
+            {
+                body = "TURRETS\nThey telegraph, then fire a burst of shots" + (sizedEnemies ? " and need at least 40% energy to destroy" : "") + ". Closing the distance between bursts is the opening.";
+            }
+            else
+            {
+                body = label;
+            }
+            return isFirst && !lower.Contains("basic")
+                ? "CONTROLS\nCharge a launch and release to fire; midair, hold the aim button to slow time and re-aim.\n\n" + body
+                : body;
+        }
+
         // The one-shot migration to the blackbody band system: creates the band palette
         // asset, rewires every EnergyRequirement in LevelElementsTest3 to it (the field's
         // TYPE changed, so the old references died), turns the required pip rows back on,

@@ -7003,6 +7003,89 @@ MonoBehaviour:
   launchLockSeconds: 0.5
   retriggerDelay: 0.6
   upwardBias: 0.35
+--- !u!1 &955590616
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 955590618}
+  - component: {fileID: 955590617}
+  m_Layer: 0
+  m_Name: SectionIntroHud
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &955590617
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 955590616}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9b82723acb954704c950f2be5983528e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.UI.SectionIntroHud
+  showHud: 1
+  sections: {fileID: 1132250274}
+  sectionTexts:
+  - 'THE BASICS
+
+    Charge a launch and release to fire. Midair, hold the aim button
+    to slow time and re-aim - the scroll wheel or right stick dials the energy up
+    and down. Ground pound with E / pad-West while airborne.
+
+
+    Checkpoints are
+    BUTTONS: press one with a steep landing or a ground pound, using at least 60%
+    energy.'
+  - 'MOVING PLATFORMS
+
+    The ghost copy shows where a platform will be WHEN YOU
+    LAND. Aim at the ghost, not at the platform.'
+  - 'ROTATING WALLS
+
+    The broad faces are safe to land on and ride. The thin red
+    edges knock you back and cost energy - time your launch through the gaps.'
+  - 'LASERS
+
+    Beams shove you back the way you came and drain energy. The dark
+    columns are safe to land on.'
+  - 'SIZED HUNTERS
+
+    Their colour and the pips above them show the energy a kill
+    needs: small 20%, medium 40%, large 60%. They dodge launches and only die while
+    cooling down after an attack - when their body lights up in their colour.'
+  - 'TURRETS
+
+    They telegraph, then fire a burst of shots and need at least 40%
+    energy to destroy. Closing the distance between bursts is the opening.'
+  - 'WEAK-SPOT FLYERS
+
+    Only a hit on the marked back cube kills them (at least
+    40% energy). Anything else staggers them and knocks you back.'
+  panelWidth: 440
+--- !u!4 &955590618
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 955590616}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &964986931
 GameObject:
   m_ObjectHideFlags: 0
@@ -16920,3 +17003,4 @@ SceneRoots:
   - {fileID: 222969840}
   - {fileID: 1823251933}
   - {fileID: 37435429}
+  - {fileID: 955590618}

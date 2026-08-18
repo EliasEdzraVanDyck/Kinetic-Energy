@@ -5460,6 +5460,88 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 8270566695329813433, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
   m_PrefabInstance: {fileID: 798814067}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &799938969
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 799938971}
+  - component: {fileID: 799938970}
+  m_Layer: 0
+  m_Name: SectionIntroHud
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &799938970
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 799938969}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9b82723acb954704c950f2be5983528e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.UI.SectionIntroHud
+  showHud: 1
+  sections: {fileID: 1132250274}
+  sectionTexts:
+  - 'THE BASICS
+
+    Charge a launch and release to fire. Midair, hold the aim button
+    to slow time and re-aim - the scroll wheel or right stick dials the energy up
+    and down. Ground pound with E / pad-West while airborne.
+
+
+    Checkpoints are
+    BUTTONS: press one with a steep landing or a ground pound, using at least 60%
+    energy.'
+  - 'MOVING PLATFORMS
+
+    The ghost copy shows where a platform will be WHEN YOU
+    LAND. Aim at the ghost, not at the platform.'
+  - 'ROTATING WALLS
+
+    The broad faces are safe to land on and ride. The thin red
+    edges knock you back and cost energy - time your launch through the gaps.'
+  - 'LASERS
+
+    Beams shove you back the way you came and drain energy. The dark
+    columns are safe to land on.'
+  - 'HUNTERS
+
+    They dodge your launches and attack even midair. They can only
+    be killed while cooling down after an attack - when their body turns purple.'
+  - 'TURRETS
+
+    They telegraph, then fire a burst of shots. Closing the distance
+    between bursts is the opening.'
+  - 'WEAK-SPOT FLYERS
+
+    Only a hit on the marked back cube kills them. Anything
+    else staggers them and knocks you back.'
+  panelWidth: 440
+--- !u!4 &799938971
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 799938969}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &801347723
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -16372,3 +16454,4 @@ SceneRoots:
   - {fileID: 2092386729}
   - {fileID: 2025835635}
   - {fileID: 2000761291}
+  - {fileID: 799938971}
