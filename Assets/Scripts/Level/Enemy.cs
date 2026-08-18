@@ -235,7 +235,11 @@ namespace KineticEnergy.Level
             {
                 if (KillableNow && killWindow != EnemyKillWindow.Always)
                 {
-                    float pulse = Mathf.PingPong(Time.unscaledTime * 2.5f, 0.4f);
+                    // A SHALLOW breath, not a wash to white: the punish window has to stay
+                    // recognisably the enemy's own tier colour, because that colour is what
+                    // the charge bar is matched against to know the launch will kill. At the
+                    // old 0.4 the body spent the whole window visibly lighter than its tier.
+                    float pulse = Mathf.PingPong(Time.unscaledTime * 2.5f, 0.15f);
                     bodyRenderer.material.color = Color.Lerp(vulnerableColor, Color.white, pulse);
                 }
                 else

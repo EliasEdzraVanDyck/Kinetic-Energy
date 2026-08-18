@@ -33,6 +33,23 @@ namespace KineticEnergy.Level
             new Tier { percent = 100, baseColor = new Color(1.000f, 0.361f, 0.824f), emissionIntensity = 5.0f, pulses = true }, // #FF5CD2 hot magenta
         };
 
+        // The tier a given amount of energy can AFFORD: the highest one whose price it
+        // covers. This is the counterpart of TierFor - charge to exactly what an
+        // interactable demands and this returns that interactable's own tier, so the charge
+        // bar's colour and the target's colour become the same colour at the moment the
+        // launch becomes lethal. Below the cheapest tier it reports the cheapest, since
+        // there is nothing lower to show.
+        public Tier TierAfforded(float fraction)
+        {
+            if (tiers == null || tiers.Length == 0) return null;
+            Tier best = tiers[0];
+            for (int i = 0; i < tiers.Length; i++)
+            {
+                if (fraction * 100f >= tiers[i].percent - 0.0001f) best = tiers[i];
+            }
+            return best;
+        }
+
         // The tier at or above the requirement - an off-table value maps to the next tier
         // up rather than silently reading as cheaper than it is.
         public Tier TierFor(int percent)

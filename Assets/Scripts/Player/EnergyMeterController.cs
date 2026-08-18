@@ -111,6 +111,29 @@ namespace KineticEnergy.Player
         [System.NonSerialized] public float displaySpan = 1f;
         RectTransform premiumRect; // the tall segment, when this meter variant has one
 
+        // The tall segment draws the charge ABOVE the main bar's span - on the 4+6 meter
+        // that is everything past 40%, so most of the charge's travel. It has to carry the
+        // same colour as the main charge bar or the tier read dies at the segment seam.
+        Image premiumChargeFill;
+        Color normalPremiumChargeColor;
+        bool premiumChargeResolved;
+
+        Image ResolvePremiumChargeFill()
+        {
+            if (premiumChargeResolved) return premiumChargeFill;
+            premiumChargeResolved = true;
+            Transform body = chargeFillImage != null ? chargeFillImage.transform.parent : null;
+            if (body == null) return null;
+            if (premiumRect == null) premiumRect = body.Find("PremiumZone") as RectTransform;
+            Transform fill = premiumRect != null ? premiumRect.Find("PremiumChargeFill") : null;
+            if (fill != null)
+            {
+                premiumChargeFill = fill.GetComponent<Image>();
+                if (premiumChargeFill != null) normalPremiumChargeColor = premiumChargeFill.color;
+            }
+            return premiumChargeFill;
+        }
+
         [Tooltip("Tier palette the CHARGE bar is coloured from while charging: a charge of 0-19% of the tank wears the first tier's colour, 20-39% the second, and so on. Empty = the charge bar keeps its own colour.")]
         public KineticEnergy.Level.EnergyTierPalette tierPalette;
 
@@ -128,14 +151,30 @@ namespace KineticEnergy.Player
                 chargeColorCaptured = true;
             }
 
+            Image premiumCharge = ResolvePremiumChargeFill();
+
             if (!charging || tierPalette == null || tierPalette.tiers == null || tierPalette.tiers.Length == 0)
             {
                 chargeFillImage.color = normalChargeColor;
+                if (premiumCharge != null) premiumCharge.color = normalPremiumChargeColor;
                 return;
             }
 
-            int band = Mathf.Clamp(Mathf.FloorToInt(Mathf.Clamp01(chargeTankFraction) * 5f), 0, tierPalette.tiers.Length - 1);
-            chargeFillImage.color = tierPalette.tiers[band].baseColor;
+            // The tier this charge can AFFORD, not the band it sits in - so charging up to
+            // an enemy's price turns the bar that enemy's own colour, and "the bar matches
+            // the target" is the tell that the launch will kill.
+            KineticEnergy.Level.EnergyTierPalette.Tier afforded = tierPalette.TierAfforded(chargeTankFraction);
+            if (afforded == null)
+            {
+                chargeFillImage.color = normalChargeColor;
+                if (premiumCharge != null) premiumCharge.color = normalPremiumChargeColor;
+                return;
+            }
+            Color banded = afforded.baseColor;
+            chargeFillImage.color = banded;
+            // Both halves of the same bar: the charge reads as one continuous colour across
+            // the seam, so passing 40% is not mistaken for a change of meaning.
+            if (premiumCharge != null) premiumCharge.color = banded;
         }
 
         // The threshold marker itself. The charge bar's own colour is handled by
