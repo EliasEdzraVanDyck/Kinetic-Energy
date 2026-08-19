@@ -43,6 +43,8 @@ namespace KineticEnergy.Level
         public float largeCooldownOffset = 0.5f;
 
         [Header("Kill Label")]
+        [Tooltip("Print the kill percentage above the body. OFF by default now - the body's band colour carries the price, and the floating figures read as clutter.")]
+        public bool showKillLabel = false;
         [Tooltip("World metres between the body's top and the percentage label.")]
         public float labelHeight = 0.9f;
         public Color labelColor = new Color(1f, 1f, 1f, 0.9f);
@@ -106,7 +108,7 @@ namespace KineticEnergy.Level
             }
 
             base.Start();
-            BuildKillLabel();
+            if (showKillLabel) BuildKillLabel();
         }
 
         // An under-charged kill attempt bounces off the armour: the enemy's ordinary hit,

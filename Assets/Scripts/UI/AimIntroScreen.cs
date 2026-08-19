@@ -42,9 +42,13 @@ namespace KineticEnergy.UI
         bool wasPausedWhenOpened;
         float dismissArmDelay; // ignore inputs for a beat so the opening click can't instantly close it
 
+        [Tooltip("Open the overlay automatically on first boot. OFF leaves it reachable only through the pause menu's Info button.")]
+        public bool showOnBoot = true;
+
         void Start()
         {
-            if (shownKeys.Contains(introKey)) return; // stays alive - the pause menu's Info button reopens it
+            if (!showOnBoot) return; // stays alive - the pause menu's Info button opens it on demand
+            if (shownKeys.Contains(introKey)) return;
             shownKeys.Add(introKey);
             Open();
         }

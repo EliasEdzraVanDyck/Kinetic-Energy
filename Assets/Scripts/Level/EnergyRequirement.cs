@@ -23,8 +23,8 @@ namespace KineticEnergy.Level
         public bool buildTickMarks = true;
         [Tooltip("World metres between the target's top and the pip row.")]
         public float tickHeight = 0.35f;
-        [Tooltip("Print the requirement as a number above the pips. Sized enemies already print their own, so they skip this.")]
-        public bool showPercentLabel = true;
+        [Tooltip("Print the requirement as a number above the pips. OFF by default: the object's own band colour carries the price, and floating figures over every enemy and pad read as clutter.")]
+        public bool showPercentLabel = false;
         [Tooltip("World metres the number sits above the pip row.")]
         public float labelRise = 0.42f;
         [Tooltip("Material the pips are drawn with. MUST be set: primitives default to the built-in Standard material, whose shader is not part of URP and is stripped from builds - the pips then render solid magenta in a build while looking fine in the editor.")]

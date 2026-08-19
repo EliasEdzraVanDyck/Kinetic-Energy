@@ -3450,13 +3450,22 @@ namespace KineticEnergy.EditorSetup
             SectionIntroHud hud = UnityEngine.Object.FindAnyObjectByType<SectionIntroHud>(FindObjectsInactive.Include);
             if (hud == null) throw new Exception("KineticEnergySetup: LevelElementsTest3 has no SectionIntroHud.");
 
-            // Beat 1 is the section's own text - it is what shows on the opening pad.
+            // Beat 1 is the section's own text - it is what shows on the opening pad. Each
+            // beat names ONLY the buttons of the device in the player's hands; the HUD
+            // swaps between the two the moment the input does.
             if (hud.sectionTexts.Length > 0)
             {
                 hud.sectionTexts[0] =
                     "THE BASICS\n" +
-                    "Charge a launch by pressing Right Mouse Button / Left Trigger and press " +
-                    "Left Mouse / Right Trigger to fire.";
+                    "Charge a launch by holding Right Mouse and press Left Mouse to fire.";
+
+                // Sized to match sectionTexts, so index 0 lines up and later sections simply
+                // fall back to their shared wording.
+                string[] padTexts = new string[hud.sectionTexts.Length];
+                padTexts[0] =
+                    "THE BASICS\n" +
+                    "Charge a launch by holding Left Trigger and press Right Trigger to fire.";
+                hud.sectionTextsGamepad = padTexts;
             }
 
             GameObject secondPlatform = GameObject.Find("BasicsHop1");
@@ -3469,17 +3478,30 @@ namespace KineticEnergy.EditorSetup
                 throw new Exception("KineticEnergySetup: BasicsHop1 or the moving-platforms checkpoint is missing.");
             }
 
+            GameObject thirdPlatform = GameObject.Find("BasicsHop2");
+            if (thirdPlatform == null) throw new Exception("KineticEnergySetup: BasicsHop2 is missing.");
+
             hud.proximitySteps = new[]
             {
                 new SectionIntroHud.ProximityStep
                 {
                     label = "Basics - re-aim",
+                    // Spans the SECOND and THIRD platforms and the air between them, so the
+                    // re-aim lesson holds for the whole hop rather than blinking out
+                    // mid-flight between the two.
                     target = secondPlatform.transform,
-                    radius = 14f, // the pad is 12 wide, so this is "on or just above it"
+                    targetEnd = thirdPlatform.transform,
+                    radius = 14f, // the pads are 12 wide, so this is "on or just above them"
                     text =
                         "THE BASICS\n" +
                         "When midair, hold the aim button again to slow time and re-aim. " +
-                        "Move the Scroll Wheel / Right Stick up/down to add or remove energy.",
+                        "Move the Scroll Wheel up/down to add or remove energy. " +
+                        "You can also launch upwards by holding and releasing Space.",
+                    gamepadText =
+                        "THE BASICS\n" +
+                        "When midair, hold the aim button again to slow time and re-aim. " +
+                        "Move the Right Stick up/down to add or remove energy. " +
+                        "You can also launch upwards by holding and releasing A.",
                 },
                 new SectionIntroHud.ProximityStep
                 {
@@ -3488,19 +3510,53 @@ namespace KineticEnergy.EditorSetup
                     radius = 22f, // picked up on the approach, before the press
                     text =
                         "CHECKPOINTS\n" +
-                        "Checkpoints are buttons. Activate one by crashing straight downwards using a " +
-                        "regular launch down or a ground pound by pressing E / X. You need atleast as much " +
-                        "energy as is indicated by the colour of the button, which matches the colour of " +
-                        "the amount of energy on the energy meter. This also resets your energy meter.",
+                        "Activate one by crashing using a regular launch down or a ground pound by " +
+                        "pressing E. You need atleast as much energy as is indicated by the colour of " +
+                        "the button, which matches the colour the amount on the energy meter. " +
+                        "This also resets your energy meter.",
+                    gamepadText =
+                        "CHECKPOINTS\n" +
+                        "Activate one by crashing using a regular launch down or a ground pound by " +
+                        "pressing X. You need atleast as much energy as is indicated by the colour of " +
+                        "the button, which matches the colour the amount on the energy meter. " +
+                        "This also resets your energy meter.",
                 },
             };
             EditorUtility.SetDirty(hud);
 
+            // The boot overlay stands down - the bottom-left HUD teaches in place now, and
+            // two explainers competing at the start was one too many. Still reachable from
+            // the pause menu's BuildInfo button.
+            MergedEconomyController economy = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
+            if (economy != null)
+            {
+                economy.showIntroOnBoot = false;
+                EditorUtility.SetDirty(economy);
+            }
+
+            // The floating world figures go: the pip rows over every interactable and the
+            // sized enemies' own percentages. The band COLOUR carries the price now.
+            int quieted = 0;
+            foreach (EnergyRequirement requirement in UnityEngine.Object.FindObjectsByType<EnergyRequirement>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                requirement.buildTickMarks = false;
+                requirement.showPercentLabel = false;
+                EditorUtility.SetDirty(requirement);
+                quieted++;
+            }
+            foreach (SizedEnemy sized in UnityEngine.Object.FindObjectsByType<SizedEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                sized.showKillLabel = false;
+                EditorUtility.SetDirty(sized);
+            }
+
             EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
             EditorSceneManager.SaveOpenScenes();
-            Debug.Log("KineticEnergySetup: basics HUD split into 3 beats OK (steps at "
-                + secondPlatform.transform.position.x.ToString("F0") + " and "
-                + firstCheckpoint.transform.position.x.ToString("F0") + ")");
+            Debug.Log("KineticEnergySetup: basics HUD split into 3 beats OK (re-aim spans "
+                + secondPlatform.transform.position.x.ToString("F0") + "-"
+                + thirdPlatform.transform.position.x.ToString("F0") + ", checkpoint at "
+                + firstCheckpoint.transform.position.x.ToString("F0") + "); intro off, "
+                + quieted + " requirement displays quieted");
         }
 
         // LevelElementsTest3's own intro. It describes a different game from the earlier

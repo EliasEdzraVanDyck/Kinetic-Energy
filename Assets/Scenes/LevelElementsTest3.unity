@@ -478,9 +478,9 @@ MonoBehaviour:
   requirementPercent: 60
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 37435431}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &61114272
@@ -1122,9 +1122,9 @@ MonoBehaviour:
   requirementPercent: 40
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 115047565}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &151897999
@@ -1495,9 +1495,9 @@ MonoBehaviour:
   requirementPercent: 40
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 211711868}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1001 &222969840
@@ -1585,9 +1585,9 @@ MonoBehaviour:
   requirementPercent: 40
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 222969842}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &230431191
@@ -1939,9 +1939,9 @@ MonoBehaviour:
   requirementPercent: 40
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 253245770}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &254650961
@@ -3036,9 +3036,9 @@ MonoBehaviour:
   requirementPercent: 60
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 363222345}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &368315525
@@ -3828,9 +3828,9 @@ MonoBehaviour:
   requirementPercent: 60
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 436884721}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &448985954
@@ -4754,9 +4754,9 @@ MonoBehaviour:
   requirementPercent: 60
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 556159084}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &593743014
@@ -7826,8 +7826,8 @@ MonoBehaviour:
   sectionTexts:
   - 'THE BASICS
 
-    Charge a launch by pressing Right Mouse Button / Left Trigger
-    and press Left Mouse / Right Trigger to fire.'
+    Charge a launch by holding Right Mouse and press Left Mouse
+    to fire.'
   - 'MOVING PLATFORMS
 
     The ghost copy shows where a platform will be when you
@@ -7852,25 +7852,50 @@ MonoBehaviour:
     They shoot on sight. Only a hit on the back cube kills them.
     Hit anywhere else to stun them and you land on their back. Their weakspot shows
     the amount of energy to kill.'
+  sectionTextsGamepad:
+  - 'THE BASICS
+
+    Charge a launch by holding Left Trigger and press Right Trigger
+    to fire.'
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
   proximitySteps:
   - label: Basics - re-aim
     target: {fileID: 1457202609}
+    targetEnd: {fileID: 431391796}
     radius: 14
     text: 'THE BASICS
 
       When midair, hold the aim button again to slow time
-      and re-aim. Move the Scroll Wheel / Right Stick up/down to add or remove energy.'
+      and re-aim. Move the Scroll Wheel up/down to add or remove energy. You can
+      also launch upwards by holding and releasing Space.'
+    gamepadText: 'THE BASICS
+
+      When midair, hold the aim button again to slow
+      time and re-aim. Move the Right Stick up/down to add or remove energy. You
+      can also launch upwards by holding and releasing A.'
   - label: Basics - checkpoints
     target: {fileID: 436884720}
+    targetEnd: {fileID: 0}
     radius: 22
     text: 'CHECKPOINTS
 
-      Checkpoints are buttons. Activate one by crashing straight
-      downwards using a regular launch down or a ground pound by pressing E / X.
-      You need atleast as much energy as is indicated by the colour of the button,
-      which matches the colour of the amount of energy on the energy meter. This
-      also resets your energy meter.'
+      Activate one by crashing using a regular launch down
+      or a ground pound by pressing E. You need atleast as much energy as is indicated
+      by the colour of the button, which matches the colour the amount on the energy
+      meter. This also resets your energy meter.'
+    gamepadText: 'CHECKPOINTS
+
+      Activate one by crashing using a regular launch
+      down or a ground pound by pressing X. You need atleast as much energy as is
+      indicated by the colour of the button, which matches the colour the amount
+      on the energy meter. This also resets your energy meter.'
   panelWidth: 440
+  gamepadStickDeadzone: 0.35
 --- !u!4 &955590618
 Transform:
   m_ObjectHideFlags: 0
@@ -8100,7 +8125,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 695100077782646650, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 801306832633094212, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
       propertyPath: m_IsActive
@@ -8208,7 +8233,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6900658540424655345, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
       propertyPath: m_IsActive
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 7273578666443170142, guid: 3fbdab865bac4b14d9aa6878d7d31e9e, type: 3}
       propertyPath: m_AnchoredPosition.y
@@ -8326,6 +8351,7 @@ MonoBehaviour:
   totalLossStepPerLevel: 0.05
   totalLossSafetyTriggerFraction: 0.4
   totalLossSafetyCeilingFraction: 0.4
+  showIntroOnBoot: 0
   introKey: levelelements
   introText: 'LEVEL ELEMENTS TEST
 
@@ -8543,9 +8569,9 @@ MonoBehaviour:
   requirementPercent: 60
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 1048913791}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &1059980512
@@ -9024,9 +9050,9 @@ MonoBehaviour:
   requirementPercent: 40
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 1109618773}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &1113005917
@@ -11221,9 +11247,9 @@ MonoBehaviour:
   requirementPercent: 40
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 1297155055}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &1300004240
@@ -14740,9 +14766,9 @@ MonoBehaviour:
   requirementPercent: 60
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 1680695754}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &1680983675
@@ -16399,9 +16425,9 @@ MonoBehaviour:
   requirementPercent: 40
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 1812660444}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1001 &1823251933
@@ -16493,9 +16519,9 @@ MonoBehaviour:
   requirementPercent: 20
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 1823251935}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &1827444431
@@ -18057,9 +18083,9 @@ MonoBehaviour:
   requirementPercent: 60
   palette: {fileID: 11400000, guid: 33160487645057f40b139d0bf62d154c, type: 2}
   targetRenderer: {fileID: 2090753729}
-  buildTickMarks: 1
+  buildTickMarks: 0
   tickHeight: 0.35
-  showPercentLabel: 1
+  showPercentLabel: 0
   labelRise: 0.42
   pipMaterial: {fileID: 2100000, guid: ac5107215b00bdb49a33c5e5ee4f428b, type: 2}
 --- !u!1 &2107311544

@@ -2175,6 +2175,30 @@ namespace KineticEnergy.Player
                 Vector3 carryVelocity = Vector3.zero;
                 if (hasPendingCarry && isStuck) carryVelocity = stuckCarryVelocity;
                 else if (isGrounded && freeMoveController != null) carryVelocity = freeMoveController.GroundPlatformVelocity;
+
+                // A grounded aim on a vertical mover is pinned by POSITION, not velocity.
+                // The velocity carry loses the ride at the summit: the platform flips
+                // downward, the sampled velocity lags a tick, a gap opens underfoot,
+                // isGrounded drops - and with it the carry, so the player hung frozen in
+                // the air while the platform sank away. The platform and the player's
+                // offset on it are latched when the aim opens, and each frozen tick closes
+                // whatever gap exists, so the ride survives the turn-around regardless of
+                // what the ground probe momentarily thinks.
+                if (isAiming)
+                {
+                    if (aimRideBody == null && isGrounded && freeMoveController != null
+                        && freeMoveController.GroundPlatform != null)
+                    {
+                        aimRideBody = freeMoveController.GroundPlatform.GetComponent<Rigidbody>();
+                        if (aimRideBody != null) aimRideOffset = rb.position - aimRideBody.position;
+                    }
+                    if (aimRideBody != null)
+                    {
+                        carryVelocity = (aimRideBody.position + aimRideOffset - rb.position) / Time.fixedDeltaTime;
+                    }
+                }
+                else aimRideBody = null;
+
                 rb.linearVelocity = carryVelocity;
                 rb.angularVelocity = Vector3.zero;
 
@@ -2517,6 +2541,11 @@ namespace KineticEnergy.Player
         // player is grounded and aiming, the button at their feet stops colliding - and the
         // exemption HOLDS through the launch itself, until the next crash re-arms it.
         Collider ignoredCheckpointButton;
+
+        // The mover a grounded aim opened on, and where the player stood on it - the aim's
+        // position pin (see FixedUpdate's frozen branch). Null whenever no aim rides one.
+        Rigidbody aimRideBody;
+        Vector3 aimRideOffset;
 
         void SetIgnoredCheckpointButton(Collider button)
         {

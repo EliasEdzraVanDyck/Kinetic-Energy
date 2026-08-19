@@ -85,6 +85,8 @@ namespace KineticEnergy.Level
         [Range(0f, 1f)] public float totalLossSafetyCeilingFraction = 0.4f;
 
         [Header("Intro")]
+        [Tooltip("Open the intro overlay automatically at boot. OFF keeps it reachable through the pause menu's BuildInfo button only - the bottom-left section HUD carries the teaching now.")]
+        public bool showIntroOnBoot = true;
         [Tooltip("The first-boot key: each key shows once per game session. Scenes with their own intro text get their own key.")]
         public string introKey = "economy2";
         [Tooltip("First-boot explainer (also opened by the pause menu's BuildInfo button). Edit freely.")]
@@ -245,6 +247,7 @@ namespace KineticEnergy.Level
             var intro = introGo.AddComponent<KineticEnergy.UI.AimIntroScreen>();
             intro.introKey = introKey;
             intro.bodyText = introText;
+            intro.showOnBoot = showIntroOnBoot;
         }
 
         // ---------- The tall premium zone (this scene only) ----------
