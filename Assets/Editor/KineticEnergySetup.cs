@@ -2599,6 +2599,32 @@ namespace KineticEnergy.EditorSetup
                 + courseLength.ToString("F0") + ")");
         }
 
+        // The first four checkpoints drop to 40%: the opening sections are where the tank
+        // is least reliable, and a 60% gate there was asking for the full price before the
+        // player has the economy to keep it. The later two stay at 60%.
+        [MenuItem("Tools/Kinetic Energy/Retune Test3 Checkpoint Prices")]
+        public static void RetuneTest3CheckpointPrices()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest3.unity", OpenSceneMode.Single);
+
+            var ordered = new List<Checkpoint>(UnityEngine.Object.FindObjectsByType<Checkpoint>(FindObjectsInactive.Include, FindObjectsSortMode.None));
+            // Course order is along x, the same axis the sections run on.
+            ordered.Sort((a, b) => a.transform.position.x.CompareTo(b.transform.position.x));
+
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                float price = i < 4 ? 0.4f : ordered[i].minActivationEnergyFraction;
+                ordered[i].minActivationEnergyFraction = price;
+                EditorUtility.SetDirty(ordered[i]);
+                Debug.Log("CPPRICE " + i + " '" + ordered[i].name + "' x=" + ordered[i].transform.position.x.ToString("F0")
+                    + " price=" + price);
+            }
+
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+            EditorSceneManager.SaveOpenScenes();
+            Debug.Log("KineticEnergySetup: Test3 checkpoint prices retuned OK (" + ordered.Count + " checkpoints)");
+        }
+
         [MenuItem("Tools/Kinetic Energy/Validate SecondLevel")]
         public static void ValidateSecondLevel()
         {

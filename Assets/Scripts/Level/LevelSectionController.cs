@@ -61,8 +61,29 @@ namespace KineticEnergy.Level
             if (target == null || controller == null) return;
 
             controller.RespawnAtPoint(target.position);
+            GrantCheckpointEnergy(target);
             ResetLevelState();
             ResetCheckpoints();
+        }
+
+        // Arriving at a checkpoint hands you the energy that checkpoint COSTS. The price is
+        // the section's entry fee, so respawning under it would strand you: no launch big
+        // enough to press the pad you are standing on, and none to reach the next one.
+        // The figure comes from the Checkpoint prefab's own public minActivationEnergyFraction,
+        // so retuning a checkpoint in the inspector retunes the spawn with it - and every
+        // scene using the prefab follows the same rule for free.
+        //
+        // RespawnAtPoint has already reset the tank to startingEnergyFraction by the time
+        // this runs, so it only ever raises: a cheap checkpoint never lowers a full tank.
+        void GrantCheckpointEnergy(Transform spawn)
+        {
+            if (controller == null || spawn == null) return;
+            foreach (Checkpoint checkpoint in FindObjectsByType<Checkpoint>(FindObjectsInactive.Include))
+            {
+                if (checkpoint.RespawnTarget != spawn) continue;
+                controller.EnsureEnergyAtLeast(checkpoint.minActivationEnergyFraction);
+                return;
+            }
         }
 
         void OnEnable()
@@ -79,6 +100,11 @@ namespace KineticEnergy.Level
         // the SAME rule about what comes back, so the enemies behind you stay cleared.
         void OnPlayerRespawned()
         {
+            // A hazard death routes through DamageWalls, which calls RespawnAtPoint itself
+            // and then fires this - so the checkpoint's grant has to be applied here too,
+            // or falling into the floor would be the one way to arrive underfunded.
+            if (controller == null) controller = FindAnyObjectByType<KineticCubeController>();
+            GrantCheckpointEnergy(ActiveRespawn);
             ResetLevelState();
             ResetCheckpoints();
         }
@@ -116,6 +142,7 @@ namespace KineticEnergy.Level
             // The controller's own respawn does the whole job: position, velocity, flight
             // state and the camera pose all reset exactly as they do on a hazard death.
             controller?.RespawnAtPoint(section.spawnPoint.position);
+            GrantCheckpointEnergy(section.spawnPoint);
 
             ResetLevelState();
         }

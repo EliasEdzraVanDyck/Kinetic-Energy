@@ -516,26 +516,33 @@ namespace KineticEnergy.Level
 
         void OnCrash(Vector3 position)
         {
-            // POUND landings belong entirely to the pound pipeline (the wash refund plus
-            // the windowed 1.5x boost) - the harness must neither void nor re-pay them.
-            // The sole-payer take-back was eating the wash, and the no-self-hop rule
-            // voided the classic slam back onto the takeoff platform - together "pounds
-            // pay nothing anymore" (direct report). The landing still counts for the
-            // chain; the ledger closes since the wash already returned the flight's spend.
+            // POUND landings belong entirely to the pound pipeline for ENERGY (the wash
+            // refund plus the windowed 1.5x boost) - the harness must neither void nor
+            // re-pay them, or "pounds pay nothing anymore" (direct report).
+            //
+            // The CHAIN, though, follows the same law as every other landing: it grows only
+            // on ground you did not just come from. Pounding the same platform over and over
+            // was free multiplier - stand still, slam, repeat - because this branch returned
+            // before the returned-to-the-same-object rule below could see it.
             if (controller.LastCrashWasPound)
             {
-                // Still the last thing touched, even though the pound is exempt from the
-                // returned-to-the-same-object rule (the classic slam back onto your own
-                // takeoff platform has to keep counting).
-                if (controller.LastCrashSurface != null) lastTouchedSurface = controller.LastCrashSurface.transform;
+                Collider poundSurface = controller.LastCrashSurface;
+                bool sameGroundAsLastTime = poundSurface != null && poundSurface.transform == lastTouchedSurface;
+                if (poundSurface != null) lastTouchedSurface = poundSurface.transform;
+
                 flightOpen = false;
-                comboCount++;
-                if (comboStepPerLevel > 0f)
+                if (!sameGroundAsLastTime)
                 {
-                    int poundMaxLevels = Mathf.Max(Mathf.FloorToInt((comboMaxMultiplier - comboBaseRefund) / comboStepPerLevel + 0.0001f), 0);
-                    comboCount = Mathf.Min(comboCount, poundMaxLevels);
+                    comboCount++;
+                    if (comboStepPerLevel > 0f)
+                    {
+                        int poundMaxLevels = Mathf.Max(Mathf.FloorToInt((comboMaxMultiplier - comboBaseRefund) / comboStepPerLevel + 0.0001f), 0);
+                        comboCount = Mathf.Min(comboCount, poundMaxLevels);
+                    }
                 }
                 chainInFlight = false;
+                // The window still refreshes either way - repositioning on the spot keeps the
+                // run alive, it just stops paying, exactly as a repeated ordinary landing does.
                 windowRemaining = comboWindowSeconds;
                 return;
             }

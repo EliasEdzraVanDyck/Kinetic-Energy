@@ -1767,6 +1767,16 @@ namespace KineticEnergy.Player
             energyFraction = Mathf.Min(energyFraction, Mathf.Clamp01(fraction));
         }
 
+        // The floor counterpart: raises the tank to at least this much, never spends it
+        // down. Arriving at a checkpoint that costs 40% hands you those 40% back, so the
+        // section is always enterable at the price it charges - see
+        // LevelSectionController.GrantCheckpointEnergy.
+        public void EnsureEnergyAtLeast(float fraction)
+        {
+            if (infiniteEnergy) return;
+            energyFraction = Mathf.Max(energyFraction, Mathf.Clamp01(fraction));
+        }
+
         [Tooltip("While clinging to a surface, an aim whose dot with that surface's normal is at or below this counts as fired INTO the surface - the preview marks it as a failed shot. Slightly above 0 so shots that merely graze along the face count too.")]
         public float stuckSurfaceLaunchClearance = 0.12f;
 
