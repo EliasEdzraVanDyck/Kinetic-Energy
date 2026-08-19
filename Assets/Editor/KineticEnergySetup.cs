@@ -2599,30 +2599,42 @@ namespace KineticEnergy.EditorSetup
                 + courseLength.ToString("F0") + ")");
         }
 
-        // The first four checkpoints drop to 40%: the opening sections are where the tank
-        // is least reliable, and a 60% gate there was asking for the full price before the
-        // player has the economy to keep it. The later two stay at 60%.
-        [MenuItem("Tools/Kinetic Energy/Retune Test3 Checkpoint Prices")]
-        public static void RetuneTest3CheckpointPrices()
+        // NOTE: checkpoint prices are tuned PER INSTANCE in the Hierarchy, on each
+        // checkpoint's own minActivationEnergyFraction. There is deliberately no setup
+        // method that stamps them any more - one existed to set the opening four to 40%,
+        // and re-running it would silently overwrite hand-tuning. Nothing at runtime writes
+        // the field either, so the inspector value on each instance is the whole authority:
+        // the activation gate, the respawn grant, the pips, the % label, the band colour
+        // and the meter tick all read it live at Start.
+        //
+        // The one method that still writes it is SetupLevelElementsTest3, which rebuilds
+        // that scene from scratch - it necessarily re-authors everything it creates.
+
+        // Diagnostic: what each checkpoint charges, and whether that figure is an INSTANCE
+        // override (which masks any edit made to the prefab).
+        [MenuItem("Tools/Kinetic Energy/Validate Checkpoint Prices")]
+        public static void ValidateCheckpointPrices()
         {
             EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest3.unity", OpenSceneMode.Single);
 
-            var ordered = new List<Checkpoint>(UnityEngine.Object.FindObjectsByType<Checkpoint>(FindObjectsInactive.Include, FindObjectsSortMode.None));
-            // Course order is along x, the same axis the sections run on.
-            ordered.Sort((a, b) => a.transform.position.x.CompareTo(b.transform.position.x));
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/Checkpoint.prefab");
+            Checkpoint prefabPoint = prefab != null ? prefab.GetComponent<Checkpoint>() : null;
+            Debug.Log("CPCHECK prefabValue=" + (prefabPoint != null ? prefabPoint.minActivationEnergyFraction.ToString("F2") : "NONE"));
 
-            for (int i = 0; i < ordered.Count; i++)
+            foreach (Checkpoint point in UnityEngine.Object.FindObjectsByType<Checkpoint>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
-                float price = i < 4 ? 0.4f : ordered[i].minActivationEnergyFraction;
-                ordered[i].minActivationEnergyFraction = price;
-                EditorUtility.SetDirty(ordered[i]);
-                Debug.Log("CPPRICE " + i + " '" + ordered[i].name + "' x=" + ordered[i].transform.position.x.ToString("F0")
-                    + " price=" + price);
+                bool overridden = false;
+                if (PrefabUtility.IsPartOfPrefabInstance(point.gameObject))
+                {
+                    foreach (PropertyModification mod in PrefabUtility.GetPropertyModifications(point.gameObject))
+                    {
+                        if (mod != null && mod.propertyPath == "minActivationEnergyFraction") overridden = true;
+                    }
+                }
+                Debug.Log("CPCHECK '" + point.name + "' x=" + point.transform.position.x.ToString("F0")
+                    + " price=" + point.minActivationEnergyFraction.ToString("F2")
+                    + " instanceOverride=" + overridden);
             }
-
-            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
-            EditorSceneManager.SaveOpenScenes();
-            Debug.Log("KineticEnergySetup: Test3 checkpoint prices retuned OK (" + ordered.Count + " checkpoints)");
         }
 
         [MenuItem("Tools/Kinetic Energy/Validate SecondLevel")]

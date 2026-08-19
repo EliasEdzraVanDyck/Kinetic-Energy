@@ -340,6 +340,10 @@ namespace KineticEnergy.Level
             }
             if (next.y < originalSpawn.y - 40f)
             {
+                // The deep backstop: a hunter that somehow slipped past the void trigger
+                // still LAUNCHES home if it has not already tried - the teleport is only
+                // for a return arc that itself failed.
+                if (returnLaunchToPlatform && !returnLaunching) return TryReturnLaunch();
                 ResetToSpawn();
                 return true;
             }
@@ -767,7 +771,13 @@ namespace KineticEnergy.Level
                 TryReturnLaunch();
                 return;
             }
-            if (next.y < originalSpawn.y - 40f) ResetToSpawn();
+            if (next.y < originalSpawn.y - 40f)
+            {
+                // Same rule as the grounded backstop: launch home first, teleport only if
+                // a return arc already failed.
+                if (returnLaunchToPlatform && !returnLaunching) TryReturnLaunch();
+                else ResetToSpawn();
+            }
         }
 
         // Hunter: pick the nearest standable platform top and ballistically hop onto it,
@@ -823,8 +833,12 @@ namespace KineticEnergy.Level
             if (foundBelow) best = bestBelow; // launch while still ABOVE the target if possible
             if (!found)
             {
-                ResetToSpawn();
-                return true;
+                // NO platform in range: hop home to the boot spawn instead of teleporting -
+                // the arc solver handles any offset, so the flight back is always flyable.
+                // A return-capable enemy visibly LAUNCHES back; it never blinks to spawn
+                // (that read as "they just spawn back", direct report). The -40 reset stays
+                // as the final backstop should even this arc somehow fail.
+                best = originalSpawn;
             }
 
             returnLaunching = true; // one attempt per fall - the -40 reset is the backstop
