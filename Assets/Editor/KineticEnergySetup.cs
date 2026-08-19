@@ -3438,6 +3438,68 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
+        // LevelElementsTest3's own intro. It describes a different game from the earlier
+        // element scenes: energy is a PRICE now, every interactable advertises what it
+        // costs on the blackbody band scale, and the enemies' tells changed with it.
+        [MenuItem("Tools/Kinetic Energy/Update Test3 Intro Text")]
+        public static void UpdateTest3IntroText()
+        {
+            const string text =
+                "LEVEL ELEMENTS TEST\n\n" +
+                "A straight run along one axis, introducing one element at a time. Pause > Sections jumps " +
+                "straight to any of them - you respawn there while you keep testing it.\n\n" +
+
+                "ENERGY IS THE PRICE: every enemy and every checkpoint shows what it costs to kill or claim - " +
+                "as a heat colour, as a row of pips (one per 10%), and as a number above it. The scale runs " +
+                "cool to hot: ember, amber, golden yellow, pale gold, white-hot. While you charge, the charge " +
+                "bar climbs that same scale and a marker on the meter shows where the threshold sits - when " +
+                "the bar reaches the marker, the shot can pay for it. Aim at something you cannot afford and " +
+                "the trail, cursor and arrow turn red.\n\n" +
+
+                "1 - BASICS: plain platforms.\n\n" +
+
+                "2 - MOVING PLATFORMS: while you aim, a ghost of the platform and a blue arrow show where it " +
+                "will be when your shot lands.\n\n" +
+
+                "3 - ROTATING WALLS: sticky faces that keep turning. Land on one and it carries you round with " +
+                "it. The thin red edges are not landings - they shove you off and drain energy.\n\n" +
+
+                "4 - LASERS: gates that blink on and off. Cross while they are turned off - touching a beam " +
+                "knocks you back and drains energy.\n\n" +
+
+                "5 - HUNTERS: three sizes, costing 20%, 40% and 60% to kill. They leap at you from a distance, " +
+                "even in midair, and dodge launches aimed at them. Red means you cannot hurt them yet. If an " +
+                "attack MISSES, they stand still wearing their own cost colour and cannot dodge - that is the " +
+                "window, and the bigger the enemy the longer it stays open. A hit that CONNECTS earns them no " +
+                "such opening. Sharing their platform is enough to be spotted: they stop wandering and hold " +
+                "their ground. Knock one off its platform and it launches its own way back.\n\n" +
+
+                "6 - TURRETS: fixed wall enemies that fire a burst of two shots, then cool down. The yellow " +
+                "flash is their wind up warning. 40% to destroy.\n\n" +
+
+                "7 - FLYERS: they hang forward with a pulsing spot on their back - that spot is the only place " +
+                "that kills them, and only with 40% or more behind the shot. Hit them anywhere else and they " +
+                "are knocked out: they turn BLUE and you land square on the middle of that spot, set up to " +
+                "ground pound it. The spot is easier to hit while they are out, and they blink blue and red " +
+                "just before they come round.\n\n" +
+
+                "CHECKPOINTS: the button on each section pad. Ground pound it or crash steeply from above - " +
+                "and it charges energy like everything else, shown on the button itself. Claiming one sets " +
+                "your energy to exactly that amount, and so does respawning there. Your combo multiplier " +
+                "survives it. Sections you have already passed stay cleared: their enemies do not come back.\n\n" +
+
+                "COMBOS: land somewhere NEW to build the multiplier. Coming straight back to the object you " +
+                "just left returns what that launch cost and nothing more - it never raises the chain.\n\n" +
+
+                "FALLING: if the combo window runs out while you are in the air, the aim is cut short and you " +
+                "fall down. Keep landing before the meter empties.\n\n" +
+
+                "Press any button to start.";
+
+            ApplyIntroText("Assets/Scenes/LevelElementsTest3.unity", text);
+            AssetDatabase.SaveAssets();
+        }
+
         static void ApplyIntroText(string scenePath, string text)
         {
             if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) return;

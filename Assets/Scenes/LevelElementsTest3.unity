@@ -7808,7 +7808,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &955590617
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -7824,41 +7824,38 @@ MonoBehaviour:
   showHud: 1
   sections: {fileID: 1132250274}
   sectionTexts:
-  - 'THE BASICS
-
-    Charge a launch and release to fire. Midair, hold the aim button
-    to slow time and re-aim - the scroll wheel or right stick dials the energy up
-    and down. Ground pound with E / pad-West while airborne.
-
-
-    Checkpoints are
-    BUTTONS: press one with a steep landing or a ground pound, using at least 60%
-    energy.'
+  - "THE BASICS\nCharge a launch by pressing Right Mouse Button / Left Trigger and
+    press Left Mouse / Right Trigger to fire. \n\nWhen midair, hold the aim button
+    to slow time and re-aim. Move the Scroll Wheel / Right Stick up/down to add or
+    remove energy. Ground pound with E / pad-West while airborne.\n\nCheckpoints
+    are buttons. Activate one by crashing straight downwards using a regular launch
+    or a ground pound. You need atleast as much energy as is indicated by the colour
+    of the button, which matches the colour of the amount of energy on the energy
+    meter."
   - 'MOVING PLATFORMS
 
-    The ghost copy shows where a platform will be WHEN YOU
-    LAND. Aim at the ghost, not at the platform.'
+    The ghost copy shows where a platform will be when you
+    land.'
   - 'ROTATING WALLS
 
-    The broad faces are safe to land on and ride. The thin red
-    edges knock you back and cost energy - time your launch through the gaps.'
-  - 'LASERS
+    The broad faces are safe to land on and are sticky, meaning
+    you can''t fall off. The thin red edges knock you back and cost energy.'
+  - 'LASER GATES
 
-    Beams shove you back the way you came and drain energy. The dark
-    columns are safe to land on.'
-  - 'SIZED HUNTERS
+    If you hit the beams they deal knockback and drain energy.'
+  - 'GROUNDED ENEMIES
 
-    Their colour and the pips above them show the energy a kill
-    needs: small 20%, medium 40%, large 60%. They dodge launches and only die while
-    cooling down after an attack - when their body lights up in their colour.'
-  - 'TURRETS
+    If you dodge their attack, they light up and become vulnerable
+    to kill. The amount of energy needed to kill is shown the same way as the checkpoints.'
+  - 'TURRET ENEMIES
 
-    They telegraph, then fire a burst of shots and need at least 40%
-    energy to destroy. Closing the distance between bursts is the opening.'
-  - 'WEAK-SPOT FLYERS
+    They fire a burst of shots. And also show their required
+    energy to kill the same way as the grounded enemies.'
+  - 'FLYING ENEMIES
 
-    Only a hit on the marked back cube kills them (at least
-    40% energy). Anything else staggers them and knocks you back.'
+    They shoot on sight. Only a hit on the back cube kills them.
+    Hit anywhere else to stun them and you land on their back. Their weakspot shows
+    the amount of energy to kill.'
   panelWidth: 440
 --- !u!4 &955590618
 Transform:
@@ -8324,50 +8321,75 @@ MonoBehaviour:
     there while you keep testing it.
 
 
-    1 - BASICS: plain platforms.
+    ENERGY IS THE PRICE: every enemy and every
+    checkpoint shows what it costs to kill or claim - as a heat colour, as a row
+    of pips (one per 10%), and as a number above it. The scale runs cool to hot:
+    ember, amber, golden yellow, pale gold, white-hot. While you charge, the charge
+    bar climbs that same scale and a marker on the meter shows where the threshold
+    sits - when the bar reaches the marker, the shot can pay for it. Aim at something
+    you cannot afford and the trail, cursor and arrow turn red.
 
 
-    2 -
-    MOVING PLATFORMS: while you aim, a ghost of the platform and a blue arrow show
-    where it will be when your shot lands.
+    1 - BASICS:
+    plain platforms.
 
 
-    3 - ROTATING WALLS: sticky faces
-    that keep turning. Land on one and it carries you round with it.
+    2 - MOVING PLATFORMS: while you aim, a ghost of the platform
+    and a blue arrow show where it will be when your shot lands.
 
 
-    4 - LASERS:
-    gates that blink on and off. Cross while they are turned off - touching a beam
-    knocks you back and drains energy.
+    3 - ROTATING
+    WALLS: sticky faces that keep turning. Land on one and it carries you round with
+    it. The thin red edges are not landings - they shove you off and drain energy.
 
 
-    5 - HUNTERS: they leap at you from a
-    distance, even in midair, and dodge launches aimed at them. They show red when
-    you can''t attack them. If they miss an attack, it leaves them open to be killed.
-    They display purple then and can''t dodge.
+    4
+    - LASERS: gates that blink on and off. Cross while they are turned off - touching
+    a beam knocks you back and drains energy.
 
 
-    6 - TURRETS: fixed wall enemies
-    that fire a burst of two shots, then cool down. The yellow flash is their wind
-    up warning.
+    5 - HUNTERS: three sizes, costing
+    20%, 40% and 60% to kill. They leap at you from a distance, even in midair, and
+    dodge launches aimed at them. Red means you cannot hurt them yet. If an attack
+    MISSES, they stand still wearing their own cost colour and cannot dodge - that
+    is the window, and the bigger the enemy the longer it stays open. A hit that
+    CONNECTS earns them no such opening. Sharing their platform is enough to be spotted:
+    they stop wandering and hold their ground. Knock one off its platform and it
+    launches its own way back.
+
+
+    6 - TURRETS: fixed wall enemies that fire a
+    burst of two shots, then cool down. The yellow flash is their wind up warning.
+    40% to destroy.
 
 
     7 - FLYERS: they hang forward with a pulsing spot on their
-    back, that spot is the only spot where you can kill them. Hit them anywhere else
-    and they are knocked out for a while. Afterwhich you land on their back and can
-    ground pound them.
+    back - that spot is the only place that kills them, and only with 40% or more
+    behind the shot. Hit them anywhere else and they are knocked out: they turn BLUE
+    and you land square on the middle of that spot, set up to ground pound it. The
+    spot is easier to hit while they are out, and they blink blue and red just before
+    they come round.
 
 
-    CHECKPOINTS: the blue button on each section pad. Ground
-    pound on it or crasht steeply from above, to activate.
+    CHECKPOINTS: the button on each section pad. Ground pound
+    it or crash steeply from above - and it charges energy like everything else,
+    shown on the button itself. Claiming one sets your energy to exactly that amount,
+    and so does respawning there. Your combo multiplier survives it. Sections you
+    have already passed stay cleared: their enemies do not come back.
 
 
-    FALLING: if the
-    combo window runs out while you are in the air, the aim is cut short and you
-    fall down. Keep landing before the meter empties.
+    COMBOS:
+    land somewhere NEW to build the multiplier. Coming straight back to the object
+    you just left returns what that launch cost and nothing more - it never raises
+    the chain.
 
 
-    Press any button to start.'
+    FALLING: if the combo window runs out while you are in the air,
+    the aim is cut short and you fall down. Keep landing before the meter empties.
+
+
+    Press
+    any button to start.'
   safetyTriggerFraction: 0.4
   safetyCeilingFraction: 0.4
   regenPerSecond: 0.12
