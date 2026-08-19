@@ -3438,6 +3438,71 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
+        // Splits the BASICS section's teaching into three beats, each shown where the player
+        // actually meets it: charging on the start pad, re-aiming once they have landed the
+        // first hop, and the button rules at the first checkpoint they must press. Only
+        // section 1's text and the step list are written - every other section is untouched.
+        [MenuItem("Tools/Kinetic Energy/Split Basics HUD Steps")]
+        public static void SplitBasicsHudSteps()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest3.unity", OpenSceneMode.Single);
+
+            SectionIntroHud hud = UnityEngine.Object.FindAnyObjectByType<SectionIntroHud>(FindObjectsInactive.Include);
+            if (hud == null) throw new Exception("KineticEnergySetup: LevelElementsTest3 has no SectionIntroHud.");
+
+            // Beat 1 is the section's own text - it is what shows on the opening pad.
+            if (hud.sectionTexts.Length > 0)
+            {
+                hud.sectionTexts[0] =
+                    "THE BASICS\n" +
+                    "Charge a launch by pressing Right Mouse Button / Left Trigger and press " +
+                    "Left Mouse / Right Trigger to fire.";
+            }
+
+            GameObject secondPlatform = GameObject.Find("BasicsHop1");
+            // The first checkpoint the player has to ACTIVATE: section 1's own button is on
+            // the pad they spawn on and is already claimed, so the button lesson belongs at
+            // the next one along.
+            GameObject firstCheckpoint = GameObject.Find("2 - Moving platformsCheckpoint");
+            if (secondPlatform == null || firstCheckpoint == null)
+            {
+                throw new Exception("KineticEnergySetup: BasicsHop1 or the moving-platforms checkpoint is missing.");
+            }
+
+            hud.proximitySteps = new[]
+            {
+                new SectionIntroHud.ProximityStep
+                {
+                    label = "Basics - re-aim",
+                    target = secondPlatform.transform,
+                    radius = 14f, // the pad is 12 wide, so this is "on or just above it"
+                    text =
+                        "THE BASICS\n" +
+                        "When midair, hold the aim button again to slow time and re-aim. " +
+                        "Move the Scroll Wheel / Right Stick up/down to add or remove energy.",
+                },
+                new SectionIntroHud.ProximityStep
+                {
+                    label = "Basics - checkpoints",
+                    target = firstCheckpoint.transform,
+                    radius = 22f, // picked up on the approach, before the press
+                    text =
+                        "CHECKPOINTS\n" +
+                        "Checkpoints are buttons. Activate one by crashing straight downwards using a " +
+                        "regular launch down or a ground pound by pressing E / X. You need atleast as much " +
+                        "energy as is indicated by the colour of the button, which matches the colour of " +
+                        "the amount of energy on the energy meter. This also resets your energy meter.",
+                },
+            };
+            EditorUtility.SetDirty(hud);
+
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+            EditorSceneManager.SaveOpenScenes();
+            Debug.Log("KineticEnergySetup: basics HUD split into 3 beats OK (steps at "
+                + secondPlatform.transform.position.x.ToString("F0") + " and "
+                + firstCheckpoint.transform.position.x.ToString("F0") + ")");
+        }
+
         // LevelElementsTest3's own intro. It describes a different game from the earlier
         // element scenes: energy is a PRICE now, every interactable advertises what it
         // costs on the blackbody band scale, and the enemies' tells changed with it.

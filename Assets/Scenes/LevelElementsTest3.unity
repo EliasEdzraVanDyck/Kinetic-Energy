@@ -7824,14 +7824,10 @@ MonoBehaviour:
   showHud: 1
   sections: {fileID: 1132250274}
   sectionTexts:
-  - "THE BASICS\nCharge a launch by pressing Right Mouse Button / Left Trigger and
-    press Left Mouse / Right Trigger to fire. \n\nWhen midair, hold the aim button
-    to slow time and re-aim. Move the Scroll Wheel / Right Stick up/down to add or
-    remove energy. Ground pound with E / pad-West while airborne.\n\nCheckpoints
-    are buttons. Activate one by crashing straight downwards using a regular launch
-    or a ground pound. You need atleast as much energy as is indicated by the colour
-    of the button, which matches the colour of the amount of energy on the energy
-    meter."
+  - 'THE BASICS
+
+    Charge a launch by pressing Right Mouse Button / Left Trigger
+    and press Left Mouse / Right Trigger to fire.'
   - 'MOVING PLATFORMS
 
     The ghost copy shows where a platform will be when you
@@ -7856,6 +7852,24 @@ MonoBehaviour:
     They shoot on sight. Only a hit on the back cube kills them.
     Hit anywhere else to stun them and you land on their back. Their weakspot shows
     the amount of energy to kill.'
+  proximitySteps:
+  - label: Basics - re-aim
+    target: {fileID: 1457202609}
+    radius: 14
+    text: 'THE BASICS
+
+      When midair, hold the aim button again to slow time
+      and re-aim. Move the Scroll Wheel / Right Stick up/down to add or remove energy.'
+  - label: Basics - checkpoints
+    target: {fileID: 436884720}
+    radius: 22
+    text: 'CHECKPOINTS
+
+      Checkpoints are buttons. Activate one by crashing straight
+      downwards using a regular launch down or a ground pound by pressing E / X.
+      You need atleast as much energy as is indicated by the colour of the button,
+      which matches the colour of the amount of energy on the energy meter. This
+      also resets your energy meter.'
   panelWidth: 440
 --- !u!4 &955590618
 Transform:
