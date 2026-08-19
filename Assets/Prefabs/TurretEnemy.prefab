@@ -127,7 +127,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 453652c89405dae489dd485866a8b42f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Level.TurretEnemy
-  detectionRadius: 26
+  detectionRadius: 40
   windUpSeconds: 0.7
   shotsPerBurst: 2
   burstSeconds: 0.8
@@ -142,3 +142,4 @@ MonoBehaviour:
   muzzleClearance: 1.4
   projectileScale: {x: 0.35, y: 0.6, z: 0.35}
   projectileColor: {r: 0.9, g: 0.1, b: 0.08, a: 1}
+  minKillEnergyFraction: 0

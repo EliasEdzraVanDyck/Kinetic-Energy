@@ -26,15 +26,21 @@ namespace KineticEnergy.Level
         public float smallKnockbackMultiplier = 0.6f;
         public float smallScaleMultiplier = 0.65f;
         [Range(0f, 1f)] public float smallKillEnergyFraction = 0.2f;
+        [Tooltip("Seconds added to this size's whole cool-down after an attack - NEGATIVE for the small one, which shakes it off quicker and so offers a shorter punish window.")]
+        public float smallCooldownOffset = -0.2f;
 
         [Header("Medium")]
         [Range(0f, 1f)] public float mediumKillEnergyFraction = 0.4f;
+        [Tooltip("The baseline - the medium enemy is the unmodified hunter, so this is 0 by default.")]
+        public float mediumCooldownOffset = 0f;
 
         [Header("Large")]
         public float largeSpeedMultiplier = 0.7f;
         public float largeKnockbackMultiplier = 1.6f;
         public float largeScaleMultiplier = 1.45f;
         [Range(0f, 1f)] public float largeKillEnergyFraction = 0.6f;
+        [Tooltip("Seconds added to this size's whole cool-down after an attack - POSITIVE for the large one, which is slow to recover and so hangs punishable for longer.")]
+        public float largeCooldownOffset = 0.5f;
 
         [Header("Kill Label")]
         [Tooltip("World metres between the body's top and the percentage label.")]
@@ -61,6 +67,7 @@ namespace KineticEnergy.Level
         {
             // The class's twist is applied BEFORE the base wiring runs, so everything
             // downstream (spawn capture, body half-height from the scale) sees final values.
+            float cooldownOffset;
             switch (sizeClass)
             {
                 case EnemySizeClass.Small:
@@ -68,16 +75,34 @@ namespace KineticEnergy.Level
                     knockbackForce *= smallKnockbackMultiplier;
                     transform.localScale *= smallScaleMultiplier;
                     killEnergyFraction = smallKillEnergyFraction;
+                    cooldownOffset = smallCooldownOffset;
                     break;
                 case EnemySizeClass.Large:
                     moveSpeed *= largeSpeedMultiplier;
                     knockbackForce *= largeKnockbackMultiplier;
                     transform.localScale *= largeScaleMultiplier;
                     killEnergyFraction = largeKillEnergyFraction;
+                    cooldownOffset = largeCooldownOffset;
                     break;
                 default:
                     killEnergyFraction = mediumKillEnergyFraction;
+                    cooldownOffset = mediumCooldownOffset;
                     break;
+            }
+
+            // The cool-down after an attack, shifted whole. All THREE values move together
+            // because the punish window is max(vulnerableAfterAttackSeconds, attackCooldown)
+            // - on the hunter that is 2.5 against 2.0, so the cooldown dominates and moving
+            // only the vulnerable figure would change nothing at all. Shifting the group
+            // keeps them in their authored relationship while the window itself lands
+            // exactly the requested amount earlier or later, and recoverSeconds keeps the
+            // slumped pose in step with it.
+            if (!Mathf.Approximately(cooldownOffset, 0f))
+            {
+                const float floor = 0.05f; // never zero or negative, however it is tuned
+                recoverSeconds = Mathf.Max(recoverSeconds + cooldownOffset, floor);
+                attackCooldown = Mathf.Max(attackCooldown + cooldownOffset, floor);
+                vulnerableAfterAttackSeconds = Mathf.Max(vulnerableAfterAttackSeconds + cooldownOffset, floor);
             }
 
             base.Start();

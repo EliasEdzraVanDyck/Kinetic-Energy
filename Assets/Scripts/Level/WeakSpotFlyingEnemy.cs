@@ -8,7 +8,7 @@ namespace KineticEnergy.Level
     {
         [Tooltip("The back cube's collider - the ONLY spot a launch can kill through.")]
         public Collider weakSpot;
-        [Tooltip("The kill collider is grown by this factor at boot - the VISUAL stays its authored size, only the forgiving hitbox around it grows. 1 = exactly the visual.")]
+        [Tooltip("How far the kill collider grows WHILE STUNNED - the visual never changes, only the hitbox, and only for the stagger. A staggered flyer is the follow-up opportunity, so the spot is easier to hit for exactly as long as that opening lasts. 1 = never grows.")]
         public float weakSpotColliderScale = 1.35f;
 
         [Header("Weak spot tell")]
@@ -24,18 +24,17 @@ namespace KineticEnergy.Level
 
         Renderer spotRenderer;
         Color spotRestColor;
+        // The authored hitbox, captured once so the widened one can always be handed back
+        // exactly - never recomputed by dividing, which would drift over repeated stuns.
+        Vector3 spotBoxSize;
+        float spotSphereRadius;
+        bool spotWidened;
 
         void Awake()
         {
             if (weakSpot == null) return;
-            // The hitbox alone grows - the collider's own size fields, never the transform,
-            // so the rendered cube keeps its authored look while the kill window around it
-            // is more forgiving. Awake runs once per instance, so no double-growth.
-            if (weakSpotColliderScale > 1.0001f)
-            {
-                if (weakSpot is BoxCollider box) box.size *= weakSpotColliderScale;
-                else if (weakSpot is SphereCollider sphere) sphere.radius *= weakSpotColliderScale;
-            }
+            if (weakSpot is BoxCollider box) spotBoxSize = box.size;
+            else if (weakSpot is SphereCollider sphere) spotSphereRadius = sphere.radius;
             spotRenderer = weakSpot.GetComponent<Renderer>();
             if (spotRenderer == null) spotRenderer = weakSpot.GetComponentInChildren<Renderer>();
             // Reading .material instances a per-renderer copy, so the shared weak-spot
@@ -45,11 +44,35 @@ namespace KineticEnergy.Level
 
         void Update()
         {
+            // The hitbox follows the STAGGER, not the lifetime: wide while the flyer hangs
+            // there to be finished off, back to its authored size the instant it recovers.
+            // The collider's own size fields are written, never the transform, so the
+            // rendered cube never changes at all.
+            SetSpotWidened(IsStunned);
+
             if (spotRenderer == null) return;
             // Unscaled, so the tell keeps beating through the midair aim's bullet-time -
             // which is exactly when the player is lining the shot up.
             float pulse = Mathf.PingPong(Time.unscaledTime * pulseSpeed, pulseAmount);
             spotRenderer.material.color = Color.Lerp(spotRestColor, pulseColor, pulse);
+        }
+
+        // Idempotent both ways - guarded on the current state, so the per-frame call never
+        // compounds the growth or fights the authored value.
+        void SetSpotWidened(bool widened)
+        {
+            if (weakSpot == null || spotWidened == widened) return;
+            spotWidened = widened;
+
+            float scale = widened ? Mathf.Max(weakSpotColliderScale, 1f) : 1f;
+            if (weakSpot is BoxCollider box) box.size = spotBoxSize * scale;
+            else if (weakSpot is SphereCollider sphere) sphere.radius = spotSphereRadius * scale;
+        }
+
+        // A revived flyer must not come back still wearing the stagger's wide hitbox.
+        void OnDisable()
+        {
+            SetSpotWidened(false);
         }
 
         // The energy-tier hook: recolours the SPOT (material and the pulse's rest colour

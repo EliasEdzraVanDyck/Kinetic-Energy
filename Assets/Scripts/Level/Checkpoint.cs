@@ -74,6 +74,16 @@ namespace KineticEnergy.Level
             KineticCubeController player = collision.collider.GetComponent<KineticCubeController>();
             if (player == null || !HitTheButton(collision) || !ArrivedSteeplyEnough(player)) return;
 
+            // Claiming NORMALISES the tank to this checkpoint's own price - the same figure
+            // a respawn here hands you - so the section that follows always begins from an
+            // identical tank, however rich or poor the approach happened to be. Set
+            // outright, so a fat approach is levelled down as well as a thin one topped up.
+            //
+            // The COMBO is deliberately untouched: the chain is a reward for how you have
+            // been playing, not part of the checkpoint's state, so it carries through the
+            // press intact.
+            player.SetEnergyTo(minActivationEnergyFraction);
+
             if (sections == null) sections = FindAnyObjectByType<LevelSectionController>();
             if (sections == null)
             {

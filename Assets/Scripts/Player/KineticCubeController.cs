@@ -1777,6 +1777,15 @@ namespace KineticEnergy.Player
             energyFraction = Mathf.Max(energyFraction, Mathf.Clamp01(fraction));
         }
 
+        // Sets the tank OUTRIGHT, up or down. Claiming a checkpoint normalises the run to
+        // that checkpoint's own price, so every attempt at the section that follows starts
+        // from the same tank however rich or poor the approach was.
+        public void SetEnergyTo(float fraction)
+        {
+            if (infiniteEnergy) return;
+            energyFraction = Mathf.Clamp01(fraction);
+        }
+
         [Tooltip("While clinging to a surface, an aim whose dot with that surface's normal is at or below this counts as fired INTO the surface - the preview marks it as a failed shot. Slightly above 0 so shots that merely graze along the face count too.")]
         public float stuckSurfaceLaunchClearance = 0.12f;
 

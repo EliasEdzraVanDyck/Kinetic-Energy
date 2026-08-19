@@ -86,6 +86,8 @@ namespace KineticEnergy.Level
         Vector3 currentTarget;
         float postFireHoldRemaining;
         float stunRemaining;
+        // Read by WeakSpotFlyingEnemy, which only widens its kill hitbox while staggered.
+        public bool IsStunned => stunRemaining > 0f;
         Quaternion stunRotation = Quaternion.identity;
         float pauseRemaining;
         FlyerState state = FlyerState.Patrol;
