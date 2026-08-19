@@ -131,7 +131,11 @@ namespace KineticEnergy.UI
             if (pausePanel != null)
             {
                 Text titleText = pausePanel.transform.Find("Title")?.GetComponent<Text>();
-                if (titleText != null) titleText.text = "You win!";
+                if (titleText != null)
+                {
+                    titleText.text = "You Win!";
+                    ShowWinSubtitle(titleText);
+                }
                 Transform resume = pausePanel.transform.Find("ResumeButton");
                 if (resume != null) resume.gameObject.SetActive(false);
             }
@@ -142,6 +146,46 @@ namespace KineticEnergy.UI
                 Transform restart = pausePanel.transform.Find("RestartButton");
                 if (restart != null) Select(restart.gameObject);
             }
+        }
+
+        [Tooltip("The line under the win title. Slightly smaller than the title, in the same font and colour.")]
+        public string winSubtitle = "Thanks for playing!";
+
+        // Built lazily from the TITLE itself - same font, colour and alignment, at a
+        // smaller size - so it needs no scene wiring and matches whatever the title is
+        // styled as in each scene. Sits directly beneath the title, and the title's own
+        // rect is never touched.
+        void ShowWinSubtitle(Text titleText)
+        {
+            RectTransform titleRect = titleText.rectTransform;
+            Transform existing = titleRect.parent.Find("WinSubtitle");
+            Text subtitle;
+            if (existing != null) subtitle = existing.GetComponent<Text>();
+            else
+            {
+                GameObject go = new GameObject("WinSubtitle", typeof(RectTransform));
+                go.transform.SetParent(titleRect.parent, false);
+                subtitle = go.AddComponent<Text>();
+                subtitle.font = titleText.font;
+                subtitle.color = titleText.color;
+                subtitle.alignment = titleText.alignment;
+                subtitle.horizontalOverflow = HorizontalWrapMode.Overflow;
+                subtitle.verticalOverflow = VerticalWrapMode.Overflow;
+                subtitle.raycastTarget = false;
+
+                RectTransform rect = go.GetComponent<RectTransform>();
+                rect.anchorMin = titleRect.anchorMin;
+                rect.anchorMax = titleRect.anchorMax;
+                rect.pivot = titleRect.pivot;
+                rect.sizeDelta = titleRect.sizeDelta;
+                // One title-height down, so it reads as a second line rather than a
+                // competing heading.
+                rect.anchoredPosition = titleRect.anchoredPosition
+                    - new Vector2(0f, titleRect.sizeDelta.y * 0.85f);
+                subtitle.fontSize = Mathf.Max(Mathf.RoundToInt(titleText.fontSize * 0.55f), 10);
+            }
+            subtitle.text = winSubtitle;
+            subtitle.gameObject.SetActive(true);
         }
 
         void Update()

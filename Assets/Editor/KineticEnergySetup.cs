@@ -2338,6 +2338,364 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
+        // SecondLevel: a full six-section course built on LevelElementsTest3's systems
+        // (player, camera, pause menu, meters, economy harness, band palette all inherited
+        // by the copy). Every section runs THREE element beats instead of the element
+        // scenes' two - half again as long - and every section after the first mixes at
+        // least two element types, so nothing is ever taught in isolation twice.
+        //
+        // The difficulty curve is in the PLACEMENT, not just the count: hazards start
+        // beside the route and end across it, enemies start alone on wide decks and end
+        // stacked on narrow ones, and the energy prices climb 20% -> 60% as the tank gets
+        // harder to keep full.
+        [MenuItem("Tools/Kinetic Energy/Setup SecondLevel")]
+        public static void SetupSecondLevel()
+        {
+            const string sourcePath = "Assets/Scenes/LevelElementsTest3.unity";
+            const string targetPath = "Assets/Scenes/SecondLevel.unity";
+
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(targetPath) != null) AssetDatabase.DeleteAsset(targetPath);
+            if (!AssetDatabase.CopyAsset(sourcePath, targetPath))
+            {
+                throw new Exception("KineticEnergySetup: could not copy LevelElementsTest3 to SecondLevel.");
+            }
+            AssetDatabase.Refresh();
+            EditorSceneManager.OpenScene(targetPath, OpenSceneMode.Single);
+
+            EnergyBandPalette palette = EnsureBandPalette();
+            Material pipMaterial = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/EnergyPipMaterial.mat");
+            Material platformMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/QuarryPlatformMaterial.mat");
+            Material wallMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/ElementsWallMaterial.mat");
+            Material damageMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/DamageWallMaterial.mat");
+            if (platformMat == null || wallMat == null || damageMat == null)
+            {
+                throw new Exception("KineticEnergySetup: course materials missing - build an element scene first.");
+            }
+
+            // ---- Clear the inherited course, keeping every SYSTEM in the scene ----
+            foreach (string stale in new[] { "ElementsCourse", "LevelSections", "DamageFloor" })
+            {
+                GameObject go = GameObject.Find(stale);
+                if (go != null) UnityEngine.Object.DestroyImmediate(go);
+            }
+            DestroyAllOfType<Enemy>();
+            DestroyAllOfType<FlyingEnemy>();
+            DestroyAllOfType<TurretEnemy>();
+            DestroyAllOfType<Checkpoint>();
+            DestroyAllOfType<WinOnFinish>();
+            DestroyAllOfType<MovingPlatform>();
+
+            KineticCubeController player = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
+            if (player == null) throw new Exception("KineticEnergySetup: SecondLevel has no player.");
+
+            MeasureLaunchDistances(out float L, out float H);
+
+            GameObject course = new GameObject("SecondLevelCourse");
+            Transform tf = course.transform;
+            Vector3 pad = new Vector3(12f, 2f, 12f);
+            var sections = new List<LevelSectionController.Section>();
+            var hazards = new List<DamageWalls>();
+
+            // Each section opens on a plain pad with its checkpoint, exactly as the element
+            // course does - a jump to any section starts from solid, safe ground.
+            Transform OpenSection(string label, Vector3 padCentre, float checkpointPrice)
+            {
+                GameObject sectionPad = CreateBlock(tf, label + "Pad", padCentre, pad, platformMat);
+                sectionPad.AddComponent<StickySurface>();
+                GameObject spawn = new GameObject(label + "Spawn");
+                spawn.transform.SetParent(tf, false);
+                spawn.transform.position = padCentre + new Vector3(0f, pad.y * 0.5f + 1.5f, 0f);
+                sections.Add(new LevelSectionController.Section { label = label, spawnPoint = spawn.transform });
+
+                GameObject checkpoint = InstantiatePrefab("Checkpoint");
+                checkpoint.name = label + "Checkpoint";
+                checkpoint.transform.SetParent(tf, false);
+                checkpoint.transform.position = padCentre + new Vector3(0f, pad.y * 0.5f + 0.75f, 0f);
+                checkpoint.transform.localScale = new Vector3(pad.x * 0.9f, 0.5f, pad.z * 0.9f);
+                Checkpoint point = checkpoint.GetComponent<Checkpoint>();
+                point.respawnPoint = spawn.transform;
+                point.minActivationEnergyFraction = checkpointPrice;
+                EditorUtility.SetDirty(checkpoint);
+                AddBandRequirement(checkpoint, palette, pipMaterial, point.buttonRenderer);
+                return spawn.transform;
+            }
+
+            float gap = 0.42f * L;
+            float lead = gap * 0.5f;
+            float x = 0f;
+            float e1, e2, e3;
+
+            // ---- 1. FOUNDATIONS - hop, ride, and one lone target -------------------
+            // The gentlest mix in the level: static ground first, then a single mover, then
+            // one small enemy alone on a wide deck with room to circle it.
+            Transform s1 = OpenSection("1 - Foundations", new Vector3(x, -1f, 0f), 0.2f);
+            Vector3 playerSpawn = new Vector3(x, 1.5f, 0f);
+            e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
+            CreateBlock(tf, "F_Hop1", new Vector3(e1, 1f, 9f), pad, platformMat);
+            CreateBlock(tf, "F_Hop2", new Vector3(e2, 4f, -8f), pad, platformMat);
+            SpawnMovingPlatform(tf, "F_Mover", new Vector3(e2 + gap * 0.5f, 5f, 2f), new Vector3(0f, 0f, 20f), 8f);
+            GameObject f_deck = CreateBlock(tf, "F_Arena", new Vector3(e3, 5f, 0f), new Vector3(26f, 2f, 26f), platformMat);
+            f_deck.AddComponent<StickySurface>();
+            SpawnBandedSizedEnemy("SL_Small1", new Vector3(e3, 7f, 0f), EnemySizeClass.Small, 9f, palette, pipMaterial);
+
+            // ---- 2. MOMENTUM - two movers and a turning face ------------------------
+            // Movers now travel on DIFFERENT axes, and the rotating wall sits between them,
+            // so the ride has to be left on a schedule rather than waited out.
+            x = e3 + gap;
+            Transform s2 = OpenSection("2 - Momentum", new Vector3(x, 4f, 0f), 0.2f);
+            e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
+            SpawnMovingPlatform(tf, "M_Side", new Vector3(e1, 6f, -13f), new Vector3(0f, 0f, 26f), 7f);
+            GameObject m_spin = SpawnRotatingWall(tf, "M_Spin", new Vector3(e2, 10f, 6f), 30f, 0f, wallMat);
+            AddEdgeDamageShell(m_spin.transform, s2, damageMat);
+            SpawnMovingPlatform(tf, "M_Lift", new Vector3(e2 + gap * 0.5f, 3f, -6f), new Vector3(0f, 15f, 0f), 6.5f);
+            CreateBlock(tf, "M_Landing", new Vector3(e3, 9f, 4f), pad, platformMat);
+            SpawnBandedSizedEnemy("SL_Medium1", new Vector3(e3, 11f, 4f), EnemySizeClass.Medium, 5f, palette, pipMaterial);
+
+            // ---- 3. CROSSFIRE - timed beams with a gun watching the runway ----------
+            // The first gate is beside the line, the second across it, and the turret covers
+            // the landing between them: the beams set the rhythm, the turret punishes waiting.
+            x = e3 + gap;
+            Transform s3 = OpenSection("3 - Crossfire", new Vector3(x, 8f, 0f), 0.4f);
+            e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
+            CreateBlock(tf, "C_Run1", new Vector3(e1, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateLaserGate(tf, "C_Gate1", new Vector3(x + lead * 0.5f, 9f, 0f), 24f, 12f, 1.5f, 1.6f, 0f, s3);
+            CreateBlock(tf, "C_Run2", new Vector3(e2, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateLaserGate(tf, "C_Gate2", new Vector3((e1 + e2) * 0.5f, 9f, 0f), 24f, 12f, 1.1f, 1.3f, 0.6f, s3);
+            GameObject c_wall = CreateBlock(tf, "C_TurretWall", new Vector3(e2, 12f, -15f), new Vector3(20f, 16f, 2f), wallMat);
+            AddDamageShell(c_wall.transform, s3, damageMat);
+            SpawnBandedTurret("SL_Turret1", new Vector3(e2, 13f, -13.8f), new Vector3(-90f, 0f, 0f), palette, pipMaterial);
+            SpawnMovingPlatform(tf, "C_Ferry", new Vector3(e3, 8f, 0f), new Vector3(0f, 0f, 18f), 6f);
+
+            // ---- 4. AERIAL - open air, weak spots, and turning walls ----------------
+            // No continuous floor: the platforms are small and far apart, the flyers own the
+            // space between them, and the tilted ledges will not hold a cling.
+            x = e3 + gap;
+            Transform s4 = OpenSection("4 - Aerial", new Vector3(x, 8f, 0f), 0.4f);
+            e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
+            CreateBlock(tf, "A_Step1", new Vector3(e1, 10f, -9f), pad, platformMat);
+            SpawnBandedFlyer("SL_Flyer1", new Vector3(x + lead * 0.7f, 17f, -3f), 10f, 26f, palette, pipMaterial);
+            GameObject a_spin = SpawnRotatingWall(tf, "A_Spin", new Vector3(e2, 14f, 4f), -34f, 90f, wallMat);
+            AddEdgeDamageShell(a_spin.transform, s4, damageMat);
+            SpawnTiltedLedge(tf, "A_LedgeA", new Vector3(e2, 8f, -16f), new Vector3(0f, 0f, 22f), wallMat);
+            CreateBlock(tf, "A_Step2", new Vector3(e3, 13f, 10f), pad, platformMat);
+            SpawnBandedFlyer("SL_Flyer2", new Vector3(e2 + gap * 0.6f, 21f, 6f), 12f, 28f, palette, pipMaterial);
+
+            // ---- 5. SIEGE - held ground, two guns and a mixed pair ------------------
+            // Crossfire from BOTH sides now, with the arena between them holding a small and
+            // a large enemy - the cheap kill and the expensive one in the same fight.
+            x = e3 + gap;
+            Transform s5 = OpenSection("5 - Siege", new Vector3(x, 6f, 0f), 0.6f);
+            e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
+            GameObject s_arena = CreateBlock(tf, "S_Arena", new Vector3(e1, 4f, 0f), new Vector3(30f, 2f, 30f), platformMat);
+            s_arena.AddComponent<StickySurface>();
+            SpawnBandedSizedEnemy("SL_Small2", new Vector3(e1 - 7f, 6f, 4f), EnemySizeClass.Small, 9f, palette, pipMaterial);
+            SpawnBandedSizedEnemy("SL_Large1", new Vector3(e1 + 7f, 6f, -4f), EnemySizeClass.Large, 9f, palette, pipMaterial);
+            GameObject s_wallL = CreateBlock(tf, "S_WallLeft", new Vector3(e1, 10f, -19f), new Vector3(20f, 16f, 2f), wallMat);
+            GameObject s_wallR = CreateBlock(tf, "S_WallRight", new Vector3(e2, 10f, 19f), new Vector3(20f, 16f, 2f), wallMat);
+            AddDamageShell(s_wallL.transform, s5, damageMat);
+            AddDamageShell(s_wallR.transform, s5, damageMat);
+            SpawnBandedTurret("SL_Turret2", new Vector3(e1, 11f, -17.8f), new Vector3(-90f, 0f, 0f), palette, pipMaterial);
+            SpawnBandedTurret("SL_Turret3", new Vector3(e2, 11f, 17.8f), new Vector3(90f, 0f, 0f), palette, pipMaterial);
+            CreateBlock(tf, "S_Run", new Vector3(e2, 6f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            CreateLaserGate(tf, "S_Gate", new Vector3((e2 + e3) * 0.5f, 7f, 0f), 24f, 12f, 1.0f, 1.2f, 0.3f, s5);
+            SpawnMovingPlatform(tf, "S_Ferry", new Vector3(e3, 7f, 0f), new Vector3(0f, 9f, 14f), 7f);
+
+            // ---- 6. GAUNTLET - every element at once --------------------------------
+            // The exam: a moving approach under a gun, an air fight over a laser gate, and a
+            // final deck holding the level's most expensive pair behind a turning wall.
+            x = e3 + gap;
+            Transform s6 = OpenSection("6 - Gauntlet", new Vector3(x, 8f, 0f), 0.6f);
+            e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
+            SpawnMovingPlatform(tf, "G_Approach", new Vector3(e1, 9f, -8f), new Vector3(0f, 0f, 22f), 5.5f);
+            GameObject g_wall = CreateBlock(tf, "G_TurretWall", new Vector3(e1, 14f, 18f), new Vector3(20f, 16f, 2f), wallMat);
+            AddDamageShell(g_wall.transform, s6, damageMat);
+            SpawnBandedTurret("SL_Turret4", new Vector3(e1, 15f, 16.8f), new Vector3(90f, 0f, 0f), palette, pipMaterial);
+            CreateBlock(tf, "G_Perch", new Vector3(e2, 11f, 2f), pad, platformMat);
+            CreateLaserGate(tf, "G_Gate", new Vector3(e2, 12f, 0f), 24f, 12f, 0.9f, 1.1f, 0.4f, s6);
+            SpawnBandedFlyer("SL_Flyer3", new Vector3(e2 - gap * 0.3f, 19f, -6f), 11f, 28f, palette, pipMaterial);
+            SpawnBandedFlyer("SL_Flyer4", new Vector3(e2 + gap * 0.3f, 21f, 8f), 11f, 28f, palette, pipMaterial);
+            GameObject g_spin = SpawnRotatingWall(tf, "G_Spin", new Vector3(e2 + gap * 0.55f, 13f, -4f), 40f, 45f, wallMat);
+            AddEdgeDamageShell(g_spin.transform, s6, damageMat);
+            GameObject g_arena = CreateBlock(tf, "G_Arena", new Vector3(e3, 8f, 0f), new Vector3(30f, 2f, 30f), platformMat);
+            g_arena.AddComponent<StickySurface>();
+            SpawnBandedSizedEnemy("SL_Medium2", new Vector3(e3 - 7f, 10f, 5f), EnemySizeClass.Medium, 9f, palette, pipMaterial);
+            SpawnBandedSizedEnemy("SL_Large2", new Vector3(e3 + 7f, 10f, -5f), EnemySizeClass.Large, 9f, palette, pipMaterial);
+
+            // ---- Finish ----
+            x = e3 + gap;
+            CreateBlock(tf, "FinishPad", new Vector3(x, 6f, 0f), new Vector3(16f, 2f, 16f), platformMat);
+            float courseLength = x;
+
+            // The finish prefab IS the trigger AND its green visual - its scale is the
+            // volume, so no separate collider sizing.
+            CreateFinishVolumePrefab();
+            GameObject finish = InstantiatePrefab("FinishVolume");
+            finish.name = "SecondLevelFinish";
+            finish.transform.SetParent(tf, false);
+            finish.transform.position = new Vector3(x, 9f, 0f);
+            finish.transform.localScale = new Vector3(6f, 6f, 12f);
+            EditorUtility.SetDirty(finish);
+
+            // ---- Lasers HURT rather than kill (same bargain as the element course) ----
+            foreach (LaserWall gate in course.GetComponentsInChildren<LaserWall>(true))
+            {
+                foreach (DamageWalls beamDamage in gate.GetComponentsInChildren<DamageWalls>(true))
+                {
+                    GameObject beamsGo = beamDamage.gameObject;
+                    UnityEngine.Object.DestroyImmediate(beamDamage);
+                    if (beamsGo.GetComponent<LaserHazard>() == null) beamsGo.AddComponent<LaserHazard>();
+                    EditorUtility.SetDirty(beamsGo);
+                }
+            }
+
+            // ---- Hazard floor ----
+            GameObject damageFloor = CreateBlock(null, "DamageFloor",
+                new Vector3(courseLength * 0.5f, -26f, 0f), new Vector3(courseLength + 120f, 2f, 240f), damageMat);
+            DamageWalls floorDamage = damageFloor.AddComponent<DamageWalls>();
+            hazards.Add(floorDamage);
+            foreach (DamageWalls courseHazard in course.GetComponentsInChildren<DamageWalls>(true))
+            {
+                hazards.Add(courseHazard);
+            }
+
+            // ---- Section index (drives the pause menu's jump screen) ----
+            GameObject sectionsGo = new GameObject("LevelSections");
+            LevelSectionController sectionController = sectionsGo.AddComponent<LevelSectionController>();
+            sectionController.sections = sections.ToArray();
+            sectionController.hazards = hazards.ToArray();
+            EditorUtility.SetDirty(sectionController);
+            foreach (DamageWalls hazard in hazards)
+            {
+                hazard.respawnPoint = sections[0].spawnPoint;
+                EditorUtility.SetDirty(hazard);
+            }
+            RebuildSectionsScreenButtons(sectionController);
+
+            player.transform.position = playerSpawn;
+            EditorUtility.SetDirty(player);
+
+            // ---- The bottom-left teaching HUD, retargeted at these six sections ----
+            SectionIntroHud hud = UnityEngine.Object.FindAnyObjectByType<SectionIntroHud>(FindObjectsInactive.Include);
+            if (hud != null)
+            {
+                hud.sections = sectionController;
+                hud.sectionTexts = new[]
+                {
+                    "FOUNDATIONS\nCharge a launch and release to fire. Midair, hold the aim button to slow time and re-aim - the wheel or right stick dials the energy up and down. Ground pound with E / pad-West while airborne.\n\nCheckpoints are BUTTONS: land steeply or pound them, using at least the energy they show.",
+                    "MOMENTUM\nThe ghost copy shows where a platform will be WHEN YOU LAND - aim at the ghost. The rotating wall's broad faces carry you; its thin red edges cost energy.",
+                    "CROSSFIRE\nBeams shove you back and drain energy. The turret telegraphs, then fires a burst - cross while it reloads.",
+                    "AERIAL\nFlyers only die to a hit on the marked back cube; anything else staggers them and drops you on top. The tilted ledges will not hold a cling.",
+                    "SIEGE\nGuns on both flanks. The arena holds a cheap kill and an expensive one - check the pips before you commit the energy.",
+                    "GAUNTLET\nEverything at once. Energy is the real resource here: every kill has a price, and the meter's marker shows whether this shot can pay it.",
+                };
+                EditorUtility.SetDirty(hud);
+            }
+
+            EnsureSceneInBuildSettings(targetPath);
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+            EditorSceneManager.SaveOpenScenes();
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: SecondLevel built OK (" + sections.Count + " sections, length "
+                + courseLength.ToString("F0") + ")");
+        }
+
+        [MenuItem("Tools/Kinetic Energy/Validate SecondLevel")]
+        public static void ValidateSecondLevel()
+        {
+            EditorSceneManager.OpenScene("Assets/Scenes/SecondLevel.unity", OpenSceneMode.Single);
+
+            LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
+            Debug.Log("SL sections=" + (sections != null ? sections.sections.Length.ToString() : "NONE")
+                + " hazards=" + (sections != null ? sections.hazards.Length.ToString() : "-"));
+            if (sections != null)
+            {
+                foreach (LevelSectionController.Section s in sections.sections)
+                {
+                    Debug.Log("SL section '" + s.label + "' x=" + (s.spawnPoint != null ? s.spawnPoint.position.x.ToString("F0") : "NULL"));
+                }
+            }
+
+            Debug.Log("SL sized=" + UnityEngine.Object.FindObjectsByType<SizedEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length
+                + " flyers=" + UnityEngine.Object.FindObjectsByType<WeakSpotFlyingEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length
+                + " turrets=" + UnityEngine.Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length
+                + " movers=" + UnityEngine.Object.FindObjectsByType<MovingPlatform>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length
+                + " lasers=" + UnityEngine.Object.FindObjectsByType<LaserWall>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length
+                + " spins=" + UnityEngine.Object.FindObjectsByType<RotatingWall>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length
+                + " checkpoints=" + UnityEngine.Object.FindObjectsByType<Checkpoint>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length
+                + " finishes=" + UnityEngine.Object.FindObjectsByType<WinOnFinish>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length);
+
+            int missingPalette = 0, missingPip = 0;
+            foreach (EnergyRequirement r in UnityEngine.Object.FindObjectsByType<EnergyRequirement>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (r.palette == null) missingPalette++;
+                if (r.pipMaterial == null) missingPip++;
+            }
+            Debug.Log("SL requirements=" + UnityEngine.Object.FindObjectsByType<EnergyRequirement>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length
+                + " missingPalette=" + missingPalette + " missingPipMaterial=" + missingPip);
+
+            SectionIntroHud hud = UnityEngine.Object.FindAnyObjectByType<SectionIntroHud>(FindObjectsInactive.Include);
+            Debug.Log("SL hud=" + (hud != null ? "texts=" + hud.sectionTexts.Length + " wired=" + (hud.sections != null) : "NONE"));
+        }
+
+        static void DestroyAllOfType<T>() where T : Component
+        {
+            foreach (T victim in UnityEngine.Object.FindObjectsByType<T>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (victim != null) UnityEngine.Object.DestroyImmediate(victim.gameObject);
+            }
+        }
+
+        // Requirement percentages are read off the enforcing gate at Start, so these only
+        // need the palette and the build-safe pip material.
+        static void AddBandRequirement(GameObject target, EnergyBandPalette palette, Material pipMaterial, Renderer shows)
+        {
+            EnergyRequirement requirement = target.GetComponent<EnergyRequirement>();
+            if (requirement == null) requirement = target.AddComponent<EnergyRequirement>();
+            requirement.palette = palette;
+            requirement.pipMaterial = pipMaterial;
+            requirement.targetRenderer = shows != null ? shows : target.GetComponentInChildren<Renderer>();
+            EditorUtility.SetDirty(requirement);
+        }
+
+        static void SpawnBandedSizedEnemy(string name, Vector3 position, EnemySizeClass sizeClass, float radius,
+            EnergyBandPalette palette, Material pipMaterial)
+        {
+            SpawnSizedEnemy(name, position, sizeClass, EnemyWanderMode.PlatformSurface, radius);
+            GameObject instance = GameObject.Find(name);
+            if (instance != null) AddBandRequirement(instance, palette, pipMaterial, instance.GetComponentInChildren<Renderer>());
+        }
+
+        static void SpawnBandedFlyer(string name, Vector3 position, float radius, float detection,
+            EnergyBandPalette palette, Material pipMaterial)
+        {
+            SpawnWeakSpotFlyer(name, position, radius, detection);
+            GameObject instance = GameObject.Find(name);
+            if (instance == null) return;
+            WeakSpotFlyingEnemy flyer = instance.GetComponent<WeakSpotFlyingEnemy>();
+            if (flyer != null)
+            {
+                flyer.minKillEnergyFraction = 0.4f;
+                EditorUtility.SetDirty(flyer);
+                AddBandRequirement(instance, palette, pipMaterial,
+                    flyer.weakSpot != null ? flyer.weakSpot.GetComponent<Renderer>() : null);
+            }
+        }
+
+        static void SpawnBandedTurret(string name, Vector3 position, Vector3 eulerRotation,
+            EnergyBandPalette palette, Material pipMaterial)
+        {
+            SpawnTurret(name, position, eulerRotation);
+            GameObject instance = GameObject.Find(name);
+            if (instance == null) return;
+            TurretEnemy turret = instance.GetComponent<TurretEnemy>();
+            if (turret != null)
+            {
+                turret.minKillEnergyFraction = 0.4f;
+                EditorUtility.SetDirty(turret);
+            }
+            AddBandRequirement(instance, palette, pipMaterial, instance.GetComponentInChildren<Renderer>());
+        }
+
         // BUILD FIX: the requirement pips and the % labels rendered solid magenta in a
         // player build while looking correct in the editor - the signature of a shader
         // that exists in the editor but is stripped from the build.
