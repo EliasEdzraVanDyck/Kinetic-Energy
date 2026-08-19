@@ -1,0 +1,80 @@
+/* Fill whatever box the page gives us - on itch.io that is an iframe of the size
+   set in the project's embed options, and the canvas has to follow it exactly.
+   The stock template hard-codes the canvas to the Player Settings resolution, so
+   a smaller iframe shows the MIDDLE of a 960x600 canvas and crops the rest. */
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+#unity-container {
+  position: absolute;
+  inset: 0;
+}
+
+/* display:block kills the inline-element baseline gap that would otherwise leave
+   a few scrolling pixels at the bottom. */
+#unity-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #000;
+}
+
+#unity-loading-bar {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+  text-align: center;
+  font-family: system-ui, sans-serif;
+  color: #ddd;
+}
+
+#unity-progress-bar-empty {
+  width: 260px;
+  height: 12px;
+  margin-top: 10px;
+  background: #222;
+  border: 1px solid #444;
+}
+
+#unity-progress-bar-full {
+  width: 0%;
+  height: 100%;
+  background: #d8c34a;
+}
+
+/* Sits over the canvas rather than in a footer bar, so it costs no play area.
+   Hidden once the game is fullscreen - the browser's own exit is the way back. */
+#unity-fullscreen-button {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 6px 12px;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  color: #eee;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+#unity-fullscreen-button:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+#unity-warning {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  transform: translate(-50%, 0);
+  font-family: system-ui, sans-serif;
+}

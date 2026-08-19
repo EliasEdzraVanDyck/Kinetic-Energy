@@ -3438,6 +3438,55 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
+        // Builds LevelElementsTest3 for the web, ready to zip and drop on itch.io.
+        //
+        // ONLY that scene goes in: the build list carries ~20 scenes, and a WebGL player
+        // pays for every one of them in download size. The pause menu's Scenes screen
+        // therefore has nothing to jump to in this build - by design, it is a single-level
+        // web cut.
+        [MenuItem("Tools/Kinetic Energy/Build WebGL (LevelElementsTest3)")]
+        public static void BuildWebGLTest3()
+        {
+            const string scene = "Assets/Scenes/LevelElementsTest3.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scene) == null)
+            {
+                throw new Exception("KineticEnergySetup: " + scene + " is missing.");
+            }
+
+            // The custom template is what makes the canvas fill the itch iframe and what
+            // holds Escape inside fullscreen - see Assets/WebGLTemplates/ItchFullscreen.
+            PlayerSettings.WebGL.template = "PROJECT:ItchFullscreen";
+            // The canvas is sized by CSS, but these are what the loader starts from and
+            // what the aspect is derived from before the first resize.
+            PlayerSettings.defaultWebScreenWidth = 1280;
+            PlayerSettings.defaultWebScreenHeight = 720;
+            // itch serves the compressed files with the right encoding, and Brotli is
+            // roughly a third smaller than gzip on a build this size.
+            PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Brotli;
+            PlayerSettings.WebGL.decompressionFallback = true; // works even if headers are wrong
+            PlayerSettings.runInBackground = false;            // a paused tab should not keep simulating
+
+            string output = "Builds/WebGL_LevelElementsTest3";
+            var options = new BuildPlayerOptions
+            {
+                scenes = new[] { scene },
+                locationPathName = output,
+                target = BuildTarget.WebGL,
+                options = BuildOptions.None,
+            };
+
+            UnityEditor.Build.Reporting.BuildReport report = BuildPipeline.BuildPlayer(options);
+            UnityEditor.Build.Reporting.BuildSummary summary = report.summary;
+            Debug.Log("WEBBUILD result=" + summary.result
+                + " errors=" + summary.totalErrors
+                + " sizeMB=" + (summary.totalSize / (1024f * 1024f)).ToString("F1")
+                + " output=" + output);
+            if (summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
+            {
+                throw new Exception("KineticEnergySetup: WebGL build did not succeed.");
+            }
+        }
+
         // Splits the BASICS section's teaching into three beats, each shown where the player
         // actually meets it: charging on the start pad, re-aiming once they have landed the
         // first hop, and the button rules at the first checkpoint they must press. Only

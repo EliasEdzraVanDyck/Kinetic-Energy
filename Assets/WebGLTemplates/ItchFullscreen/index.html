@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes">
+    <title>{{{ PRODUCT_NAME }}}</title>
+    <link rel="stylesheet" href="TemplateData/style.css">
+  </head>
+  <body>
+    <div id="unity-container">
+      <canvas id="unity-canvas" width={{{ WIDTH }}} height={{{ HEIGHT }}} tabindex="-1"></canvas>
+      <div id="unity-loading-bar">
+        <div>Loading…</div>
+        <div id="unity-progress-bar-empty">
+          <div id="unity-progress-bar-full"></div>
+        </div>
+      </div>
+      <div id="unity-warning"> </div>
+      <div id="unity-fullscreen-button">Fullscreen</div>
+    </div>
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+      var fullscreenButton = document.querySelector("#unity-fullscreen-button");
+
+      function unityShowBanner(msg, type) {
+        var warningBanner = document.querySelector("#unity-warning");
+        function updateBannerVisibility() {
+          warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+        }
+        var div = document.createElement('div');
+        div.innerHTML = msg;
+        warningBanner.appendChild(div);
+        if (type == 'error') div.style = 'background: red; padding: 10px;';
+        else {
+          if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+          setTimeout(function() {
+            warningBanner.removeChild(div);
+            updateBannerVisibility();
+          }, 5000);
+        }
+        updateBannerVisibility();
+      }
+
+      var buildUrl = "Build";
+      var loaderUrl = buildUrl + "/{{{ LOADER_FILENAME }}}";
+      var config = {
+        arguments: [],
+        dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+        frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+#if USE_THREADS
+        workerUrl: buildUrl + "/{{{ WORKER_FILENAME }}}",
+#endif
+#if USE_WASM
+        codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+        symbolsUrl: buildUrl + "/{{{ SYMBOLS_FILENAME }}}",
+#endif
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+        productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
+        productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+        showBanner: unityShowBanner,
+      };
+
+      // ESCAPE STAYS IN THE GAME.
+      // A browser reserves Escape to leave fullscreen, so on itch the pause key was
+      // quitting fullscreen instead of opening the menu. The Keyboard Lock API hands
+      // Escape to the page instead - it is only permitted while actually fullscreen
+      // and on a secure origin (itch.io is HTTPS), so it is requested on entering and
+      // released on leaving. Where it is unsupported the call simply fails and the old
+      // behaviour remains, which is why nothing here depends on it succeeding.
+      function lockEscapeKey() {
+        if (navigator.keyboard && navigator.keyboard.lock) {
+          navigator.keyboard.lock(["Escape"]).catch(function () { /* unsupported - ignore */ });
+        }
+      }
+
+      function releaseEscapeKey() {
+        if (navigator.keyboard && navigator.keyboard.unlock) {
+          navigator.keyboard.unlock();
+        }
+      }
+
+      document.addEventListener("fullscreenchange", function () {
+        if (document.fullscreenElement) {
+          lockEscapeKey();
+          fullscreenButton.style.display = "none";
+        } else {
+          releaseEscapeKey();
+          fullscreenButton.style.display = "";
+        }
+        // Fullscreen swaps the focused element in some browsers; without this the
+        // canvas stops receiving keys and the game looks frozen.
+        canvas.focus();
+      });
+
+      // Keys only reach Unity while the canvas holds focus. In an itch iframe the page
+      // does not start focused, so the first click has to hand it over - and clicking
+      // anywhere in the frame should count, not only the canvas itself.
+      document.addEventListener("pointerdown", function () { canvas.focus(); });
+
+      document.querySelector("#unity-loading-bar").style.display = "block";
+
+      var script = document.createElement("script");
+      script.src = loaderUrl;
+      script.onload = () => {
+        createUnityInstance(canvas, config, (progress) => {
+          document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
+        }).then((unityInstance) => {
+          document.querySelector("#unity-loading-bar").style.display = "none";
+          canvas.focus();
+
+          fullscreenButton.onclick = () => {
+            unityInstance.SetFullscreen(1);
+            // SetFullscreen resolves asynchronously; the fullscreenchange handler above
+            // is what actually locks Escape once the browser has switched over.
+          };
+        }).catch((message) => {
+          alert(message);
+        });
+      };
+
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>
