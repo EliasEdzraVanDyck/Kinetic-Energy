@@ -222,7 +222,12 @@ namespace KineticEnergy.UI
             pausePanel?.SetActive(true);
             SetHintsVisible(false);
             RefreshCameraVariantLabel();
-            infoButton?.SetActive(FindAnyObjectByType<AimIntroScreen>(FindObjectsInactive.Include) != null);
+            // The AimIntroScreen check alone used to decide this - and the economy harness
+            // creates one at runtime in every scene, so the button came back on the first
+            // pause no matter what the prefab said. The flag is the master switch now,
+            // OFF by default (direct request: disabled entirely until further notice).
+            infoButton?.SetActive(buildInfoButtonEnabled
+                && FindAnyObjectByType<AimIntroScreen>(FindObjectsInactive.Include) != null);
             Select(firstPauseButton);
         }
 
@@ -273,6 +278,8 @@ namespace KineticEnergy.UI
         [Header("Info Button (wired by setup)")]
         // Shown only in scenes that carry an intro/explainer screen - reopens it on demand.
         public GameObject infoButton;
+        [Tooltip("Master switch for the BuildInfo button. OFF keeps it hidden even though the intro overlay exists in the scene - nothing re-activates it while this is unticked.")]
+        public bool buildInfoButtonEnabled = false;
 
         public void OnInfoClicked()
         {

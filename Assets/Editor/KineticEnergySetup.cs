@@ -3438,6 +3438,101 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
+        // Hides the pause menu's BuildInfo button. Held OFF until asked otherwise - the
+        // boot explainer it reopens is switched off too, and the section HUD teaches in
+        // place now. Hidden, not deleted, so turning it back on is one flag.
+        [MenuItem("Tools/Kinetic Energy/Set BuildInfo Button Hidden")]
+        public static void SetBuildInfoButtonHidden()
+        {
+            const string prefabPath = PrefabFolder + "/PauseSystem.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                Transform button = FindDeep(root.transform, "BuildInfoButton");
+                if (button == null) throw new Exception("KineticEnergySetup: BuildInfoButton not found.");
+                button.gameObject.SetActive(false);
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+                Debug.Log("KineticEnergySetup: BuildInfo button hidden OK");
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+
+            // Scene instances can carry their own active-state override, so the scenes that
+            // matter are cleared too rather than trusting the prefab alone.
+            foreach (string scenePath in new[]
+            {
+                "Assets/Scenes/LevelElementsTest3.unity",
+                "Assets/Scenes/SecondLevel.unity",
+            })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                int hidden = 0;
+                foreach (Transform t in UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (t.name != "BuildInfoButton" || !t.gameObject.activeSelf) continue;
+                    t.gameObject.SetActive(false);
+                    EditorUtility.SetDirty(t.gameObject);
+                    hidden++;
+                }
+                if (hidden > 0)
+                {
+                    EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                    EditorSceneManager.SaveOpenScenes();
+                }
+                Debug.Log("KineticEnergySetup: " + scenePath + " - BuildInfo instances hidden: " + hidden);
+            }
+        }
+
+        // The itch.io build. Everything here is chosen for ONE requirement: it has to load
+        // from a plain static host that sets no special headers.
+        [MenuItem("Tools/Kinetic Energy/Build WebGL ItchBuild02")]
+        public static void BuildWebGLItch02()
+        {
+            const string scene = "Assets/Scenes/LevelElementsTest3.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scene) == null)
+            {
+                throw new Exception("KineticEnergySetup: " + scene + " is missing.");
+            }
+
+            PlayerSettings.WebGL.template = "PROJECT:ItchFullscreen";
+            PlayerSettings.defaultWebScreenWidth = 1280;
+            PlayerSettings.defaultWebScreenHeight = 720;
+
+            // COMPRESSION OFF. This is the fix for the blank page: itch.io serves files
+            // straight from static storage and never sets Content-Encoding, so a Brotli
+            // (or gzip) build hands the browser compressed bytes labelled as plain ones and
+            // the loader dies before anything renders - leaving exactly the empty page that
+            // was reported. Uncompressed files need no header agreement at all. The build
+            // gets bigger; itch's limit is far above that and a load that works beats a
+            // smaller one that does not.
+            PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
+            PlayerSettings.WebGL.decompressionFallback = false; // nothing left to decompress
+            PlayerSettings.WebGL.dataCaching = true;            // second visit loads from cache
+            PlayerSettings.runInBackground = false;
+            // Exceptions kept: a silent failure in a web build is undiagnosable otherwise.
+            PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
+
+            string output = "Builds/ItchBuild02";
+            var options = new BuildPlayerOptions
+            {
+                scenes = new[] { scene },
+                locationPathName = output,
+                target = BuildTarget.WebGL,
+                options = BuildOptions.None,
+            };
+
+            UnityEditor.Build.Reporting.BuildReport report = BuildPipeline.BuildPlayer(options);
+            UnityEditor.Build.Reporting.BuildSummary summary = report.summary;
+            Debug.Log("WEBBUILD result=" + summary.result
+                + " errors=" + summary.totalErrors
+                + " sizeMB=" + (summary.totalSize / (1024f * 1024f)).ToString("F1")
+                + " output=" + output);
+            if (summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
+            {
+                throw new Exception("KineticEnergySetup: ItchBuild02 did not succeed.");
+            }
+        }
+
         // Builds LevelElementsTest3 for the web, ready to zip and drop on itch.io.
         //
         // ONLY that scene goes in: the build list carries ~20 scenes, and a WebGL player

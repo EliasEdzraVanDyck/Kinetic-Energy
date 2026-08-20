@@ -118,9 +118,25 @@
             // is what actually locks Escape once the browser has switched over.
           };
         }).catch((message) => {
-          alert(message);
+          // Shown ON the page, not in an alert: a failed load used to leave nothing but
+          // the page background, which says nothing about what went wrong.
+          showFatal(message);
         });
       };
+
+      script.onerror = () => {
+        showFatal("Could not load " + loaderUrl + " - check that the Build folder sits next to index.html.");
+      };
+
+      function showFatal(message) {
+        document.querySelector("#unity-loading-bar").style.display = "none";
+        var box = document.createElement("div");
+        box.style = "position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);"
+          + "max-width:80%;padding:16px;background:#300;color:#fdd;border:1px solid #f66;"
+          + "font-family:system-ui,sans-serif;font-size:14px;white-space:pre-wrap;text-align:left";
+        box.textContent = "The game could not start.\n\n" + message;
+        document.querySelector("#unity-container").appendChild(box);
+      }
 
       document.body.appendChild(script);
     </script>
