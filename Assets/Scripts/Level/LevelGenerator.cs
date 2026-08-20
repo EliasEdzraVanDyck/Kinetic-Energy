@@ -12,9 +12,7 @@ namespace KineticEnergy.Level
         public float maxHorizontalDistance = 13f;
         public float minHeightDifference = -1.5f;
         public float maxHeightDifference = 2f;
-        // Wired by KineticEnergySetup to Assets/CheckeredFloor.mat - the same material asset
-        // Sandbox Scene's own floor uses, shared (not cloned) so both surfaces genuinely match.
-        // platformColor is a fallback only used if this is ever left unassigned.
+
         public Material platformMaterial;
         public Color platformColor = new Color(0.5f, 0.5f, 0.55f);
 
@@ -27,13 +25,7 @@ namespace KineticEnergy.Level
         public float finishCharacterSize = 0.2f;
 
         [Header("Safety Floor")]
-        // A real, solid, invisible catch-floor well below the lowest platform - a miss currently
-        // falls all the way to fallResetY and triggers a full level reload; this gives a miss a
-        // forgiving landing spot instead. Being a plain static Collider with no Rigidbody and no
-        // isTrigger, it needs no special-casing to be included in landing prediction:
-        // KineticCubeController.BuildPredictionGeometryProxies already scans for exactly this
-        // kind of object and clones it into the prediction's own PhysicsScene automatically -
-        // the same way Sandbox Scene's own floor already does.
+
         public float safetyFloorMargin = 8f;
         public float safetyFloorSize = 260f;
 
@@ -73,9 +65,6 @@ namespace KineticEnergy.Level
                     break;
                 }
 
-                // Z always advances forward by the random horizontal-distance range; X reuses
-                // the same range but can go either way, so the path drifts side to side instead
-                // of running in a dead-straight line.
                 float dx = Random.Range(minHorizontalDistance, maxHorizontalDistance) * (Random.value < 0.5f ? -1f : 1f);
                 float dz = Random.Range(minHorizontalDistance, maxHorizontalDistance);
                 float dy = Random.Range(minHeightDifference, maxHeightDifference);
@@ -91,20 +80,10 @@ namespace KineticEnergy.Level
             floor.name = "SafetyFloor";
             floor.transform.SetParent(transform, true);
             floor.transform.position = new Vector3(0f, floorY, 0f);
-            // Unity's default Plane is a 10x10 unit quad at scale 1 - dividing by that gives a
-            // scale that makes the finished floor safetyFloorSize units wide/deep regardless of
-            // how far the randomized platform path happens to drift.
+
             floor.transform.localScale = new Vector3(safetyFloorSize / 10f, 1f, safetyFloorSize / 10f);
             Destroy(floor.GetComponent<Renderer>());
 
-            // Solid for PREDICTION only, not for the real player - the player should still fall
-            // straight through it (a miss stays a real miss, all the way to fallResetY). This
-            // Collider still needs to physically exist and stay non-trigger, non-Rigidbody so
-            // KineticCubeController.BuildPredictionGeometryProxies keeps including it when it
-            // clones static geometry into the prediction's own isolated PhysicsScene - only the
-            // ONE specific pairing below (this floor's collider vs the real player's own
-            // collider) gets ignored, which has no effect on that separate clone/proxy pair the
-            // prediction system uses, since those are entirely different Collider instances.
             if (player != null)
             {
                 BoxCollider playerCollider = player.GetComponent<BoxCollider>();
@@ -116,10 +95,6 @@ namespace KineticEnergy.Level
             }
         }
 
-        // "The camera should already face in the direction of the finish on bootup" - points the
-        // camera's initial orbit yaw along the straight-line direction from the start platform to
-        // the finish platform, so the player can see (roughly) where they're headed from frame
-        // one, rather than whatever direction the authored camera rig happened to start facing.
         void FaceCameraTowardFinish(Vector3 startPos, Vector3 finishPos)
         {
             if (cameraTransform == null) return;
@@ -153,13 +128,6 @@ namespace KineticEnergy.Level
             pad.transform.SetParent(transform, true);
             Destroy(pad.GetComponent<Collider>());
 
-            // zFightGap: without this, the pad's bottom face sits at EXACTLY the same Y as the
-            // platform's top surface (platformSize.y*0.5 + padHeight*0.5 puts the pad's own
-            // bottom face precisely on that plane) - two coincident faces is the textbook
-            // Z-fighting setup, and since it's baked into every Level1 run, it read as the
-            // level's visuals "flickering constantly" even though it had nothing to do with the
-            // landing-preview system three earlier rounds of fixes targeted. A small vertical
-            // gap lifts the pad clear of the platform surface so the faces never overlap.
             const float padHeight = 0.05f;
             const float zFightGap = 0.03f;
             pad.transform.position = platformPosition + new Vector3(0f, platformSize.y * 0.5f + zFightGap + padHeight * 0.5f, 0f);
@@ -172,7 +140,7 @@ namespace KineticEnergy.Level
 
             TextMesh textMesh = textGo.AddComponent<TextMesh>();
             textMesh.text = finishText;
-            textMesh.color = finishTextColor; // vivid blue by default - contrast via color, not a backing plate
+            textMesh.color = finishTextColor;
             textMesh.fontSize = finishFontSize;
             textMesh.characterSize = finishCharacterSize;
             textMesh.anchor = TextAnchor.MiddleCenter;
@@ -181,10 +149,6 @@ namespace KineticEnergy.Level
             Billboard billboard = textGo.AddComponent<Billboard>();
             billboard.target = cameraTransform;
 
-            // Separate invisible trigger volume, not the pad's own collider (which was removed
-            // above) - covers the platform footprint and reaches generously above the surface so
-            // it reliably catches the player even mid-bounce, without needing the visual pad
-            // itself to carry physics behavior.
             GameObject trigger = new GameObject("FinishTrigger");
             trigger.transform.SetParent(transform, true);
             trigger.transform.position = platformPosition + new Vector3(0f, platformSize.y * 0.5f + 1f, 0f);
@@ -221,12 +185,6 @@ namespace KineticEnergy.Level
             return null;
         }
 
-        // See KineticEnergySetup.MakeTransparent (Editor-only, can't be shared from here) -
-        // URP Lit/Unlit default to Opaque, alpha is ignored without this explicit switch.
-        // _ALPHABLEND_ON is the BUILT-IN RENDER PIPELINE's Standard-shader keyword, not URP's -
-        // requesting it on a URP shader asks for a keyword/property combination with no matching
-        // compiled variant, which is exactly what renders as Unity's pink/magenta error material.
-        // URP's actual surface-type keyword is _SURFACE_TYPE_TRANSPARENT.
         static void MakeTransparent(Material mat, float alpha)
         {
             Color c = mat.color;

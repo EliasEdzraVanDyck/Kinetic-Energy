@@ -4,36 +4,7 @@ using UnityEngine.SceneManagement;
 
 namespace KineticEnergy.Player
 {
-    /// <summary>
-    /// Complementary movement layered on top of KineticCubeController's charge-and-launch
-    /// mechanic, not a replacement for it - both run simultaneously. Outside of actively aiming,
-    /// the left stick directly drives movement: while grounded it walks the cube around on the
-    /// X/Z plane, and while airborne (having launched, walked off a ledge, or fallen any other
-    /// way) it applies a subtle, continuous nudge to the current trajectory instead: stick
-    /// up/down extends/shortens how far it travels (pushes more or less force along the camera's
-    /// forward direction), stick left/right drifts the landing spot sideways (force along the
-    /// camera's right direction). "Subtle" is load-bearing here - airControlAcceleration
-    /// defaults well below gravity (9.81 m/s^2) so this can only ever nudge an already-falling
-    /// arc, never replace it with full player-directed flight.
-    ///
-    /// The cube visually leans into whichever way the stick is pushed while airborne (a
-    /// snowboard/surfboard-style bank), which is why the mesh lives on a separate `visual` child
-    /// transform instead of directly on this object: the root Rigidbody keeps
-    /// RigidbodyConstraints.FreezeRotation (needed for the BoxCast-based ground check and clean,
-    /// predictable landings, exactly as in KineticCubeController), so the lean has to be a purely
-    /// cosmetic rotation on a child that physics never touches.
-    ///
-    /// Coordinates with KineticCubeController (see launchController / AllowGroundedMovement /
-    /// AllowAirborneNudge) rather than being toggled on/off by it - this stays enabled the whole
-    /// time and simply goes passive on its own, per-FixedUpdate, per branch, based on what the
-    /// launch controller is currently doing. The two branches are gated differently on purpose:
-    /// grounded movement directly SETS velocity, which must stay blocked for a launch's entire
-    /// flight (not just a brief post-launch window) or it can silently overwrite the launch
-    /// itself; airborne nudging only ADDS a small force, which can't meaningfully stomp anything,
-    /// so it only needs to wait out that brief window. KineticCubeController's Hold-Release and
-    /// Analog schemes are kept in the project but not currently selectable (see its
-    /// alternateSchemesEnabled) - only Launch Instantly is reachable for now.
-    /// </summary>
+
     [RequireComponent(typeof(Rigidbody))]
     public class KineticCubeControllerFreeMove : MonoBehaviour
     {
@@ -42,11 +13,7 @@ namespace KineticEnergy.Player
         [Range(0f, 1f)] public float moveDeadzone = 0.15f;
 
         [Header("Air Correction")]
-        // Raised from 3 - project gravity went from 9.81 to 18 two rounds ago (see
-        // ProjectSettings/DynamicsManager.asset), which alone made this weaker relative to
-        // gravity than it used to feel even before "increase midair control" was asked for
-        // directly. Still kept below gravity so it only ever nudges an existing fall rather than
-        // overriding it outright.
+
         [Tooltip("Max acceleration (m/s^2) applied from stick input while airborne - kept below gravity so this only ever nudges the existing fall, never overrides it.")]
         public float airControlAcceleration = 7f;
         [Range(0f, 1f)] public float airControlDeadzone = 0.1f;
@@ -77,18 +44,13 @@ namespace KineticEnergy.Player
         Quaternion visualTargetRotation = Quaternion.identity;
         float launchFacingYaw;
 
-        // Read by KineticCubeController's StickAim scheme (RT's neutral-stick fallback direction)
-        // and FacingArrowIndicator (the always-on red arrow) - both need "which way is the cube
-        // currently facing", which is exactly what this field already tracks for the lean visual.
         public float FacingYaw => launchFacingYaw;
 
         void Awake()
         {
             rb = GetComponent<Rigidbody>();
             boxCollider = GetComponent<BoxCollider>();
-            // Same Player object as KineticCubeController - the two now run together rather than
-            // one disabling the other, so this needs to know when it's safe to drive velocity
-            // directly (see AllowFreeMovement's own comment for why).
+
             launchController = GetComponent<KineticCubeController>();
         }
 
@@ -104,8 +66,7 @@ namespace KineticEnergy.Player
 
         void Update()
         {
-            // Time.timeScale freezes physics/FixedUpdate for free, but not this raw check -
-            // without this guard a fall-reset could still trigger while the pause menu is up.
+
             if (Time.timeScale <= 0f) return;
 
             if (transform.position.y < fallResetY)
@@ -128,12 +89,7 @@ namespace KineticEnergy.Player
 
             if (isGrounded)
             {
-                // Gated on the FULL flight (AllowGroundedMovement), not just the brief post-launch
-                // window - this branch SETS velocity directly every tick it runs, which must never
-                // happen while a real launch is still in progress, no matter what this component's
-                // own isGrounded check thinks at this instant. A shallow shot staying close to the
-                // ground for longer than a short fixed window was exactly what let this silently
-                // overwrite real launches before - see AllowGroundedMovement's own comment.
+
                 if (launchController != null && !launchController.AllowGroundedMovement)
                 {
                     wasGrounded = isGrounded;
@@ -147,10 +103,6 @@ namespace KineticEnergy.Player
                 Vector3 horizontalVelocity = moveDirection * moveSpeed;
                 rb.linearVelocity = new Vector3(horizontalVelocity.x, rb.linearVelocity.y, horizontalVelocity.z);
 
-                // StickAim/LaunchInstantly/Mixed: face movement direction instantly while
-                // walking (direct request extended this from StickAim-only to the old scheme and
-                // Mixed's grounded phase too). Only HoldRelease/AnalogPressure - kept in the
-                // project but currently unreachable - still leave facing alone while grounded.
                 bool instantGroundFacing = launchController != null && (
                     launchController.CurrentScheme == ControlScheme.StickAim ||
                     launchController.CurrentScheme == ControlScheme.LaunchInstantly ||
@@ -162,11 +114,6 @@ namespace KineticEnergy.Player
                     if (visual != null) visual.localRotation = Quaternion.Euler(0f, launchFacingYaw, 0f);
                 }
 
-                // Pitch/roll (lean) reset to level, but yaw (launchFacingYaw) is deliberately
-                // left alone - landing shouldn't re-orient which way the cube is facing, only
-                // level it back out. On the exact frame landing is detected, snap pitch/roll to
-                // 0 immediately instead of letting the Slerp below ease into it - the target
-                // here already matches that snap, so the Slerp step this same frame is a no-op.
                 if (!wasGrounded && visual != null)
                 {
                     visual.localRotation = Quaternion.Euler(0f, launchFacingYaw, 0f);
@@ -175,10 +122,7 @@ namespace KineticEnergy.Player
             }
             else
             {
-                // Only needs to wait out the brief post-launch grace window (AllowAirborneNudge),
-                // not the whole flight - this branch only ADDS a small force on top of whatever
-                // velocity already exists, it can't stomp the launch the way directly setting
-                // velocity could, so there's no reason to also suppress it for the entire flight.
+
                 if (launchController != null && !launchController.AllowAirborneNudge)
                 {
                     wasGrounded = isGrounded;
@@ -187,33 +131,15 @@ namespace KineticEnergy.Player
 
                 if (stick.sqrMagnitude > airControlDeadzone * airControlDeadzone)
                 {
-                    // Force, not velocity - this ADDS to whatever the fall's existing velocity
-                    // already is (from gravity, and from however the cube left the ground) rather
-                    // than overriding it, so it always reads as "steering an existing fall".
-                    //
-                    // Divided back out by timeScale when the game is running FAST (FastPaced's
-                    // 150% in-flight speed-up - see KineticCubeController.fastPacedFlightTimeScale):
-                    // at timeScale 1.5 the physics steps 1.5x as much game-time per real second,
-                    // so an unadjusted acceleration would integrate into 1.5x the nudge per real
-                    // second of stick-holding - direct request is that nudging NOT be affected by
-                    // the speed-up. Slow-motion (charging) is deliberately left uncompensated:
-                    // nothing is in flight to nudge during a charge anyway.
+
                     float speedUpCompensation = Time.timeScale > 1f ? 1f / Time.timeScale : 1f;
                     Vector3 correction = (forward * stick.y + right * stick.x) * (airControlAcceleration * speedUpCompensation);
                     rb.AddForce(correction, ForceMode.Acceleration);
                 }
 
-                // Leans "into" the stick: pushing forward (distance+) dips the nose forward,
-                // pushing sideways banks that way - a snowboard/surfboard-style tilt. Signs here
-                // are a best guess (no way to visually verify from this environment) - if it
-                // reads as leaning the wrong way in the Editor, flip the sign on the offending
-                // axis below rather than the stick input itself.
                 float pitchLean = stick.y * maxLeanAngle;
                 float rollLean = -stick.x * maxLeanAngle;
-                // launchFacingYaw keeps the cube facing the direction it was launched in for the
-                // rest of the flight - without it, this target's yaw would default back to 0
-                // every tick and the next Slerp step would visibly un-rotate whatever
-                // FaceLaunchDirection just snapped it to.
+
                 visualTargetRotation = Quaternion.Euler(pitchLean, launchFacingYaw, rollLean);
             }
 
@@ -225,12 +151,6 @@ namespace KineticEnergy.Player
             wasGrounded = isGrounded;
         }
 
-        // Called by KineticCubeController the instant it applies a launch impulse. Snaps the
-        // visual to face the launch direction immediately (not eased through Slerp like the
-        // lean, which is the whole point - the player should see the cube committed to its new
-        // heading the same physics tick it launches, not ease into facing it over a few frames),
-        // and remembers the yaw so the ongoing airborne lean (FixedUpdate above) keeps facing
-        // that direction, with pitch/roll lean layered on top, for the rest of the flight.
         public void FaceLaunchDirection(Vector3 direction)
         {
             Vector3 flat = new Vector3(direction.x, 0f, direction.z);
@@ -243,25 +163,12 @@ namespace KineticEnergy.Player
             }
         }
 
-        // Called by KineticCubeController.OnCollisionEnter the instant a crash sticks the cube -
-        // direct request: "the cubes surface should align with the surface it just hit, so they
-        // are parallel". Aligning local up to the surface's own outward normal reproduces the
-        // IDENTICAL rotation the cube already has resting on ordinary flat ground (whose normal
-        // IS world up), so this is a no-op there and only visibly kicks in for walls/ceilings/
-        // ramps. Instant snap, not eased through the lean Slerp, same reasoning as
-        // FaceLaunchDirection above - and it needs no explicit reset: FixedUpdate returns early
-        // (skipping the Slerp entirely) for the whole time AllowGroundedMovement/
-        // AllowAirborneNudge are both false, which is exactly the isStuck window, so this holds
-        // untouched until the next launch calls FaceLaunchDirection and naturally overwrites it.
         public void AlignVisualToSurface(Vector3 surfaceNormal)
         {
             if (visual == null) return;
             visual.localRotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal);
         }
 
-        // Same BoxCast-across-the-footprint approach as KineticCubeController.FixedUpdate, and
-        // for the same reason: a single center ray can miss when the cube is resting right at a
-        // platform's edge.
         void UpdateGrounded()
         {
             Vector3 halfExtents = boxCollider != null

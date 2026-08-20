@@ -5,12 +5,7 @@ using KineticEnergy.Player;
 
 namespace KineticEnergy.UI
 {
-    // "You should be able to switch between the four control schemes using your Dpad to open a
-    // radial menu" (direct request). Holding any Dpad direction opens the menu and highlights
-    // whichever of the 4 labels that direction currently points at; letting go of the Dpad
-    // commits to whatever was last highlighted and closes the menu. Mapping (arbitrary but
-    // documented in the controls text): Up = Launch Instantly, Right = Stick Aim, Down = Mixed,
-    // Left = Defy Gravity.
+
     public class RadialMenuController : MonoBehaviour
     {
         [Header("Input")]
@@ -26,9 +21,6 @@ namespace KineticEnergy.UI
         public Color normalColor = Color.white;
         public Color highlightColor = new Color(1f, 0.82f, 0.2f);
 
-        // Cross-hierarchy reference (this lives on PauseSystem, the player controller lives on
-        // Player) - wired by KineticEnergySetup after both are instantiated, same pattern as
-        // every other Player<->PauseSystem cross-wire in this project.
         public KineticCubeController controller;
 
         readonly ControlScheme upScheme = ControlScheme.LaunchInstantly;
@@ -52,8 +44,7 @@ namespace KineticEnergy.UI
 
         void Update()
         {
-            // Same pause guard every other input-reading Update in this project uses - without
-            // it the menu could still open/select while the pause menu is up.
+
             if (Time.timeScale <= 0f) return;
             if (controller == null || !controller.schemeSwitchingEnabled)
             {
@@ -74,8 +65,6 @@ namespace KineticEnergy.UI
                     menuRoot?.SetActive(true);
                 }
 
-                // Whichever axis has the bigger deflection picks the cardinal direction - a
-                // diagonal-ish dpad read still resolves to exactly one of the four.
                 ControlScheme highlighted = Mathf.Abs(dir.x) > Mathf.Abs(dir.y)
                     ? (dir.x > 0f ? rightScheme : leftScheme)
                     : (dir.y > 0f ? upScheme : downScheme);

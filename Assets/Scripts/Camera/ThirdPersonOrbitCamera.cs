@@ -13,22 +13,9 @@ namespace KineticEnergy.Camera
         [Header("Orbit")]
         public float distance = 6f;
         public float rotationSpeed = 120f;
-        // Raised in magnitude from -20 - direct request: "allow the camera to be pointed upwards
-        // as well, for the vertical segment it was hard not being able to see what was above me".
-        // Negative pitch swings the camera BELOW the target, looking UP (see the position formula
-        // below: desiredPosition = focusPoint - rotation*forward*distance, and positive pitch
-        // tilts forward toward -Y, so negative pitch tilts it toward +Y, putting the camera
-        // underneath) - -20 only allowed a shallow 20-degree glance upward, nowhere near enough to
-        // see a platform directly overhead. -75 mirrors maxPitch's own margin from the 90-degree
-        // gimbal-adjacent instability described below, applied to the opposite pole.
+
         public float minPitch = -75f;
-        // Pulled back from an earlier 89 - that was close enough to true top-down (90) that
-        // Quaternion.LookRotation(lookDir, Vector3.up) started reading as visibly "spinning"
-        // while rotating: as lookDir approaches anti-parallel to the Vector3.up hint, tiny
-        // positional differences (SmoothDamp lag makes the ACTUAL camera position lag behind the
-        // theoretical orbit spot, so this isn't just the exact 90-degree instant) flip which way
-        // LookRotation resolves roll, which reads as spin. 75 keeps a real margin from that
-        // degenerate zone while still allowing a dramatically steep, near-top-down view.
+
         public float maxPitch = 75f;
         public bool invertY = false;
 
@@ -37,26 +24,15 @@ namespace KineticEnergy.Camera
         public float maxDeltaTime = 0.05f;
 
         [Header("Auto Recenter")]
-        // Used by StickAim launches (see KineticCubeController.QueueStickAimLaunch) to swing the
-        // camera back behind the player after firing - NOT used by the charge-based schemes,
-        // which need the camera to stay exactly where the player left it so the landing-preview
-        // trail stays fully visible and un-yanked-at (see LandingPreviewController's own accuracy
-        // requirements). Cancels itself the instant the player provides any manual look input, so
-        // it never fights the player's own camera control.
+
         public float recenterSpeed = 240f;
 
         [Header("Input")]
         public InputActionReference lookAction;
 
-        // Tutorial2's midair aim (KineticCubeController.mixedFastPacedAir) - while active, the
-        // LEFT stick aims instead of the right stick (direct request): any non-mouse look input
-        // is substituted by the stick value fed in here each frame. Mouse aiming is deliberately
-        // unaffected - the substitution only applies when the look action isn't mouse-driven.
         bool aimStickOverrideActive;
         Vector2 aimStickOverrideValue;
-        // While the grounded aim's "Aim: Mouse" option is steering the launch direction with
-        // mouse delta (KineticCubeController.groundedAimWithMouse), mouse-driven look input is
-        // ignored so one hand motion doesn't rotate the camera and the aim arrow together.
+
         bool mouseLookSuppressed;
 
         public void SetAimStickOverride(bool active, Vector2 stick)
@@ -70,9 +46,6 @@ namespace KineticEnergy.Camera
             mouseLookSuppressed = suppressed;
         }
 
-        // EnergyEconomy1's straight-up/ground-pound charges: the camera keeps FULL speed while
-        // the game runs slow ("the camera should not be bound to the gamespeed" - direct
-        // request) - set per frame by KineticCubeController.
         bool ignoreSlowMo;
 
         public void SetIgnoreSlowMo(bool ignore)
@@ -80,33 +53,14 @@ namespace KineticEnergy.Camera
             ignoreSlowMo = ignore;
         }
 
-        // While a launch is aimed MIDAIR the orbit frames the TRAJECTORY instead of the player
-        // (direct request: "the visual line should be in the middle of the screen") - the focus
-        // point becomes the line's midpoint outright, so the line is genuinely centered and the
-        // player simply falls out of frame on a long arc, which is the intent. Distance from
-        // First person sits at the centre of the player's FRONT FACE, pushed this far further
-        // along the view direction so the cube itself is never in shot (direct request,
-        // replacing the look-at-the-landing-point framing, which whipped around whenever the
-        // predicted landing jumped). The cube is 1 unit across, so 0.5 reaches its front face
-        // and the rest is clearance.
         public float firstPersonForwardOffset = 0.75f;
-        // Position smoothing used for the frame(s) right after a first-person <-> third-person
-        // switch (direct request: the change should be near instant). Ordinary movement keeps
-        // positionSmoothTime; only the mode change uses this much snappier value.
+
         public float modeSwitchSmoothTime = 0.02f;
 
         bool modeSwitching;
 
-        // First-person aim looks AT the predicted landing point (the cursor at the end of the
-        // dotted line) rather than along the raw launch ray - the arc drops under gravity, so
-        // the two differ. Snapped into place the instant aiming starts, then eased whenever
-        // the landing point MOVES (new target, changed energy), which is what stops the
-        // violent whipping when a target jumps (direct request).
         public float framingTurnSpeed = 300f;
-        // How far the framed view may ever deviate from the actual AIM direction. Without this
-        // a steeply-up shot - which arcs over and lands BELOW you - swung the camera round to
-        // look down while you were aiming up (direct report). Inside the cap the cursor still
-        // centres normally; past it the view stays with the aim.
+
         public float framingMaxDeviation = 45f;
 
         bool framingActive;
@@ -121,54 +75,28 @@ namespace KineticEnergy.Camera
         }
 
         [Header("Fine Aim")]
-        // "Slow down the speed of aiming if you make fine adjustments with your mouse or stick,
-        // if you make wider less fine movements, the speed should be the same as now" (direct
-        // request) - rotation speed scales with how hard the input is being pushed, from
-        // fineAimMinFactor at a barely-moving input up to full speed at/beyond the reference
-        // magnitude. The reference is per-device because the two input types live on completely
-        // different scales: a stick deflection maxes out around 1.0, while a mouse delta is
-        // pixels-per-frame and routinely reads 10+ during a fast sweep - a single shared
-        // threshold would either make the stick never reach full speed or make every mouse
-        // movement count as "wide".
+
         [Range(0f, 1f)] public float fineAimMinFactor = 0.3f;
         public float fineAimStickReference = 0.9f;
         public float fineAimMouseReference = 8f;
 
         [Header("First Person Aim")]
-        // FastPaced scheme only (see KineticCubeController.UpdateFastPacedScheme) -
-        // SetFirstPersonMode collapses the orbit to sit exactly at the focus point instead of
-        // orbiting at `distance`, and SetAimZoom narrows the field of view as charge builds so a
-        // long-charged shot's distant landing spot stays legible instead of shrinking to a speck
-        // - direct request: "the longer you charge the more you need to zoom in on the landing
-        // spot". Both are no-ops for every other scheme, which never calls them.
+
         public float normalFov = 60f;
         public float maxZoomFov = 20f;
-        // Pitch limits while first person is active - near-vertical is SAFE there (first person
-        // applies the raw rotation directly, none of the LookRotation-at-target degeneracy the
-        // +/-75 orbit limits guard against). Tutorial2's camera instance sets these to +/-89
-        // (direct request); the defaults keep every other scene exactly as before.
+
         public float firstPersonMinPitch = -75f;
         public float firstPersonMaxPitch = 75f;
 
         UnityEngine.Camera cam;
         bool firstPerson;
 
-        // The up direction the whole orbit is built around - world up everywhere except after a
-        // FastPaced crash onto a tilted platform, where SetUpVector re-bases it to that
-        // platform's surface normal (direct request: "the camera's up should be the platform's up
-        // that the player crashed onto"). currentUp glides toward targetUp in LateUpdate rather
-        // than snapping, so the horizon rolls smoothly over ~a second instead of jump-cutting.
-        // All the orbit math below composes tiltRotation (world-up -> currentUp) with the
-        // ordinary world-up yaw/pitch rotation, so yaw/pitch keep meaning "turn/look within the
-        // current frame of reference" no matter which way that frame is tilted.
         Vector3 targetUp = Vector3.up;
         Vector3 currentUp = Vector3.up;
         public float upAlignSpeed = 3f;
 
         Quaternion TiltRotation => Quaternion.FromToRotation(Vector3.up, currentUp);
 
-        // World-space direction this camera is currently looking - the FastPaced scheme fires
-        // exactly along this, so the shot always goes exactly where the first-person view points.
         public Vector3 AimForward => TiltRotation * Quaternion.Euler(pitch, yaw, 0f) * Vector3.forward;
 
         public void SetUpVector(Vector3 up)
@@ -178,7 +106,7 @@ namespace KineticEnergy.Camera
 
         public void SetFirstPersonMode(bool enabled)
         {
-            if (firstPerson != enabled) modeSwitching = true; // near-instant transition, see modeSwitchSmoothTime
+            if (firstPerson != enabled) modeSwitching = true;
             firstPerson = enabled;
             if (!enabled) SetAimZoom(0f);
         }
@@ -191,13 +119,7 @@ namespace KineticEnergy.Camera
         }
 
         [Header("Wall Occlusion")]
-        // "If the camera is looking at a wall from the outside, you should be able to look
-        // through the wall" (direct request - commonly called camera occlusion culling). There
-        // was no camera-collision handling here at all before this - a wall ending up between
-        // the orbit position and the player (e.g. the camera orbits to just outside one of
-        // Level2's hallway walls) just blocked the view outright. Hides (doesn't fade) whichever
-        // renderers are directly between the camera and the player each frame, restoring them
-        // the instant they're no longer in the way.
+
         public LayerMask occlusionMask = ~0;
         public float occlusionCheckRadius = 0.25f;
 
@@ -220,7 +142,7 @@ namespace KineticEnergy.Camera
         void Start()
         {
             if (target == null) return;
-            if (yawInitialized) return; // already set externally (e.g. LevelGenerator facing the finish) before this ran
+            if (yawInitialized) return;
 
             Vector3 offset = transform.position - (target.position + Vector3.up * height);
             if (offset.sqrMagnitude > 0.0001f)
@@ -229,12 +151,6 @@ namespace KineticEnergy.Camera
             }
         }
 
-        // Called from LevelGenerator.Awake() - guaranteed to run before this component's own
-        // Start() (Unity runs every Awake() in the scene before any Start()), so it always wins
-        // over the offset-based auto-calculation above. Also snaps position immediately rather
-        // than letting LateUpdate's SmoothDamp ease into the new orbit spot over a few frames,
-        // so the camera is already correctly framed on the very first rendered frame instead of
-        // visibly sliding into place right as the level appears.
         public void SetInitialYaw(float yawDegrees)
         {
             yaw = yawDegrees;
@@ -252,10 +168,6 @@ namespace KineticEnergy.Camera
             }
         }
 
-        // Starts a smooth (not instant) swing of the orbit yaw back to directly behind
-        // targetYawDegrees (the player's new facing) - "move behind the player again", not
-        // "snap" (that's what SetInitialYaw is for, at level load). Actual interpolation happens
-        // in LateUpdate so it can be interrupted cleanly by manual look input at any point.
         public void RecenterBehindTarget(float targetYawDegrees)
         {
             recenterTargetYaw = targetYawDegrees;
@@ -285,40 +197,13 @@ namespace KineticEnergy.Camera
                 && lookAction.action.activeControl != null
                 && lookAction.action.activeControl.device is Mouse;
 
-            // Left-stick aim substitution (see SetAimStickOverride) - replaces stick-driven
-            // look input only; a mouse-driven frame keeps the mouse delta untouched.
             if (aimStickOverrideActive && !lookIsMouseDriven) look = aimStickOverrideValue;
 
-            // Mouse-driven look is dropped while the mouse is busy steering the grounded aim -
-            // see SetMouseLookSuppressed.
             if (mouseLookSuppressed && lookIsMouseDriven) look = Vector2.zero;
 
-            // Unscaled, not Time.deltaTime - Time.deltaTime already shrinks 1:1 with
-            // Time.timeScale, which would otherwise make the camera merely ride along with
-            // whatever fraction chargeTimeScale happens to be. Direct request is a flat half
-            // speed specifically whenever the game is running SLOW, not a proportional slowdown
-            // that tracks the exact charge-time-scale value. Strictly < 1, not != 1 - the
-            // FastPaced scheme now SPEEDS the game up to 150% during a flight (see
-            // KineticCubeController.fastPacedFlightTimeScale), and the direct request there is
-            // that camera/aiming be UNAFFECTED by the speed-up, which unscaled time already
-            // gives for free; the != 1 form would have wrongly halved camera speed for the whole
-            // flight.
-            //
-            // The frame right after a scene reload (Restart, or the new fall-reset) can have an
-            // abnormally large deltaTime - loading everything (Player/Camera/PauseSystem, plus
-            // Level1's platform generation) takes real time before the next frame renders.
-            // Multiplied straight into this accumulator, holding the stick at that exact moment
-            // (plausible right after falling or hitting Restart) could snap yaw/pitch to a
-            // garbage value in one frame, making the camera look broken/unresponsive afterward -
-            // still a risk with unscaled time, so the clamp stays.
             bool gameRunningSlow = Time.timeScale < 1f && !ignoreSlowMo;
             float dt = Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime) * (gameRunningSlow ? 0.5f : 1f);
 
-            // Fine-aim scaling (see the Fine Aim header comment): a gentle input rotates at
-            // fineAimMinFactor of normal speed, ramping linearly up to full speed at the active
-            // device's reference magnitude. The device is read from whichever control is
-            // actually driving the action THIS frame, so switching between mouse and gamepad
-            // mid-session picks the right scale automatically.
             float fineAimScale = 1f;
             if (look.sqrMagnitude > 0.0001f)
             {
@@ -330,8 +215,6 @@ namespace KineticEnergy.Camera
                 fineAimScale = Mathf.Lerp(fineAimMinFactor, 1f, t);
             }
 
-            // Manual input always wins outright, the instant there is any - recentering only
-            // ever happens while the player isn't already telling the camera what to do.
             if (look.sqrMagnitude > 0.0001f) recentering = false;
 
             if (recentering)
@@ -348,35 +231,16 @@ namespace KineticEnergy.Camera
                 firstPerson ? firstPersonMinPitch : minPitch,
                 firstPerson ? firstPersonMaxPitch : maxPitch);
 
-            // Glide the reference-frame up toward wherever the last crash re-based it (see
-            // SetUpVector) - Slerp by a rate*dt fraction gives a fast start that eases out, which
-            // reads as the horizon "settling" onto the new platform rather than snapping.
             currentUp = Vector3.Slerp(currentUp, targetUp, Mathf.Clamp01(upAlignSpeed * dt)).normalized;
             Quaternion tilt = TiltRotation;
 
-            // Traditional 3rd-person platformer orbit: position swings around the target on
-            // both yaw and pitch, always framing it, rather than tilting/panning in place.
-            // firstPerson (FastPaced scheme's RMB-aim only - see SetFirstPersonMode) collapses
-            // this to sit exactly at the focus point instead of orbiting at `distance`, using the
-            // raw look rotation directly rather than LookRotation-at-target (which degenerates at
-            // zero distance, where focusPoint - transform.position is ~zero and has no reliable
-            // direction). Reuses the same SmoothDamp position glide either way, so switching in
-            // or out of first person eases smoothly rather than snapping. Everything is composed
-            // on top of `tilt` so the whole orbit - height offset included - is expressed in the
-            // crashed platform's frame of reference, not the world's (see currentUp above).
             Quaternion rotation = tilt * Quaternion.Euler(pitch, yaw, 0f);
             Vector3 focusPoint = target.position + currentUp * height;
 
-            // First person: the player's own centre pushed forward past its front face - NOT
-            // the focus point, which carries the third-person `height` lift and was what put
-            // the first-person view up at a raised Y. Third person keeps its ordinary orbit.
             Vector3 desiredPosition = firstPerson
                 ? target.position + rotation * Vector3.forward * firstPersonForwardOffset
                 : focusPoint - rotation * Vector3.forward * distance;
 
-            // A mode switch uses the much shorter smooth time until the camera has essentially
-            // arrived - so first <-> third person reads as a snap without the hard teleport
-            // (and without the leftover SmoothDamp velocity that a teleport would keep).
             float smoothTime = modeSwitching ? modeSwitchSmoothTime : positionSmoothTime;
             transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, smoothTime);
             if (modeSwitching && (transform.position - desiredPosition).sqrMagnitude < 0.0025f) modeSwitching = false;
@@ -387,33 +251,27 @@ namespace KineticEnergy.Camera
                 Quaternion targetRotation = rotation;
                 if (framingActive && framingDir.sqrMagnitude > 0.0001f)
                 {
-                    // Toward the cursor, but never further than framingMaxDeviation off the
-                    // aim - so an up-aimed shot that lands behind/below you can't spin the
-                    // view downward.
+
                     targetRotation = Quaternion.RotateTowards(rotation,
                         Quaternion.LookRotation(framingDir, currentUp), framingMaxDeviation);
                 }
 
                 if (framingJustStarted)
                 {
-                    // Aiming just began - land on the cursor immediately.
+
                     transform.rotation = targetRotation;
                     framingJustStarted = false;
                 }
                 else
                 {
-                    // The landing point moved (retarget, energy change) - ease across at a
-                    // capped rate. Unscaled so it feels the same during the aim's bullet-time.
+
                     transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation,
                         framingTurnSpeed * Mathf.Min(Time.unscaledDeltaTime, maxDeltaTime));
                 }
             }
             else
             {
-                // Look directly at the target from wherever the camera ACTUALLY is, rather than
-                // reusing the theoretical orbit rotation - position lags behind via SmoothDamp, so
-                // during fast stick movement the two used to disagree and the camera briefly didn't
-                // point exactly at the player.
+
                 Vector3 lookDir = focusPoint - transform.position;
                 if (lookDir.sqrMagnitude > 0.0001f)
                 {
@@ -421,16 +279,9 @@ namespace KineticEnergy.Camera
                 }
             }
 
-            // Always called, even in first person - UpdateWallOcclusion's own distance check
-            // already no-ops the sphere-cast when the camera sits ~on top of the target (exactly
-            // the first-person case), but the loop that RESTORES a renderer hidden just before
-            // switching into first person still needs to run every frame, or a wall occluded the
-            // instant before RMB was pressed would stay disabled for the entire aim.
             UpdateWallOcclusion(focusPoint);
         }
 
-        // Hides any renderer whose collider sits directly between the camera and the player,
-        // restoring it the instant it no longer does - see occlusionMask's own comment.
         void UpdateWallOcclusion(Vector3 focusPoint)
         {
             stillOccludedThisFrame.Clear();
@@ -444,8 +295,7 @@ namespace KineticEnergy.Camera
                 RaycastHit[] hits = Physics.SphereCastAll(origin, occlusionCheckRadius, toTarget / distance, distance, occlusionMask, QueryTriggerInteraction.Ignore);
                 foreach (RaycastHit hit in hits)
                 {
-                    // Only interested in geometry actually BETWEEN the camera and the player -
-                    // never hide the player's own collider/visual.
+
                     if (target != null && (hit.collider.transform == target || hit.collider.transform.IsChildOf(target))) continue;
 
                     Renderer hitRenderer = hit.collider.GetComponent<Renderer>();

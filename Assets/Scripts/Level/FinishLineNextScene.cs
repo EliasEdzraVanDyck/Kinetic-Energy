@@ -4,10 +4,7 @@ using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // Playtest-flow finish trigger: instead of opening the win screen (FinishLineWin), touching
-    // it loads the next scene in the chain - MainMenu -> Tutorial -> TestLevel1 -> Tutorial2 ->
-    // TestLevel2 -> back to MainMenu. One-shot per scene load; identifies the player by
-    // component, matching FinishLine's reasoning.
+
     public class FinishLineNextScene : MonoBehaviour
     {
         [Tooltip("Scene name loaded when the player reaches this finish - must be in Build Settings.")]

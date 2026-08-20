@@ -2,13 +2,7 @@ using UnityEngine;
 
 namespace KineticEnergy.Player
 {
-    // Always-flat, yaw-only directional marker shown on top of the player while StickAim is the
-    // active control scheme - unlike AimArrowIndicator (full pitch+yaw, only visible while
-    // actively charging a shot in the other schemes), this tracks the player's current facing
-    // continuously and never tilts, regardless of KineticCubeControllerFreeMove's airborne lean
-    // on the `visual` child. Parented under the player ROOT instead (see KineticEnergySetup.
-    // BuildFacingArrow), which stays perfectly level (RigidbodyConstraints.FreezeRotation) no
-    // matter what the visual is doing.
+
     public class FacingArrowIndicator : MonoBehaviour
     {
         public Color arrowColor = new Color(0.9f, 0.05f, 0.05f);

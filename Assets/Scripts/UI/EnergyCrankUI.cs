@@ -3,11 +3,7 @@ using UnityEngine.UI;
 
 namespace KineticEnergy.UI
 {
-    // The Circle Crank mode's popup (KineticCubeController.EnergyControlMode.CircleCrank): a
-    // ring in the screen's lower-left corner with a big dot that follows the crank input's
-    // direction along the ring's edge. Lives on the Player in that scene; builds its own
-    // overlay canvas lazily (the same small-blocks visual language as the reticle ring, so no
-    // sprite assets are needed - a UI Image with no sprite renders a plain solid rectangle).
+
     public class EnergyCrankUI : MonoBehaviour
     {
         [Tooltip("Ring radius in reference-resolution pixels.")]
@@ -27,8 +23,6 @@ namespace KineticEnergy.UI
             if (root != null && root.activeSelf != visible) root.SetActive(visible);
         }
 
-        // angleDeg in the standard math convention (0 = right, counterclockwise positive) -
-        // matches Atan2 of the raw input vector.
         public void SetDotAngle(float angleDeg)
         {
             if (dot == null) return;
@@ -41,7 +35,7 @@ namespace KineticEnergy.UI
             GameObject canvasGo = new GameObject("EnergyCrankCanvas");
             Canvas canvas = canvasGo.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 60; // above gameplay HUD, below the pause canvas (100)
+            canvas.sortingOrder = 60;
             CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920f, 1080f);

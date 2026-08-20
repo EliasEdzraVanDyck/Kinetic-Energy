@@ -4,11 +4,7 @@ using UnityEngine.SceneManagement;
 
 namespace KineticEnergy.UI
 {
-    // The playtest build's boot menu (MainMenu.unity): explains the two-control-scheme test and
-    // offers Start (into the Tutorial), Feedback (opens feedbackUrl in the browser), Scenes
-    // (direct access to the four playtest scenes), and Quit - the pause menu's layout with
-    // Restart/Resume replaced by Start. Buttons are wired by KineticEnergySetup with persistent
-    // listeners, same as PauseController's.
+
     public class MainMenuController : MonoBehaviour
     {
         [Header("Panels (wired by setup)")]
@@ -16,10 +12,7 @@ namespace KineticEnergy.UI
         public GameObject scenesPanel;
 
         [Header("Controller Navigation (wired by setup)")]
-        // Gamepad support (direct request): the Dpad/stick navigates between Buttons via
-        // Unity's automatic navigation, but only once something is SELECTED - these are the
-        // buttons focused whenever their panel opens, same pattern as PauseController's
-        // firstPauseButton and friends.
+
         public GameObject firstMenuButton;
         public GameObject firstScenesButton;
 
@@ -31,8 +24,7 @@ namespace KineticEnergy.UI
 
         void Start()
         {
-            // Arriving here from Tutorial2/TestLevel2 can leave the OS cursor locked and, in
-            // principle, a stale timeScale - a menu needs both back to normal.
+
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
             Time.timeScale = 1f;

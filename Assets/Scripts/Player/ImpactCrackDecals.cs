@@ -3,14 +3,7 @@ using UnityEngine;
 
 namespace KineticEnergy.Player
 {
-    // "Whenever you touch a wall or floor" one of the 9 cracks (a 3x3 sheet -
-    // Assets/Textures/CrackDecalSheet.png) is stamped at the contact point as a flat decal,
-    // holds fully visible for holdSeconds, then fades out over fadeSeconds and destroys itself.
-    // Lives on the Player (its Rigidbody is what receives the OnCollisionEnter), added per-scene
-    // as an instance override (SlowPacedLevel only) so Player.prefab and every other scene stay
-    // untouched. To use different crack art, overwrite Assets/Textures/CrackDecalSheetSource.png
-    // with any 3x3 sheet (white background or transparent both work) and run
-    // Tools > Kinetic Energy > Rebuild Crack Decal Texture.
+
     public class ImpactCrackDecals : MonoBehaviour
     {
         [Header("Sheet")]
@@ -22,16 +15,11 @@ namespace KineticEnergy.Player
         [Header("Placement")]
         [Tooltip("World-space edge length of a spawned crack quad.")]
         public float decalSize = 1.2f;
-        // Pushed off the surface along its contact normal so the flat quad never z-fights the
-        // block face it's stamped on.
+
         public float surfaceOffset = 0.02f;
         [Tooltip("Give each crack a random spin around the surface normal so repeats are less obvious.")]
         public bool randomRoll = true;
-        // Impact speed measured ALONG the contact normal, not the full relative speed - the floor
-        // is built from many separate blocks, so just walking across a seam fires a fresh
-        // OnCollisionEnter with plenty of HORIZONTAL speed. Only the perpendicular component
-        // says "hit the surface" rather than "slid onto the next block", so a small floor here
-        // filters seam-walking out while letting genuine landings and wall bumps through.
+
         public float minImpactSpeed = 1.5f;
         [Tooltip("Ignore additional contacts this soon after the last decal - one crash can report several contacts at once.")]
         public float minSpawnInterval = 0.05f;
@@ -76,13 +64,10 @@ namespace KineticEnergy.Player
         {
             if (container == null)
             {
-                // Scene-root container, NOT a child of the player - decals must stay where they
-                // were stamped, not ride along with the cube.
+
                 container = new GameObject("CrackDecals").transform;
             }
 
-            // Any direction perpendicular to the normal works as LookRotation's up - it only has
-            // to be non-collinear, which the fallback guarantees for straight-up/down normals.
             Vector3 tangent = Vector3.Cross(normal, Vector3.up);
             if (tangent.sqrMagnitude < 1e-4f) tangent = Vector3.Cross(normal, Vector3.forward);
             Quaternion rotation = Quaternion.LookRotation(normal, tangent.normalized);
@@ -100,8 +85,6 @@ namespace KineticEnergy.Player
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             renderer.receiveShadows = false;
 
-            // Pick one of the 9 cells at random - _BaseMap_ST shrinks the UV window to a single
-            // cell of the 3x3 sheet, per decal, without needing 9 separate materials.
             int columns = Mathf.Max(sheetColumns, 1);
             int rows = Mathf.Max(sheetRows, 1);
             int column = Random.Range(0, columns);
@@ -142,10 +125,6 @@ namespace KineticEnergy.Player
             }
         }
 
-        // Built in code instead of using the built-in Quad primitive so there's no ambiguity
-        // about which way the visible face points - and the material is double-sided (_Cull off,
-        // see KineticEnergySetup's CrackDecalMaterial) anyway, so orientation can never cull a
-        // decal into invisibility.
         static Mesh GetQuadMesh()
         {
             if (sharedQuad != null) return sharedQuad;

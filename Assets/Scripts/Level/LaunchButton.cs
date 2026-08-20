@@ -3,16 +3,7 @@ using UnityEngine;
 
 namespace KineticEnergy.Level
 {
-    // The launch-button prefab (Assets/Prefabs/LaunchButton.prefab): a flat socket slab with a
-    // smaller, taller cap on top. Launch onto the cap to press it - the cap sinks back into the
-    // socket and every assigned target object has its active state FLIPPED (inactive objects
-    // turn on, active ones turn off), so one button can reveal some platforms and remove others
-    // at once. The cap carries NonStickSurface, so touching it never crash-sticks the player:
-    // they just fall away again.
-    //
-    // Assign targets per placed instance in the scene - the references must live on the scene
-    // instance, never inside the prefab asset (a prefab cannot hold a reference to a scene
-    // object; it would silently save as null).
+
     public class LaunchButton : MonoBehaviour
     {
         [Header("Targets")]
@@ -45,7 +36,6 @@ namespace KineticEnergy.Level
             normalCapMaterial = capRenderer != null ? capRenderer.sharedMaterial : null;
         }
 
-        // Called by LaunchButtonCap the moment the player touches the cap.
         public void Press()
         {
             if (pressed) return;
@@ -77,7 +67,7 @@ namespace KineticEnergy.Level
                 if (releaseTimer <= 0f)
                 {
                     pressed = false;
-                    FlipTargets(); // flip everything back to its pre-press state
+                    FlipTargets();
                     if (capRenderer != null && normalCapMaterial != null) capRenderer.sharedMaterial = normalCapMaterial;
                 }
             }
