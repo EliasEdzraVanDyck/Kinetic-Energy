@@ -432,6 +432,13 @@ namespace KineticEnergy.Player
         float energyFraction;
         float lastLaunchEnergySpent;
         bool lastLaunchWasGrounded;
+
+        // Which control fired the most recent launch. The checkpoint buttons gate on it: a
+        // press must be EARNED with a midair aim (or a pound) - neither a grounded launch
+        // that happens to arc down steeply nor a straight up-charge falling back onto the
+        // pad counts as a deliberate press.
+        public enum LaunchKind { GroundedAim, HoldCharge, AirAim }
+        public LaunchKind LastLaunchKind { get; private set; }
         bool lastLaunchWasPound;
         // Running total spent across every launch since the last landing - the pound's wash
         // refund pays back the WHOLE flight, not just the pound itself.
@@ -1345,6 +1352,7 @@ namespace KineticEnergy.Player
                 if (firePressed)
                 {
                     QueueLaunch(direction, force, damping);
+                    LastLaunchKind = LaunchKind.GroundedAim;
                     CloseGroundedAim();
                     waitingForAimRelease = true;
                 }
@@ -1461,6 +1469,7 @@ namespace KineticEnergy.Player
             {
                 bool firedPound = holdChargeDirection == HoldChargeDirection.Down && !isGrounded;
                 QueueLaunch(direction, force, damping);
+                LastLaunchKind = LaunchKind.HoldCharge;
                 lastLaunchWasPound = firedPound;
                 CancelHoldCharge();
             }
@@ -1640,6 +1649,7 @@ namespace KineticEnergy.Player
             {
                 chargeTime = fireFraction * maxChargeTime; // pay exactly for what fires
                 QueueLaunch(direction, force, damping);
+                LastLaunchKind = LaunchKind.AirAim;
                 // Momentum option: the SPEED carried into the aim, REDIRECTED along the
                 // fire direction (see the preview above - the same sum it showed).
                 if (addPreAimVelocityToLaunch)

@@ -120,6 +120,11 @@ namespace KineticEnergy.Level
             if (player.ArrivalEnergySpent < minActivationEnergyFraction - 0.0001f) return false;
 
             if (player.LastCrashWasPound) return true;
+            // The press must be EARNED with a midair aim: a grounded launch that happens to
+            // arc down steeply, or a straight up-charge falling back onto its own pad, is
+            // not a deliberate press and leaves the button up (direct request). The pound
+            // above is the one non-aim press.
+            if (player.LastLaunchKind != KineticCubeController.LaunchKind.AirAim) return false;
             Vector3 approach = player.PreCollisionVelocity;
             if (approach.sqrMagnitude < 0.01f) return false;
             return Vector3.Dot(approach.normalized, Vector3.down) >= minimumImpactSteepness;
