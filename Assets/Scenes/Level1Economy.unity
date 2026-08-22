@@ -1368,22 +1368,47 @@ MonoBehaviour:
   totalLossStepPerLevel: 0.05
   totalLossSafetyTriggerFraction: 0.1
   totalLossSafetyCeilingFraction: 0.4
-  introText: "MERGED ECONOMY VARIANTS\n\nCombo refunds + an under-threshold recharge
-    + a premium top: the first 80% of the tank is\nnormal energy, the last 20% (the
-    two big meter blocks) only fills from combo extras or the\npound boost - and
-    dies when your chain stops.\n\nSwitch variants with V / D-pad Right (back: C
-    / D-pad Left):\nA - Revocable extra: the latest chain bonus stays orange, lost
-    if the window lapses.\nB - Banked extra: every chain bonus becomes normal energy
-    instantly.\nC - Dual refunds: landings pay from BOTH the flight's first launch
-    and its midair\n     relaunches, each with its own rate; the bonus part stays
-    revocable orange.\nD - Dual refunds (banked): the same, with bonuses banking
-    instantly.\nE - Total loss: miss a combo window and ALL energy is gone - the
-    ground recharge\n     then rebuilds you to its threshold.\n\nX / D-pad Down toggles
-    AUTO MAX ENERGY in ANY variant: every launch fires with the\nmaximum the tank
-    can pay - no manual regulation.\n\nStanding still below the recharge threshold
-    slowly refills the tank (fresh energy shows\norange, then turns yellow as it
-    banks). If you are completely empty you cannot launch.\n\nPress any button to
-    start."
+  introText: 'HOW THIS LEVEL''S ENERGY WORKS
+
+    
+
+    THE METER: the first 4
+    blocks (40%) are normal energy. The 6 taller blocks are boosted
+
+    energy,
+    only combo bonuses and the groundpound boost can fill them.
+
+    
+
+    COMBOS:
+    a successful launch refunds the energy of your launch(es) times the combo
+
+    multiplier.
+
+    Relaunch
+    within the window to raise the multiplier. Landing back on the object you launched
+
+    from
+    pays nothing.
+
+    If you miss the window, your energy reverts to 40%, everything
+    boosted is lost.
+
+    
+
+    GROUND POUND: if you groundpound and aim within
+    the slow-mo window, the pound pays
+
+    back 1.5x what you put in.
+
+    
+
+    Reach
+    the finish to win.
+
+    
+
+    Press any button to start.'
   safetyTriggerFraction: 0.1
   safetyCeilingFraction: 0.4
   regenPerSecond: 0.12
@@ -2063,7 +2088,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7393285045070305340, guid: 20bc1b7486d758446aed67711f880e2c, type: 3}
       propertyPath: m_ClearFlags
-      value: 2
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 7393285045070305340, guid: 20bc1b7486d758446aed67711f880e2c, type: 3}
       propertyPath: m_BackGroundColor.b
