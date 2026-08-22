@@ -20,6 +20,10 @@ namespace KineticEnergy.Player
     // The model is a sphere, which is what makes the cheap trick safe: the deform aligns
     // by ROTATING the visual so its local Z faces the effect direction, and on a sphere
     // that rotation is invisible - only the scale reads.
+    // LateUpdate ordering: the orbit camera writes its pose in its own LateUpdate, and
+    // every camera-space effect here (the shakes) must land AFTER it or be overwritten -
+    // which is exactly what the old in-controller shake got wrong.
+    [DefaultExecutionOrder(1000)]
     public class Polish : MonoBehaviour
     {
         [Tooltip("The mesh child that gets deformed. Empty = the free-move controller's visual.")]
@@ -79,6 +83,24 @@ namespace KineticEnergy.Player
 
         Volume blurVolume;
         float blurWeight;
+        bool isFlying; // computed once per frame by the blur gate, shared by the shakes
+
+        [Header("Screen Shake")]
+        [Tooltip("Kick the camera on every crash - both axes, camera-relative, decaying over the duration.")]
+        public bool crashShake = true;
+        [Tooltip("Seconds the crash kick lasts, unscaled.")]
+        public float crashShakeDuration = 0.2f;
+        [Tooltip("Peak crash offset in world units AT FULL SPEND - a 100%-energy launch crashes at this. Cheaper arrivals shake proportionally softer, down to the floor fraction.")]
+        public float crashShakeIntensity = 0.35f;
+        [Tooltip("Fraction of the full crash shake a ZERO-spend arrival still gets, so a free fall registers without reading like a slam. Same idea as the rumble floor.")]
+        [Range(0f, 1f)] public float crashShakeFloorFraction = 0.25f;
+        [Tooltip("Rattle the camera continuously WHILE FLYING - through the whole launch, not a kick at the button press. Both axes, camera-relative.")]
+        public bool flightShake = true;
+        [Tooltip("Flight rattle amplitude in world units. Small: it is engine vibration, not impact.")]
+        public float flightShakeIntensity = 0.05f;
+
+        float crashShakeTimer;
+        float crashShakeWeight = 1f; // the arriving launch's spend, sampled at the crash
 
         KineticCubeController controller;
         Rigidbody body;
@@ -137,6 +159,15 @@ namespace KineticEnergy.Player
             Vector3 approach = controller.PreCollisionVelocity;
             crashAxis = approach.sqrMagnitude > 0.01f ? approach.normalized : Vector3.down;
             crashTimer = Mathf.Max(crashRecoverSeconds, 0.01f);
+            if (crashShake)
+            {
+                crashShakeTimer = Mathf.Max(crashShakeDuration, 0.01f);
+                // The kick measures what the arriving launch PAID - the same figure the
+                // rumble and the gates read - so a full-tank slam rocks the screen and a
+                // cheap hop barely nudges it.
+                crashShakeWeight = Mathf.Lerp(crashShakeFloorFraction, 1f,
+                    Mathf.Clamp01(controller.ArrivalEnergySpent));
+            }
 
             if (crashRumble && GamepadIsActiveInput())
             {
@@ -172,15 +203,50 @@ namespace KineticEnergy.Player
         // stuck to a surface, not standing - and still moving fast enough to deserve it.
         void UpdateSpeedBlur()
         {
-            if (blurVolume == null || controller == null || body == null) return;
-            bool flying = controller.HasLaunched
+            if (controller == null || body == null) return;
+            isFlying = controller.HasLaunched
                 && !controller.IsAimingOrCharging
                 && !controller.IsStuck
                 && !controller.IsGrounded
                 && body.linearVelocity.sqrMagnitude > blurMinSpeed * blurMinSpeed;
-            blurWeight = Mathf.Lerp(blurWeight, flying ? 1f : 0f,
+            if (blurVolume == null) return;
+            blurWeight = Mathf.Lerp(blurWeight, isFlying ? 1f : 0f,
                 1f - Mathf.Exp(-blurEaseSpeed * Time.unscaledDeltaTime));
             blurVolume.weight = blurWeight;
+        }
+
+        // Applied AFTER the orbit camera has written this frame's pose (the execution
+        // order attribute guarantees it), as a one-frame offset in the CAMERA's own right
+        // and up - both axes always, never just vertical. Nothing is accumulated and
+        // nothing needs restoring: the orbit rewrites the pose from scratch next frame,
+        // so each frame's shake is a fresh sample on top of a clean base.
+        void ApplyScreenShake()
+        {
+            if (controller == null) return;
+            Transform cam = controller.cameraTransform;
+            if (cam == null && UnityEngine.Camera.main != null) cam = UnityEngine.Camera.main.transform;
+            if (cam == null) return;
+
+            Vector2 shake = Vector2.zero;
+
+            if (crashShake && crashShakeTimer > 0f)
+            {
+                crashShakeTimer -= Time.unscaledDeltaTime;
+                float strength = Mathf.Clamp01(crashShakeTimer / Mathf.Max(crashShakeDuration, 0.01f));
+                shake += Random.insideUnitCircle * (crashShakeIntensity * crashShakeWeight * strength);
+            }
+
+            // The flight rattle runs the whole launch - through the air, not at the press -
+            // and stands down with the same gate as the blur, so aiming is always steady.
+            if (flightShake && isFlying)
+            {
+                shake += Random.insideUnitCircle * flightShakeIntensity;
+            }
+
+            if (shake.sqrMagnitude > 0f)
+            {
+                cam.position += cam.right * shake.x + cam.up * shake.y;
+            }
         }
 
         // The buzz must END no matter what the game is doing - motors hold their last
@@ -207,6 +273,7 @@ namespace KineticEnergy.Player
         {
             StopRumbleWhenDone();
             UpdateSpeedBlur();
+            ApplyScreenShake();
 
             if (visual == null || controller == null) return;
 
