@@ -124,18 +124,27 @@ namespace KineticEnergy.UI
 
             GameObject textGo = new GameObject("Body", typeof(RectTransform));
             textGo.transform.SetParent(overlayRoot.transform, false);
+            // Anchored to the WHOLE canvas with margins, not a fixed 1250x900 box: the old
+            // fixed rect plus the default Truncate overflow silently cut off whatever text
+            // did not fit - which the longer intros no longer did.
             RectTransform textRect = textGo.GetComponent<RectTransform>();
-            textRect.anchorMin = new Vector2(0.5f, 0.5f);
-            textRect.anchorMax = new Vector2(0.5f, 0.5f);
-            textRect.pivot = new Vector2(0.5f, 0.5f);
-            textRect.sizeDelta = new Vector2(1250f, 900f);
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(120f, 40f);
+            textRect.offsetMax = new Vector2(-120f, -40f);
 
             Text body = textGo.AddComponent<Text>();
             body.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            body.fontSize = 30;
             body.alignment = TextAnchor.MiddleLeft;
             body.color = Color.white;
             body.text = bodyText;
+            // Best-fit DOWN from the authored size: short intros still render at 30, and a
+            // long one shrinks exactly enough to fit the rect instead of being clipped.
+            body.resizeTextForBestFit = true;
+            body.resizeTextMaxSize = 30;
+            body.resizeTextMinSize = 14;
+            body.horizontalOverflow = HorizontalWrapMode.Wrap;
+            body.verticalOverflow = VerticalWrapMode.Truncate; // BestFit needs a bounded rect to fit INTO
         }
     }
 }
