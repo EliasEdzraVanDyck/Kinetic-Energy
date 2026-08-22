@@ -150,12 +150,21 @@ namespace KineticEnergy.Player
         [Tooltip("The impact thud on landings and crashes.")]
         public bool crashSoundEnabled = true;
         public AudioClip crashSound;
-        [Tooltip("Crash pitch - WELL below 1: pitching the thud down is what makes it heavy. 1 = the old thin slap.")]
+        [Tooltip("Crash pitch AT FULL SPEND - well below 1: pitching down is what makes it heavy.")]
         public float crashPitch = 0.72f;
-        [Tooltip("Crash volume, 0-1.")]
+        [Tooltip("Crash volume AT FULL SPEND, 0-1.")]
         [Range(0f, 1f)] public float crashVolume = 1f;
+        [Tooltip("Pitch of a ZERO-spend arrival - slightly above 1, so a cheap crash is a light tap and the ramp down to the heavy pitch carries the spend.")]
+        public float crashLightPitch = 1.05f;
+        [Tooltip("Volume of a ZERO-spend arrival.")]
+        [Range(0f, 1f)] public float crashLightVolume = 0.35f;
+        [Tooltip("The SUB-THUMP: the same thud layered an octave down, fading in above ~35% spend - the chest hit that makes a committed slam sound like one. 0 disables the layer.")]
+        [Range(0f, 1f)] public float crashSubThumpVolume = 0.8f;
+        [Tooltip("Contrast on the spend-to-sound curve, like the rumble's: higher pushes cheap crashes toward the light end so the heavy end stands apart.")]
+        public float crashSoundContrast = 1.5f;
 
         AudioSource crashSource;
+        AudioSource crashSubSource; // the octave-down layer needs its own pitch, hence its own source
         bool audioWasGrounded;
         float nextCrashSoundTime;
 
@@ -179,8 +188,24 @@ namespace KineticEnergy.Player
             {
                 playerSounds.Stop(); // the flight is over; its whoosh must not ring under the thud
             }
-            crashSource.pitch = crashPitch;
-            crashSource.PlayOneShot(crashSound, crashVolume);
+
+            // The impact is SCORED by what the launch spent - the same figure the shake and
+            // rumble read, so ears, hands and eyes agree about every crash. Three effects
+            // carry it: pitch slides from a light tap down to the heavy thud, volume climbs
+            // with it, and past ~35% spend the same sample comes in again an OCTAVE DOWN -
+            // the chest layer that makes a committed slam sound like one.
+            float spend = Mathf.Clamp01(controller.ArrivalEnergySpent);
+            float weight = Mathf.Pow(spend, Mathf.Max(crashSoundContrast, 0.01f));
+            crashSource.pitch = Mathf.Lerp(crashLightPitch, crashPitch, weight);
+            crashSource.PlayOneShot(crashSound, Mathf.Lerp(crashLightVolume, crashVolume, weight));
+
+            float subVolume = crashSubThumpVolume
+                * Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.35f, 1f, spend));
+            if (subVolume > 0.02f && crashSubSource != null)
+            {
+                crashSubSource.pitch = crashSource.pitch * 0.5f;
+                crashSubSource.PlayOneShot(crashSound, subVolume);
+            }
         }
 
         // The charge chirp-then-loop machine (verbatim from the controller), the pause
@@ -394,6 +419,9 @@ namespace KineticEnergy.Player
             crashSource = gameObject.AddComponent<AudioSource>();
             crashSource.playOnAwake = false;
             if (playerSounds != null) crashSource.spatialBlend = playerSounds.spatialBlend;
+            crashSubSource = gameObject.AddComponent<AudioSource>();
+            crashSubSource.playOnAwake = false;
+            crashSubSource.spatialBlend = crashSource.spatialBlend;
 
             // The blur rides its own runtime-built global Volume, so the scene's shared
             // profile asset is never written to. Weight 0 = the override does not exist;
