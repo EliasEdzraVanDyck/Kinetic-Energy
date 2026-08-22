@@ -2734,6 +2734,55 @@ namespace KineticEnergy.EditorSetup
             AddBandRequirement(instance, palette, pipMaterial, instance.GetComponentInChildren<Renderer>());
         }
 
+        // The crash decal: imports the stamp texture, builds its unlit-transparent material
+        // (a real asset, so the shader survives WebGL stripping - the pip lesson), and
+        // wires it onto the Player prefab's Polish in place.
+        [MenuItem("Tools/Kinetic Energy/Setup Crash Decal")]
+        public static void SetupCrashDecal()
+        {
+            const string texturePath = "Assets/Textures/CrashDecal.png";
+            TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+            if (importer == null) throw new Exception("KineticEnergySetup: " + texturePath + " missing.");
+            importer.textureType = TextureImporterType.Default;
+            importer.alphaIsTransparency = true;
+            importer.mipmapEnabled = true; // a world decal is seen at every distance
+            importer.SaveAndReimport();
+            Texture2D texture = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
+
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/CrashDecalMaterial.mat");
+            if (material == null)
+            {
+                Shader unlit = Shader.Find("Universal Render Pipeline/Unlit");
+                if (unlit == null) throw new Exception("KineticEnergySetup: URP/Unlit shader not found.");
+                Material fresh = new Material(unlit);
+                fresh.SetFloat("_Surface", 1f); // transparent
+                fresh.SetFloat("_Blend", 0f);   // alpha blend
+                fresh.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                fresh.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                fresh.SetInt("_ZWrite", 0);
+                fresh.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                fresh.SetOverrideTag("RenderType", "Transparent");
+                fresh.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+                material = SaveMaterialAsset(fresh, "CrashDecalMaterial");
+            }
+            // The texture is (re)pointed even on an existing material - it IS the decal.
+            material.SetTexture("_BaseMap", texture);
+            EditorUtility.SetDirty(material);
+
+            string prefabPath = PrefabFolder + "/Player.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                Polish polish = root.GetComponent<Polish>();
+                if (polish == null) polish = root.AddComponent<Polish>();
+                polish.crashDecalMaterial = material;
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: crash decal wired OK");
+        }
+
         // Adds the Polish component (squash and stretch) to the Player prefab, edited in
         // place so no instance override is lost. The visual reference is wired to the same
         // child the free-move lean already drives.

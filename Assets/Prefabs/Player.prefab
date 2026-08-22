@@ -4829,12 +4829,6 @@ MonoBehaviour:
   crashSound: {fileID: 8300000, guid: b4d713f985ad47449a0763f89eb7f511, type: 3}
   enableScreenspaceTrail: 1
   screenspaceTrailImage: {fileID: 6421481331109567342}
-  enableScreenshakeLaunch: 1
-  screenshakeLaunchDuration: 0.3
-  screenshakeLaunchIntensity: 1
-  enableScreenshakeCrash: 1
-  screenshakeCrashDuration: 0.2
-  screenshakeCrashIntensity: 1
   enableCrashDebris: 1
   crashDebrisParticleSystem: {fileID: 8240383400530212568}
   crashDustParticleSystem: {fileID: 3606745338738820828}
@@ -4996,6 +4990,30 @@ MonoBehaviour:
   crashLongAxisPercent: 135
   crashRecoverSeconds: 0.25
   easeSpeed: 14
+  aimResetEaseSpeed: 30
+  crashRumble: 1
+  rumbleLowMotor: 1
+  rumbleHighMotor: 1
+  rumbleFloorFraction: 0.08
+  rumbleContrast: 2.5
+  rumbleSeconds: 0.4
+  speedBlur: 1
+  blurIntensity: 0.45
+  blurMinSpeed: 10
+  blurEaseSpeed: 8
+  speedVignette: 0.19
+  speedVignetteSmoothness: 0.85
+  crashShake: 1
+  crashShakeDuration: 0.2
+  crashShakeIntensity: 0.35
+  crashShakeFloorFraction: 0.25
+  flightShake: 1
+  flightShakeIntensity: 0.05
+  crashDecals: 1
+  crashDecalMaterial: {fileID: 2100000, guid: 6704ccdac6d0a084796eb0e80a8830d6, type: 2}
+  decalMinSize: 2
+  decalMaxSize: 3
+  maxDecals: 40
 --- !u!1 &4034759232217851443
 GameObject:
   m_ObjectHideFlags: 0

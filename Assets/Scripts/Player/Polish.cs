@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+using KineticEnergy.Level;
 
 namespace KineticEnergy.Player
 {
@@ -102,6 +103,20 @@ namespace KineticEnergy.Player
         float crashShakeTimer;
         float crashShakeWeight = 1f; // the arriving launch's spend, sampled at the crash
 
+        [Header("Crash Decal")]
+        [Tooltip("Stamp an impact mark where a crash lands on WORLD geometry - never on enemies, whose bodies move and die.")]
+        public bool crashDecals = true;
+        [Tooltip("The decal material (unlit transparent, wired by the setup method). Empty = no decals.")]
+        public Material crashDecalMaterial;
+        [Tooltip("Decal width in world units at ZERO launch spend.")]
+        public float decalMinSize = 2f;
+        [Tooltip("Decal width at FULL spend - kept at 1.5x the minimum per the spec (about 50% between the extremes).")]
+        public float decalMaxSize = 3f;
+        [Tooltip("Most decals kept alive at once - the oldest is recycled beyond this, so a long session cannot fill the scene.")]
+        public int maxDecals = 40;
+
+        readonly System.Collections.Generic.Queue<GameObject> decals = new System.Collections.Generic.Queue<GameObject>();
+
         KineticCubeController controller;
         Rigidbody body;
         Vector3 restScale;
@@ -169,6 +184,8 @@ namespace KineticEnergy.Player
                     Mathf.Clamp01(controller.ArrivalEnergySpent));
             }
 
+            SpawnCrashDecal();
+
             if (crashRumble && GamepadIsActiveInput())
             {
                 // Scaled by what the arriving launch actually SPENT - the same figure the
@@ -183,6 +200,50 @@ namespace KineticEnergy.Player
                 // A third to full, by weight: the wider spread is what makes the top end
                 // land - a heavy slam holds the motors three times as long as a cheap tap.
                 rumbleTimer = Mathf.Max(rumbleSeconds * Mathf.Lerp(0.33f, 1f, weight), 0.02f);
+            }
+        }
+
+        // The impact mark: flush against the face the crash landed on, spun randomly
+        // around its normal, sized by what the launch spent. Parented to the surface, so
+        // a mark on a moving platform rides it instead of hanging where the platform was.
+        void SpawnCrashDecal()
+        {
+            if (!crashDecals || crashDecalMaterial == null) return;
+            Collider surface = controller.LastCrashSurface;
+            if (surface == null) return;
+            // World geometry only: a mark makes no sense on a body that walks off or dies.
+            if (surface.GetComponentInParent<Enemy>() != null) return;
+            if (surface.GetComponentInParent<FlyingEnemy>() != null) return;
+            if (surface.GetComponentInParent<TurretEnemy>() != null) return;
+
+            Vector3 normal = controller.StuckSurfaceNormal.sqrMagnitude > 0.0001f
+                ? controller.StuckSurfaceNormal.normalized
+                : Vector3.up;
+            // The exact point ON the face, not the player's centre: the closest point the
+            // hit collider offers, nudged out along the normal so the quad never z-fights.
+            Vector3 point = surface.ClosestPoint(transform.position) + normal * 0.03f;
+
+            GameObject decal = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            decal.name = "CrashDecal";
+            Destroy(decal.GetComponent<Collider>()); // a mark is not geometry
+            // A Unity quad FACES -Z, so looking along the reversed normal lays it flat on
+            // the surface; the random spin is around the normal itself - the "y rotation"
+            // of a mark that lives in the surface's plane.
+            decal.transform.SetPositionAndRotation(point,
+                Quaternion.AngleAxis(Random.Range(0f, 360f), normal) * Quaternion.LookRotation(-normal));
+            float size = Mathf.Lerp(decalMinSize, decalMaxSize, Mathf.Clamp01(controller.ArrivalEnergySpent));
+            decal.transform.localScale = new Vector3(size, size, 1f);
+            decal.transform.SetParent(surface.transform, true);
+
+            Renderer decalRenderer = decal.GetComponent<Renderer>();
+            decalRenderer.sharedMaterial = crashDecalMaterial;
+            decalRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+            decals.Enqueue(decal);
+            while (decals.Count > Mathf.Max(maxDecals, 1))
+            {
+                GameObject oldest = decals.Dequeue();
+                if (oldest != null) Destroy(oldest);
             }
         }
 
