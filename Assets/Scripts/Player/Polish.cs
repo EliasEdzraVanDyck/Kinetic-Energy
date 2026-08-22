@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace KineticEnergy.Player
 {
@@ -44,6 +45,22 @@ namespace KineticEnergy.Player
         [Tooltip("How quickly the body returns to round when a midair aim opens - its own rate, faster than the ordinary ease so the un-deform reads as settling to attention.")]
         public float aimResetEaseSpeed = 30f;
 
+        [Header("Crash Rumble")]
+        [Tooltip("Buzz the controller on every crash - only while the controller is the CURRENT input (a keyboard player's idle pad on the desk stays silent).")]
+        public bool crashRumble = true;
+        [Tooltip("Low-frequency (heavy) motor strength at FULL spend - a 100%-energy launch crashes at this. The thump of the two.")]
+        [Range(0f, 1f)] public float rumbleLowMotor = 1f;
+        [Tooltip("High-frequency (light) motor strength at FULL spend. The sting of the two.")]
+        [Range(0f, 1f)] public float rumbleHighMotor = 1f;
+        [Tooltip("Fraction of the full strength a ZERO-spend arrival still buzzes at, so even a free-fall crash registers. 0 = cheap crashes are silent.")]
+        [Range(0f, 1f)] public float rumbleFloorFraction = 0.08f;
+        [Tooltip("Contrast on the spend-to-strength curve: 1 = linear, higher pushes cheap crashes DOWN so the expensive ones stand apart. Pads compress differences badly - 2.5 restores them.")]
+        public float rumbleContrast = 2.5f;
+        [Tooltip("Seconds a FULL-spend buzz lasts, unscaled. Cheap crashes buzz much shorter (down to a third of this), because duration is the difference a pad conveys best.")]
+        public float rumbleSeconds = 0.4f;
+
+        float rumbleTimer;
+
         KineticCubeController controller;
         Rigidbody body;
         Vector3 restScale;
@@ -68,11 +85,6 @@ namespace KineticEnergy.Player
             if (controller != null) controller.CrashRegistered += OnCrash;
         }
 
-        void OnDisable()
-        {
-            if (controller != null) controller.CrashRegistered -= OnCrash;
-        }
-
         void OnCrash(Vector3 position)
         {
             // The arrival direction, read before physics wiped it - the squash flattens
@@ -80,6 +92,52 @@ namespace KineticEnergy.Player
             Vector3 approach = controller.PreCollisionVelocity;
             crashAxis = approach.sqrMagnitude > 0.01f ? approach.normalized : Vector3.down;
             crashTimer = Mathf.Max(crashRecoverSeconds, 0.01f);
+
+            if (crashRumble && GamepadIsActiveInput())
+            {
+                // Scaled by what the arriving launch actually SPENT - the same figure the
+                // checkpoint and kill gates read. The contrast power bends the curve so
+                // cheap crashes sit near the floor and expensive ones stand clearly apart
+                // (a linear map felt like no difference at all - motors compress), and the
+                // DURATION scales with it too, which is the difference a pad conveys best.
+                float spend = Mathf.Clamp01(controller.ArrivalEnergySpent);
+                float weight = Mathf.Lerp(rumbleFloorFraction, 1f,
+                    Mathf.Pow(spend, Mathf.Max(rumbleContrast, 0.01f)));
+                Gamepad.current.SetMotorSpeeds(rumbleLowMotor * weight, rumbleHighMotor * weight);
+                // A third to full, by weight: the wider spread is what makes the top end
+                // land - a heavy slam holds the motors three times as long as a cheap tap.
+                rumbleTimer = Mathf.Max(rumbleSeconds * Mathf.Lerp(0.33f, 1f, weight), 0.02f);
+            }
+        }
+
+        // "Current input" by recency: the pad only counts while it was touched more
+        // recently than the keyboard and the mouse - the same judgment a player makes
+        // about which device they are on, without any scheme bookkeeping.
+        static bool GamepadIsActiveInput()
+        {
+            Gamepad pad = Gamepad.current;
+            if (pad == null) return false;
+            double padTime = pad.lastUpdateTime;
+            if (Keyboard.current != null && Keyboard.current.lastUpdateTime > padTime) return false;
+            if (Mouse.current != null && Mouse.current.lastUpdateTime > padTime) return false;
+            return true;
+        }
+
+        // The buzz must END no matter what the game is doing - motors hold their last
+        // speed forever otherwise. Unscaled, so pauses and bullet-time can't stretch it.
+        void StopRumbleWhenDone()
+        {
+            if (rumbleTimer <= 0f) return;
+            rumbleTimer -= Time.unscaledDeltaTime;
+            if (rumbleTimer <= 0f && Gamepad.current != null) Gamepad.current.ResetHaptics();
+        }
+
+        void OnDisable()
+        {
+            if (controller != null) controller.CrashRegistered -= OnCrash;
+            // A respawn, scene change or quit mid-buzz must not leave the motors running.
+            rumbleTimer = 0f;
+            if (Gamepad.current != null) Gamepad.current.ResetHaptics();
         }
 
         // LateUpdate, so it lands after the free-move lean has written the visual's pose
@@ -87,6 +145,8 @@ namespace KineticEnergy.Player
         // that costs nothing.
         void LateUpdate()
         {
+            StopRumbleWhenDone();
+
             if (visual == null || controller == null) return;
 
             // Any midair aim or charge - the forward re-aim, the up-charge, the pound

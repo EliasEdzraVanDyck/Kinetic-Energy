@@ -6270,7 +6270,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: startingEnergyFraction
-      value: 0.4
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 1435845940050071036, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: enableScreenshakeLaunch
@@ -6349,8 +6349,24 @@ PrefabInstance:
       value: 6
       objectReference: {fileID: 0}
     - target: {fileID: 8154805299663399080, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
+      propertyPath: rumbleSeconds
+      value: 0.35
+      objectReference: {fileID: 0}
+    - target: {fileID: 8154805299663399080, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: launchMinSpeed
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8154805299663399080, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
+      propertyPath: rumbleContrast
+      value: 0.4
+      objectReference: {fileID: 0}
+    - target: {fileID: 8154805299663399080, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
+      propertyPath: rumbleLowMotor
+      value: 0.9
+      objectReference: {fileID: 0}
+    - target: {fileID: 8154805299663399080, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
+      propertyPath: rumbleHighMotor
+      value: 0.85
       objectReference: {fileID: 0}
     - target: {fileID: 8154805299663399080, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: aimResetEaseSpeed
@@ -6359,6 +6375,10 @@ PrefabInstance:
     - target: {fileID: 8154805299663399080, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: crashRecoverSeconds
       value: 0.6
+      objectReference: {fileID: 0}
+    - target: {fileID: 8154805299663399080, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
+      propertyPath: rumbleFloorFraction
+      value: 0.3
       objectReference: {fileID: 0}
     - target: {fileID: 8154805299663399080, guid: c993b9db49a8e5549b92eddec811bec8, type: 3}
       propertyPath: crashLongAxisPercent
