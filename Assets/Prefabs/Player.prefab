@@ -4827,8 +4827,6 @@ MonoBehaviour:
   chargingSound: {fileID: 8300000, guid: e62fccd53101e6b43bfb273535862e4b, type: 3}
   chargingLoopSound: {fileID: 8300000, guid: c4dd4d1fdb2ddd6488adf36d882bac02, type: 3}
   crashSound: {fileID: 8300000, guid: b4d713f985ad47449a0763f89eb7f511, type: 3}
-  enableScreenspaceTrail: 1
-  screenspaceTrailImage: {fileID: 6421481331109567342}
   groundedAimCameraFollow: 0
   groundedAimFollowThreshold: 60
   groundedAimFollowBand: 5
@@ -5011,6 +5009,11 @@ MonoBehaviour:
   decalMinSize: 2
   decalMaxSize: 3
   maxDecals: 40
+  screenspaceTrail: 1
+  trailImage: {fileID: 6421481331109567342}
+  motionTrail: {fileID: 7801135997219884100}
+  trailStartWidth: 0.5
+  trailSeconds: 0.3
   crashDebris: 1
   debrisParticles: {fileID: 8240383400530212568}
   dustParticles: {fileID: 3606745338738820828}
@@ -5018,6 +5021,10 @@ MonoBehaviour:
   debrisSizeMultiplier: 0.6
   debrisGreyBlend: 0.35
   debrisGrey: {r: 0.55, g: 0.55, b: 0.55, a: 1}
+  debrisEmitterHeight: 0
+  debrisSpeed: 5
+  debrisGravity: 1.5
+  debrisConeAngle: 40
 --- !u!1 &4034759232217851443
 GameObject:
   m_ObjectHideFlags: 0

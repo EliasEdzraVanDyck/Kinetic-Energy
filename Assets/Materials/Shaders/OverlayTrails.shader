@@ -10,8 +10,8 @@ Shader "Custom/URP/OverlayTrails"
         _Density ("Density", Range(0, 1)) = 0.55
         _LineWidth ("Line Width", Range(0.01, 0.5)) = 0.10
 
-        _InnerRadius ("Minimum Start", Range(0, 1)) = 0.18
-        _OuterRadius ("Maximum Start", Range(0, 1)) = 0.68
+        _InnerRadius ("Inner Clear Radius", Range(0, 2)) = 0.5
+        _OuterRadius ("Outer Travel Extent", Range(0.5, 3)) = 2.0
         _TailSoftness ("Tail Softness", Range(0.001, 0.2)) = 0.04
 
         _AnimSpeed ("Animation Speed", Range(0, 10)) = 1.5
@@ -19,6 +19,11 @@ Shader "Custom/URP/OverlayTrails"
         _AngularJitter ("Angular Jitter", Range(0, 0.2)) = 0.025
 
         _Center ("Vanishing Point", Vector) = (0.5, 0.5, 0, 0)
+
+        _OutwardTaper ("Outward Taper", Range(0, 1)) = 0.15
+
+        _StreamSpeed ("Stream Speed", Range(0, 5)) = 1.2
+        _StreamLength ("Stream Length", Range(0.05, 1)) = 0.35
     }
 
     SubShader
@@ -79,6 +84,11 @@ Shader "Custom/URP/OverlayTrails"
                 float _AngularJitter;
 
                 float4 _Center;
+
+                float _OutwardTaper;
+
+                float _StreamSpeed;
+                float _StreamLength;
 
             CBUFFER_END
 
@@ -208,23 +218,11 @@ Shader "Custom/URP/OverlayTrails"
                     abs(local - lineCenter);
 
 
-                // Random thickness
+                // Random thickness. The mask itself is built AFTER the radius is known -
+                // the outward taper needs it.
                 float width =
                     _LineWidth
                     * lerp(0.55, 1.55, rndWidth);
-
-
-                // Pixel-size antialiasing
-                float aa =
-                    max(fwidth(distanceFromLine), 0.0005);
-
-
-                float lineMask =
-                    1.0 - smoothstep(
-                        width,
-                        width + aa * 1.5,
-                        distanceFromLine
-                    );
 
 
                 // --------------------------------------------------------
@@ -282,42 +280,100 @@ Shader "Custom/URP/OverlayTrails"
 
 
                 // --------------------------------------------------------
-                // Every line starts at a different distance from center.
+                // Outward taper: the streak's angular width SHRINKS with
+                // radius, so each wedge is thick toward the centre and
+                // runs to a point at the screen edge - an arrowhead
+                // pointing AWAY from the centre. (Constant angular width
+                // did the opposite: wedges widened outward, so every
+                // streak read as an arrow aimed AT the centre.)
+                // --------------------------------------------------------
+
+                width *= lerp(1.25, 1.0 - _OutwardTaper, radius);
+
+
+                // Pixel-size antialiasing
+                float aa =
+                    max(fwidth(distanceFromLine), 0.0005);
+
+
+                float lineMask =
+                    1.0 - smoothstep(
+                        width,
+                        width + aa * 1.5,
+                        distanceFromLine
+                    );
+
+
+                // --------------------------------------------------------
+                // STREAMING SLIVERS: each line is a finite band that
+                // slides OUTWARD along its ray and wraps.
                 //
-                // Because width is angular, the ray naturally becomes
-                // wider toward the outside of the screen, creating the
-                // triangular/comic-book appearance.
+                // Banding runs on a CIRCULAR radius (0.5 screen heights
+                // = 1), NOT the edge-normalised one above - that one is
+                // corrected for the rectangular viewport, so any fixed
+                // threshold on it traced a scaled RECTANGLE around the
+                // centre. The edge-normalised radius keeps serving the
+                // outward taper, where tracking the actual screen edge
+                // is the point.
                 // --------------------------------------------------------
 
-                float startRadius =
-                    lerp(
-                        _InnerRadius,
-                        _OuterRadius,
-                        rndLength
+                float rBand =
+                    dist * 2.0;
+
+
+                // Each line's clear centre is its own: jittered per line
+                // so the inner ends land at slightly different distances
+                // instead of a single shared ring.
+                float rndInner =
+                    Hash(sectorID + 7.7);
+
+                float innerR =
+                    _InnerRadius * lerp(0.8, 1.35, rndInner);
+
+
+                float len =
+                    _StreamLength * lerp(0.7, 1.4, rndLength);
+
+                // _OuterRadius is the outward travel extent in the SAME
+                // circular units - past the corners, so slivers leave
+                // the screen before wrapping.
+                float span =
+                    _OuterRadius + len - innerR;
+
+                float cycle =
+                    frac(
+                        rndPosition
+                        + time * _StreamSpeed
+                            * lerp(0.75, 1.35, rndSpeed)
                     );
 
-
-                // --------------------------------------------------------
-                // Animate the line length slightly.
-                // --------------------------------------------------------
-
-                float lengthPulse =
-                    sin(
-                        time
-                        * lerp(0.65, 1.35, rndSpeed)
-                        + rndPhase * kTwoPi
-                    );
-
-                startRadius +=
-                    lengthPulse * _LengthAnimation;
+                float bandStart =
+                    innerR + cycle * span - len;
 
 
-                // Fade in at the inner end of the streak.
+                // Long soft head and tail (scaled by the sliver's own
+                // length) - hard ends on a fast band strobed instead of
+                // reading as motion.
+                float fade =
+                    max(_TailSoftness, len * 0.4);
+
                 float radialMask =
                     smoothstep(
-                        startRadius,
-                        startRadius + _TailSoftness,
-                        radius
+                        bandStart,
+                        bandStart + fade,
+                        rBand
+                    )
+                    * (1.0 - smoothstep(
+                        bandStart + len - fade,
+                        bandStart + len,
+                        rBand
+                    ));
+
+                radialMask *=
+                    smoothstep(
+                        innerR * 0.85,
+                        innerR,
+                        rBand
                     );
 
 

@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+using UnityEngine.UI;
 using KineticEnergy.Level;
 
 namespace KineticEnergy.Player
@@ -116,6 +117,64 @@ namespace KineticEnergy.Player
         public int maxDecals = 40;
 
         readonly System.Collections.Generic.Queue<GameObject> decals = new System.Collections.Generic.Queue<GameObject>();
+
+        [Header("Screenspace Trail")]
+        [Tooltip("The fullscreen speed-lines overlay, shown only while the launch is genuinely FLYING - it drops out the moment an aim opens, with the blur and the rattle.")]
+        public bool screenspaceTrail = true;
+        [Tooltip("The overlay Image (the Player's 'Trails' child - wired by the setup method).")]
+        public Image trailImage;
+
+        // Same gate as the blur and the flight rattle (isFlying: launched, not aiming or
+        // charging, not stuck, not grounded, above the speed floor) - the whole speed
+        // package arrives and leaves as one. Aiming is the deliberate beat; speed dressing
+        // during it undercut the stillness.
+        void UpdateScreenspaceTrail()
+        {
+            if (trailImage == null) return;
+            bool show = screenspaceTrail && isFlying;
+            if (trailImage.enabled != show) trailImage.enabled = show;
+        }
+
+        [Header("Motion Trail")]
+        [Tooltip("The world-space ribbon behind the player (the 'Trail' child - wired by the setup method).")]
+        public TrailRenderer motionTrail;
+        [Tooltip("Ribbon width at the player, in world units. The shape is fixed: full width here, tapering to a POINT at the far end.")]
+        public float trailStartWidth = 0.5f;
+        [Tooltip("Seconds a trail segment lives - the ribbon's length in time.")]
+        public float trailSeconds = 0.3f;
+
+        bool motionTrailHidden;
+
+        // The ribbon marks MOVEMENT THE PLAYER OWNS. It stands down while aiming (the
+        // deliberate beat), while stuck to any surface (a rotating wall's carry is the
+        // wall's motion, not the player's), and while riding a moving platform (same
+        // reason - the ribbon just traced the platform's path). Cleared on every
+        // transition: re-enabling draws a segment from the LAST recorded point, which
+        // after a ride or teleport is a line from somewhere else entirely.
+        void UpdateMotionTrail()
+        {
+            if (motionTrail == null) return;
+            bool hide = controller.IsAimingOrCharging
+                || controller.IsStuck
+                || (controller.IsGrounded && controller.GroundPlatform != null);
+            if (hide == motionTrailHidden) return;
+            motionTrailHidden = hide;
+            motionTrail.emitting = !hide;
+            motionTrail.Clear();
+        }
+
+        // The authored curve went 0.5 -> 0.23 -> 0 with the zero placed two-thirds along,
+        // which left the ribbon's visible end as a blunt cut rather than a point. Rebuilt
+        // at boot as a single clean taper: full width at the emitter, zero at the far tip.
+        void ApplyTrailShape()
+        {
+            if (motionTrail == null) return;
+            motionTrail.widthMultiplier = trailStartWidth;
+            motionTrail.widthCurve = new AnimationCurve(
+                new Keyframe(0f, 1f, 0f, -1f),
+                new Keyframe(1f, 0f, -1f, 0f));
+            motionTrail.time = trailSeconds;
+        }
 
         [Header("Crash Debris")]
         [Tooltip("Play the debris and dust bursts on every crash.")]
@@ -236,6 +295,7 @@ namespace KineticEnergy.Player
             }
             if (visual != null) restScale = visual.localScale;
             ApplyDebrisTuning();
+            ApplyTrailShape();
 
             // The blur rides its own runtime-built global Volume, so the scene's shared
             // profile asset is never written to. Weight 0 = the override does not exist;
@@ -455,6 +515,8 @@ namespace KineticEnergy.Player
             StopRumbleWhenDone();
             UpdateSpeedBlur();
             ApplyScreenShake();
+            if (controller != null) UpdateScreenspaceTrail();
+            if (controller != null) UpdateMotionTrail();
 
             if (visual == null || controller == null) return;
 

@@ -2734,6 +2734,28 @@ namespace KineticEnergy.EditorSetup
             AddBandRequirement(instance, palette, pipMaterial, instance.GetComponentInChildren<Renderer>());
         }
 
+        // The speed-lines look, matched to the manga reference: MANY needle-thin lines, a
+        // wide clear centre, streaming outward - and far subtler than before.
+        [MenuItem("Tools/Kinetic Energy/Tune Trail Speed Lines")]
+        public static void TuneTrailSpeedLines()
+        {
+            Material trail = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/TrailScreenspace.mat");
+            if (trail == null) throw new Exception("KineticEnergySetup: TrailScreenspace.mat missing.");
+            trail.SetFloat("_Intensity", 0.25f);      // "much much less pronounced"
+            trail.SetFloat("_LineCount", 90f);        // dense field of needles
+            trail.SetFloat("_LineWidth", 0.045f);     // thin
+            trail.SetFloat("_Density", 0.55f);
+            trail.SetFloat("_InnerRadius", 1f);       // circular units: hole ~half the screen height - the lines live at the corners and edges only
+            trail.SetFloat("_OuterRadius", 2f);       // travel extent - slivers clear the corners before wrapping
+            trail.SetFloat("_TailSoftness", 0.05f);
+            trail.SetFloat("_OutwardTaper", 0.15f);   // near-constant width, needle tips inward as referenced
+            trail.SetFloat("_StreamSpeed", 0.35f);    // slow drift outward - the old 1.2 strobed
+            trail.SetFloat("_StreamLength", 0.7f);    // long comets, soft both ends
+            EditorUtility.SetDirty(trail);
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: trail speed lines tuned OK");
+        }
+
         // The crash decal: imports the stamp texture, builds its unlit-transparent material
         // (a real asset, so the shader survives WebGL stripping - the pip lesson), and
         // wires it onto the Player prefab's Polish in place.
@@ -2782,6 +2804,13 @@ namespace KineticEnergy.EditorSetup
                 Transform dust = FindDeep(root.transform, "Dust");
                 if (debris != null) polish.debrisParticles = debris.GetComponent<ParticleSystem>();
                 if (dust != null) polish.dustParticles = dust.GetComponent<ParticleSystem>();
+                // The speed-lines overlay, migrated off the controller.
+                Transform trails = FindDeep(root.transform, "Trails");
+                if (trails != null) polish.trailImage = trails.GetComponent<UnityEngine.UI.Image>();
+                // The world-space ribbon behind the player. TWO children are named
+                // "Trail", so the one actually CARRYING a TrailRenderer is the anchor -
+                // never the name alone.
+                polish.motionTrail = root.GetComponentInChildren<TrailRenderer>(true);
                 PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
                 Debug.Log("KineticEnergySetup: debris wired=" + (polish.debrisParticles != null)
                     + " dust wired=" + (polish.dustParticles != null));

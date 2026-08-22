@@ -87,10 +87,8 @@ namespace KineticEnergy.Player
         [Tooltip("The sound that plays while the cube lands on the ground (crashes).")]
         public AudioClip crashSound;
 
-        [Tooltip("Should rumble happen on launch?")]
-        public bool enableScreenspaceTrail = true;
-        private bool isScreenspaceTrailActive = false;
-        public Image screenspaceTrailImage;
+        // The screenspace trail overlay moved to Polish, which derives launch-until-grounded
+        // from public state instead of being told at each transition.
         // Screenshake lives in Polish now - the old version here wrote localPosition from
         // Update and fought the orbit camera's LateUpdate pose write, which is why it read
         // as vertical-only drift.
@@ -883,7 +881,6 @@ namespace KineticEnergy.Player
 
             if (isGrounded && !groundedLastFrame)
             {
-                SetScreenspaceTrailActive(false);
 
                 if (playerSounds && enableAudio)
                 {
@@ -1990,30 +1987,8 @@ namespace KineticEnergy.Player
             return (Quaternion.AngleAxis(spin, direction) * tilt) * direction;
         }
 
-        void SetScreenspaceTrailActive(bool value)
-        {
-            if (enableScreenspaceTrail)
-            {
-                isScreenspaceTrailActive = value;
-
-                if (screenspaceTrailImage)
-                {
-                    if (isScreenspaceTrailActive)
-                    {
-                        screenspaceTrailImage.enabled = true;
-                    }
-                    else
-                    {
-                        screenspaceTrailImage.enabled = false;
-                    }
-                }
-            }
-        }
-
         void QueueLaunch(Vector3 direction, float force, float damping)
         {
-            SetScreenspaceTrailActive(true);
-
             // Overcharge scatter (economy variant 3): the committed charge buys imprecision.
             float scatterCone = ScatterConeAngleFor(ChargeFraction());
             if (scatterCone > 0.01f)
