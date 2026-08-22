@@ -4829,9 +4829,6 @@ MonoBehaviour:
   crashSound: {fileID: 8300000, guid: b4d713f985ad47449a0763f89eb7f511, type: 3}
   enableScreenspaceTrail: 1
   screenspaceTrailImage: {fileID: 6421481331109567342}
-  enableCrashDebris: 1
-  crashDebrisParticleSystem: {fileID: 8240383400530212568}
-  crashDustParticleSystem: {fileID: 3606745338738820828}
   groundedAimCameraFollow: 0
   groundedAimFollowThreshold: 60
   groundedAimFollowBand: 5
@@ -5014,6 +5011,13 @@ MonoBehaviour:
   decalMinSize: 2
   decalMaxSize: 3
   maxDecals: 40
+  crashDebris: 1
+  debrisParticles: {fileID: 8240383400530212568}
+  dustParticles: {fileID: 3606745338738820828}
+  debrisCountMultiplier: 2
+  debrisSizeMultiplier: 0.6
+  debrisGreyBlend: 0.35
+  debrisGrey: {r: 0.55, g: 0.55, b: 0.55, a: 1}
 --- !u!1 &4034759232217851443
 GameObject:
   m_ObjectHideFlags: 0

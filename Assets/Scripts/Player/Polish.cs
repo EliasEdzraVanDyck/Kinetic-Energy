@@ -117,6 +117,108 @@ namespace KineticEnergy.Player
 
         readonly System.Collections.Generic.Queue<GameObject> decals = new System.Collections.Generic.Queue<GameObject>();
 
+        [Header("Crash Debris")]
+        [Tooltip("Play the debris and dust bursts on every crash.")]
+        public bool crashDebris = true;
+        [Tooltip("The chunky debris system (the Player's 'Debris' child - wired by the setup method).")]
+        public ParticleSystem debrisParticles;
+        [Tooltip("The soft dust system (the 'Dust' child). Only played - the tuning below touches the DEBRIS alone.")]
+        public ParticleSystem dustParticles;
+        [Tooltip("Multiplier on the debris emission (rate and bursts alike). Above 1 = more chunks.")]
+        public float debrisCountMultiplier = 2f;
+        [Tooltip("Multiplier on the debris start size. Below 1 = smaller chunks.")]
+        public float debrisSizeMultiplier = 0.6f;
+        [Tooltip("How far the debris start colour is pulled toward the grey below (0 = authored colour, 1 = fully grey).")]
+        [Range(0f, 1f)] public float debrisGreyBlend = 0.35f;
+        [Tooltip("The grey the blend pulls toward.")]
+        public Color debrisGrey = new Color(0.55f, 0.55f, 0.55f);
+        [Tooltip("Local height the debris emitter sits at, relative to the player's centre (0 = dead centre). The authored child floats at 0.5, which read as chunks spawning ABOVE the player.")]
+        public float debrisEmitterHeight = 0f;
+
+        // The authored system was a narrow 12-degree gravityless cone: chunks rose in a
+        // straight line (height untunable except via speed, which also killed the spread)
+        // and always UP, even off a wall. These three take ownership of the ballistics -
+        // ARCS, whose shape each field controls independently:
+        [Tooltip("Launch speed of the chunks. With gravity on, more speed = higher AND further.")]
+        public float debrisSpeed = 5f;
+        [Tooltip("Gravity on the chunks (standard-gravity multiples). THE height dial: higher gravity = flatter, lower arcs that fall out sooner. 0 returns to the old straight-line climb.")]
+        public float debrisGravity = 1.5f;
+        [Tooltip("Cone half-angle in degrees - the SPREAD dial. The authored 12 was a tight fountain; 40 throws chunks visibly outward.")]
+        public float debrisConeAngle = 40f;
+
+        // The multipliers are applied ONCE at boot, on top of whatever the systems were
+        // authored with - so the inspector on the particle systems stays the authority for
+        // the base look, and these fields say how the crash variant differs from it.
+        void ApplyDebrisTuning()
+        {
+            if (debrisParticles == null) return;
+
+            // Height only - the horizontal placement (and with it the emission radius the
+            // shape module spreads over) stays exactly as authored.
+            Vector3 emitterLocal = debrisParticles.transform.localPosition;
+            emitterLocal.y = debrisEmitterHeight;
+            debrisParticles.transform.localPosition = emitterLocal;
+
+            ParticleSystem.MainModule main = debrisParticles.main;
+
+            // Ballistics owned outright (see the field comments). Speed spans a range so
+            // the chunks don't march in lockstep; the shape's radius is left as authored.
+            main.startSpeed = new ParticleSystem.MinMaxCurve(debrisSpeed * 0.55f, debrisSpeed);
+            main.gravityModifier = debrisGravity;
+            ParticleSystem.ShapeModule shape = debrisParticles.shape;
+            shape.angle = debrisConeAngle;
+
+            ParticleSystem.MinMaxCurve size = main.startSize;
+            size.constant *= debrisSizeMultiplier;
+            size.constantMin *= debrisSizeMultiplier;
+            size.constantMax *= debrisSizeMultiplier;
+            main.startSize = size;
+
+            ParticleSystem.MinMaxGradient colour = main.startColor;
+            colour.color = Color.Lerp(colour.color, debrisGrey, debrisGreyBlend);
+            colour.colorMin = Color.Lerp(colour.colorMin, debrisGrey, debrisGreyBlend);
+            colour.colorMax = Color.Lerp(colour.colorMax, debrisGrey, debrisGreyBlend);
+            main.startColor = colour;
+            main.maxParticles = Mathf.CeilToInt(main.maxParticles * Mathf.Max(debrisCountMultiplier, 1f));
+
+            ParticleSystem.EmissionModule emission = debrisParticles.emission;
+            ParticleSystem.MinMaxCurve rate = emission.rateOverTime;
+            rate.constant *= debrisCountMultiplier;
+            rate.constantMin *= debrisCountMultiplier;
+            rate.constantMax *= debrisCountMultiplier;
+            emission.rateOverTime = rate;
+            for (int i = 0; i < emission.burstCount; i++)
+            {
+                ParticleSystem.Burst burst = emission.GetBurst(i);
+                burst.count = new ParticleSystem.MinMaxCurve(
+                    burst.count.constant * debrisCountMultiplier,
+                    Mathf.Max(burst.count.constantMax, burst.count.constant) * debrisCountMultiplier);
+                emission.SetBurst(i, burst);
+            }
+        }
+
+        // Hitting something that HURTS is not an impact worth celebrating with debris -
+        // the hit's own feedback (knockback, energy loss, the hazard's colour) carries it.
+        bool CrashSurfaceDealsDamage()
+        {
+            Collider surface = controller.LastCrashSurface;
+            if (surface == null) return false;
+            return surface.GetComponentInParent<Enemy>() != null
+                || surface.GetComponentInParent<FlyingEnemy>() != null
+                || surface.GetComponentInParent<TurretEnemy>() != null
+                || surface.GetComponentInParent<LaserHazard>() != null
+                || surface.GetComponentInParent<DamageWalls>() != null
+                || surface.GetComponentInParent<DeathWall>() != null;
+        }
+
+        // Called by the controller's respawn reset, so a fresh spawn never opens on a
+        // half-finished burst from the death that caused it.
+        public void ResetCrashParticles()
+        {
+            if (debrisParticles != null) { debrisParticles.Stop(); debrisParticles.Clear(); }
+            if (dustParticles != null) { dustParticles.Stop(); dustParticles.Clear(); }
+        }
+
         KineticCubeController controller;
         Rigidbody body;
         Vector3 restScale;
@@ -133,6 +235,7 @@ namespace KineticEnergy.Player
                 if (freeMove != null) visual = freeMove.visual;
             }
             if (visual != null) restScale = visual.localScale;
+            ApplyDebrisTuning();
 
             // The blur rides its own runtime-built global Volume, so the scene's shared
             // profile asset is never written to. Weight 0 = the override does not exist;
@@ -185,6 +288,23 @@ namespace KineticEnergy.Player
             }
 
             SpawnCrashDecal();
+
+            if (crashDebris && !CrashSurfaceDealsDamage())
+            {
+                // The burst sprays OFF the face that was hit: the emitter's cone is aimed
+                // along the crash normal, so a wall crash throws chunks away from the wall
+                // instead of the old always-upward fountain, and a floor crash keeps the
+                // familiar upward spray.
+                Vector3 sprayNormal = controller.StuckSurfaceNormal.sqrMagnitude > 0.0001f
+                    ? controller.StuckSurfaceNormal.normalized
+                    : Vector3.up;
+                if (debrisParticles != null)
+                {
+                    debrisParticles.transform.rotation = Quaternion.LookRotation(sprayNormal);
+                    debrisParticles.Play();
+                }
+                if (dustParticles != null) dustParticles.Play();
+            }
 
             if (crashRumble && GamepadIsActiveInput())
             {

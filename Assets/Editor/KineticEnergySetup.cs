@@ -2776,7 +2776,15 @@ namespace KineticEnergy.EditorSetup
                 Polish polish = root.GetComponent<Polish>();
                 if (polish == null) polish = root.AddComponent<Polish>();
                 polish.crashDecalMaterial = material;
+                // The debris systems moved off the controller - re-wired here by child
+                // name, the same objects the old fields pointed at.
+                Transform debris = FindDeep(root.transform, "Debris");
+                Transform dust = FindDeep(root.transform, "Dust");
+                if (debris != null) polish.debrisParticles = debris.GetComponent<ParticleSystem>();
+                if (dust != null) polish.dustParticles = dust.GetComponent<ParticleSystem>();
                 PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+                Debug.Log("KineticEnergySetup: debris wired=" + (polish.debrisParticles != null)
+                    + " dust wired=" + (polish.dustParticles != null));
             }
             finally { PrefabUtility.UnloadPrefabContents(root); }
             AssetDatabase.SaveAssets();
