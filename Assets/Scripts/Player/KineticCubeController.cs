@@ -104,6 +104,12 @@ namespace KineticEnergy.Player
         private bool isScreenshakeCrash;
         private float screenshakeCrashTime = 0f;
 
+        [Tooltip("Should there be debris on crash?")]
+        public bool enableCrashDebris = true;
+        [Tooltip("Particle systems that play on crash.")]
+        public ParticleSystem crashDebrisParticleSystem;
+        public ParticleSystem crashDustParticleSystem;
+
         [Header("Control Scheme Variants (QuarryAim lab - all default OFF)")]
         // Toggled by ControlSchemeVariantController; every other scene keeps the classics.
         [Tooltip("Grounded aim: the camera slowly pans horizontally after the aim swings past the follow threshold to either side.")]
@@ -684,6 +690,18 @@ namespace KineticEnergy.Player
             aimBudgetRemaining = aimBudgetSeconds;
             // Defensive: a scene saved mid-stuck must not start the game with gravity off.
             rb.useGravity = true;
+
+            if (crashDebrisParticleSystem)
+            {
+                crashDebrisParticleSystem.Stop();
+                crashDebrisParticleSystem.Clear();
+            }
+
+            if (crashDustParticleSystem)
+            {
+                crashDustParticleSystem.Stop();
+                crashDustParticleSystem.Clear();
+            }
         }
 
         void OnValidate()
@@ -923,6 +941,13 @@ namespace KineticEnergy.Player
             if (isGrounded && !groundedLastFrame)
             {
                 isScreenshakeCrash = true;
+
+                if (enableCrashDebris)
+                {
+                    crashDebrisParticleSystem.Play();
+                    crashDustParticleSystem.Play();
+                }
+
                 SetScreenspaceTrailActive(false);
 
                 if (playerSounds && enableAudio)
