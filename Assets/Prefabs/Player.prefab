@@ -4723,6 +4723,7 @@ GameObject:
   - component: {fileID: 1834731943432722525}
   - component: {fileID: 706653064994577510}
   - component: {fileID: 8734136292897704757}
+  - component: {fileID: 8154805299663399080}
   m_Layer: 3
   m_Name: Player
   m_TagString: Untagged
@@ -4975,6 +4976,26 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5efca447e94a4be49894a76f40bc6b31, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Player.AimCameraLogger
+--- !u!114 &8154805299663399080
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4034230215606629242}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9f8886f723da13c47b8947a9ea2633f0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::KineticEnergy.Player.Polish
+  visual: {fileID: 9135542873427346466}
+  launchLongAxisPercent: 135
+  launchShortAxisPercent: 80
+  launchMinSpeed: 6
+  crashShortAxisPercent: 55
+  crashLongAxisPercent: 135
+  crashRecoverSeconds: 0.25
+  easeSpeed: 14
 --- !u!1 &4034759232217851443
 GameObject:
   m_ObjectHideFlags: 0

@@ -2734,6 +2734,27 @@ namespace KineticEnergy.EditorSetup
             AddBandRequirement(instance, palette, pipMaterial, instance.GetComponentInChildren<Renderer>());
         }
 
+        // Adds the Polish component (squash and stretch) to the Player prefab, edited in
+        // place so no instance override is lost. The visual reference is wired to the same
+        // child the free-move lean already drives.
+        [MenuItem("Tools/Kinetic Energy/Add Polish To Player")]
+        public static void AddPolishToPlayer()
+        {
+            string prefabPath = PrefabFolder + "/Player.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                Polish polish = root.GetComponent<Polish>();
+                if (polish == null) polish = root.AddComponent<Polish>();
+                KineticCubeControllerFreeMove freeMove = root.GetComponent<KineticCubeControllerFreeMove>();
+                if (freeMove != null && freeMove.visual != null) polish.visual = freeMove.visual;
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+                Debug.Log("KineticEnergySetup: Polish added to Player OK (visual="
+                    + (polish.visual != null ? polish.visual.name : "NULL") + ")");
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+        }
+
         // BUILD FIX: the requirement pips and the % labels rendered solid magenta in a
         // player build while looking correct in the editor - the signature of a shader
         // that exists in the editor but is stripped from the build.
