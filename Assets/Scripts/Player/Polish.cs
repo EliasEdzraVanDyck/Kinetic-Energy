@@ -1,5 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace KineticEnergy.Player
 {
@@ -61,6 +63,23 @@ namespace KineticEnergy.Player
 
         float rumbleTimer;
 
+        [Header("Speed Blur")]
+        [Tooltip("Motion blur while the launch is actually FLYING - never while aiming, charging, stuck or standing. Forward camera motion smears the periphery hardest, which is the racing-game edge blur.")]
+        public bool speedBlur = true;
+        [Tooltip("Blur intensity at full effect, 0-1. Racing games sit around 0.3-0.6; past that it reads as drunk, not fast.")]
+        [Range(0f, 1f)] public float blurIntensity = 0.45f;
+        [Tooltip("Flight speed below which the blur stands down, so the slow tail of a flight sharpens back up.")]
+        public float blurMinSpeed = 10f;
+        [Tooltip("How quickly the blur fades in and out (bigger = snappier).")]
+        public float blurEaseSpeed = 8f;
+        [Tooltip("Edge vignette at full flight, 0-1 - how far in from the edges the darkening reaches. THIS is what carries the speed read on this game's flat-colour surfaces. 0 turns it off.")]
+        [Range(0f, 1f)] public float speedVignette = 0.19f;
+        [Tooltip("How soft the vignette's inner edge is, 0-1. High = a long gradual falloff instead of a visible ring.")]
+        [Range(0f, 1f)] public float speedVignetteSmoothness = 0.85f;
+
+        Volume blurVolume;
+        float blurWeight;
+
         KineticCubeController controller;
         Rigidbody body;
         Vector3 restScale;
@@ -77,6 +96,32 @@ namespace KineticEnergy.Player
                 if (freeMove != null) visual = freeMove.visual;
             }
             if (visual != null) restScale = visual.localScale;
+
+            // The blur rides its own runtime-built global Volume, so the scene's shared
+            // profile asset is never written to. Weight 0 = the override does not exist;
+            // easing the weight is the whole fade machinery.
+            if (speedBlur)
+            {
+                GameObject volumeGo = new GameObject("SpeedBlurVolume");
+                volumeGo.transform.SetParent(transform, false);
+                blurVolume = volumeGo.AddComponent<Volume>();
+                blurVolume.isGlobal = true;
+                blurVolume.priority = 50f; // over the scene's authored volume
+                blurVolume.weight = 0f;
+                VolumeProfile profile = ScriptableObject.CreateInstance<VolumeProfile>();
+                MotionBlur blur = profile.Add<MotionBlur>(true);
+                blur.intensity.Override(Mathf.Clamp01(blurIntensity));
+                blur.quality.Override(MotionBlurQuality.Medium);
+                // The vignette rides the SAME volume weight, so the two arrive and leave
+                // as one effect: edges darken and pull in while the flight is fast.
+                if (speedVignette > 0.001f)
+                {
+                    Vignette vignette = profile.Add<Vignette>(true);
+                    vignette.intensity.Override(Mathf.Clamp01(speedVignette));
+                    vignette.smoothness.Override(Mathf.Clamp01(speedVignetteSmoothness));
+                }
+                blurVolume.profile = profile;
+            }
         }
 
         void OnEnable()
@@ -123,6 +168,21 @@ namespace KineticEnergy.Player
             return true;
         }
 
+        // Live only while the launch is genuinely FLYING: not aiming, not charging, not
+        // stuck to a surface, not standing - and still moving fast enough to deserve it.
+        void UpdateSpeedBlur()
+        {
+            if (blurVolume == null || controller == null || body == null) return;
+            bool flying = controller.HasLaunched
+                && !controller.IsAimingOrCharging
+                && !controller.IsStuck
+                && !controller.IsGrounded
+                && body.linearVelocity.sqrMagnitude > blurMinSpeed * blurMinSpeed;
+            blurWeight = Mathf.Lerp(blurWeight, flying ? 1f : 0f,
+                1f - Mathf.Exp(-blurEaseSpeed * Time.unscaledDeltaTime));
+            blurVolume.weight = blurWeight;
+        }
+
         // The buzz must END no matter what the game is doing - motors hold their last
         // speed forever otherwise. Unscaled, so pauses and bullet-time can't stretch it.
         void StopRumbleWhenDone()
@@ -146,6 +206,7 @@ namespace KineticEnergy.Player
         void LateUpdate()
         {
             StopRumbleWhenDone();
+            UpdateSpeedBlur();
 
             if (visual == null || controller == null) return;
 
