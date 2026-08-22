@@ -56,6 +56,16 @@ namespace KineticEnergy.Camera
         [Tooltip("How much LONGER the launch-follow smoothing runs for a zero-charge launch (1 = no stretch). Weak launches are slow, so without this their camera lag is over before it reads; full-charge launches always use the base values.")]
         public float shortLaunchLagMultiplier = 2f;
 
+        [Tooltip("Seconds before the predicted landing at which the launch follow starts tightening, so the camera has mostly caught up by the moment of impact - a crash shake on a camera still swooping in reads as disconnected from it.")]
+        public float landingTightenWindowSeconds = 0.45f;
+        [Tooltip("What fraction of the launch follow smoothing remains AT the landing (1 = no tightening, 0.4 = a much tighter chase in the final approach).")]
+        [Range(0.05f, 1f)] public float landingTightenMultiplier = 0.4f;
+        float remainingFlightSeconds = float.PositiveInfinity;
+
+        // Fed by the controller every frame: game-seconds until the predicted landing,
+        // infinity when no flight is running.
+        public void SetRemainingFlight(float seconds) => remainingFlightSeconds = seconds;
+
         public void SetLaunchInFlight(bool inFlight, bool vertical, float intensity01)
         {
             launchInFlight = inFlight;
@@ -755,6 +765,16 @@ namespace KineticEnergy.Camera
             // the tight follow made the camera lunge at the player the frame a flight ended.
             float activeLaunchFollow = (launchIsVertical ? verticalLaunchFollowSmoothTime : launchFollowSmoothTime)
                 * Mathf.Lerp(shortLaunchLagMultiplier, 1f, launchIntensity);
+            // FINAL APPROACH: inside the last window of the flight the follow tightens
+            // toward the multiplier, so the camera has essentially arrived at the player
+            // when the crash lands - the impact (and its shake) then happens ON the player
+            // instead of on a camera still catching up. The relax machinery below carries
+            // the shrink, so the tighten eases in rather than stepping.
+            if (launchInFlight && !firstPerson && remainingFlightSeconds < landingTightenWindowSeconds)
+            {
+                float approach = Mathf.Clamp01(1f - remainingFlightSeconds / Mathf.Max(landingTightenWindowSeconds, 0.01f));
+                activeLaunchFollow *= Mathf.Lerp(1f, landingTightenMultiplier, approach);
+            }
             float targetFollow = launchInFlight && !firstPerson ? activeLaunchFollow : positionSmoothTime;
             if (targetFollow > followSmoothTime)
             {

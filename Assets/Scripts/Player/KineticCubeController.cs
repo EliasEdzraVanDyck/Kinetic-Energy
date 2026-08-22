@@ -1097,6 +1097,11 @@ namespace KineticEnergy.Player
             // launch for a moment instead of being glued to it. Vertical flights report
             // themselves so the camera can use its slightly tighter vertical value.
             cameraOrbit.SetLaunchInFlight(hasLaunched, currentFlightIsVertical, currentFlightIntensity);
+            // How long until the predicted landing - the camera tightens its chase inside
+            // the final stretch so it has arrived when the impact (and its shake) lands.
+            cameraOrbit.SetRemainingFlight(hasLaunched && lastPredictedFlightSeconds > 0.05f
+                ? Mathf.Max(lastPredictedFlightSeconds - flightElapsedSeconds, 0f)
+                : float.PositiveInfinity);
             cameraOrbit.SetPlayerGrounded(isGrounded);
 
             // First-person midair aim looks at the cursor at the end of the dotted line.
