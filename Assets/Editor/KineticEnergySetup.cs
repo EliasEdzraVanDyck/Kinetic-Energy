@@ -2807,6 +2807,14 @@ namespace KineticEnergy.EditorSetup
                 // The speed-lines overlay, migrated off the controller.
                 Transform trails = FindDeep(root.transform, "Trails");
                 if (trails != null) polish.trailImage = trails.GetComponent<UnityEngine.UI.Image>();
+                // Audio, migrated off the controller - the same source and the same four
+                // clips its old fields referenced (mapped by guid before the fields went).
+                polish.playerSounds = root.GetComponentInChildren<AudioSource>(true);
+                polish.flyingSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Whoosh.mp3");
+                polish.chargingSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Charge.mp3");
+                polish.chargingLoopSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/ChargeLoop.wav");
+                polish.crashSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Thud.wav");
+
                 // The world-space ribbon behind the player. TWO children are named
                 // "Trail", so the one actually CARRYING a TrailRenderer is the anchor -
                 // never the name alone.

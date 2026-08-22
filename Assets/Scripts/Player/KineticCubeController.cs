@@ -73,19 +73,7 @@ namespace KineticEnergy.Player
         [Tooltip("Damping applied while airborne with no launch in flight, so plain falls accelerate naturally.")]
         public float plainFallDamping = 0.2f;
 
-        [Header("Player feedback")]
-        [Tooltip("Should audio be used?")]
-        public bool enableAudio = true;
-        [Tooltip("The Player's AudioSource that will play the clips.")]
-        public AudioSource playerSounds;
-        [Tooltip("The sound that plays while the cube is airborne.")]
-        public AudioClip flyingSound;
-        [Tooltip("The sound that plays while the cube is charging.")]
-        public AudioClip chargingSound;
-        [Tooltip("The sound that plays while the cube is done charging but not fired yet.")]
-        public AudioClip chargingLoopSound;
-        [Tooltip("The sound that plays while the cube lands on the ground (crashes).")]
-        public AudioClip crashSound;
+        // All player audio moved to Polish, per-clip toggles included.
 
         // The screenspace trail overlay moved to Polish, which derives launch-until-grounded
         // from public state instead of being told at each transition.
@@ -742,10 +730,6 @@ namespace KineticEnergy.Player
             // input - nothing below may run while the pause menu is up.
             if (paused)
             {
-                if (playerSounds.isPlaying)
-                {
-                    playerSounds.Stop();
-                }
                 justUnpaused = true;
                 return;
             }
@@ -833,13 +817,6 @@ namespace KineticEnergy.Player
             }
             else if (isGrounded && poundWindowTimer <= 0f)
             {
-                if (playerSounds.isPlaying && (playerSounds.clip == chargingLoopSound || playerSounds.clip == chargingSound))
-                {
-                    playerSounds.clip = flyingSound;
-                    playerSounds.loop = false;
-                    playerSounds.Stop();
-                }
-
                 // NOT during the post-pound window: the bounce hop is lower than the ground
                 // check, so the cube reads as grounded there - but a window aim must open
                 // the MIDAIR aim (which claims the boost), never the grounded one.
@@ -878,18 +855,6 @@ namespace KineticEnergy.Player
             // dead for the rest of the run. A crash-stick counts as arriving too, or a
             // locked player stuck to a sticky wall would have no way off it at all.
             if (isGrounded || isStuck) airAimLockedUntilGrounded = false;
-
-            if (isGrounded && !groundedLastFrame)
-            {
-
-                if (playerSounds && enableAudio)
-                {
-                    playerSounds.Stop();
-                    playerSounds.loop = false;
-                    playerSounds.clip = crashSound;
-                    playerSounds.Play();
-                }
-            }
 
             groundedLastFrame = isGrounded;
         }
@@ -1186,32 +1151,6 @@ namespace KineticEnergy.Player
                     // The cursor at the end of the line shows for grounded aims too.
                     landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
                     if (!isGrounded) MidairAimOpened?.Invoke();
-                }
-                else
-                {
-                    if (playerSounds != null && enableAudio)
-                    {
-                        // If we are charging
-                        if (playerSounds.clip == chargingSound || playerSounds.clip == chargingLoopSound)
-                        {
-                            // But the audio stopped playing
-                            if (!playerSounds.isPlaying)
-                            {
-                                // Play the loop sound
-                                playerSounds.clip = chargingLoopSound;
-                                playerSounds.loop = true;
-                                playerSounds.Play();
-                            }
-                        }
-                        else
-                        {
-                            // If we are not playing charing or loop sound yet, play the charging sound once
-                            playerSounds.Stop();
-                            playerSounds.clip = chargingSound;
-                            playerSounds.loop = false;
-                            playerSounds.Play();
-                        }
-                    }
                 }
 
                 if (groundedDialControls)
@@ -2084,16 +2023,7 @@ namespace KineticEnergy.Player
             // knocked about by an enemy, a projectile or a laser.
             flightSpeedUpSuppressed = false;
 
-            // While in the air, loop this audio
-            if (playerSounds != null && enableAudio)
-            {
-                playerSounds.Stop();
-                playerSounds.loop = true;
-                playerSounds.clip = flyingSound;
-                playerSounds.Play();
-            }
-
-            LaunchFired?.Invoke();
+            LaunchFired?.Invoke(); // Polish starts the flight loop off this event
         }
 
         // ---------- Physics step ----------

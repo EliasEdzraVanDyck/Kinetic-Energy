@@ -135,6 +135,99 @@ namespace KineticEnergy.Player
             if (trailImage.enabled != show) trailImage.enabled = show;
         }
 
+        [Header("Audio")]
+        [Tooltip("The Player's AudioSource for the LOOPED sounds (charging, flying). The crash plays through its own runtime source, so its heavy pitch never bleeds into the loops.")]
+        public AudioSource playerSounds;
+        [Tooltip("Whoosh loop while airborne after a launch.")]
+        public bool flyingSoundEnabled = true;
+        public AudioClip flyingSound;
+        [Tooltip("The one-shot chirp when a charge/aim opens.")]
+        public bool chargingSoundEnabled = true;
+        public AudioClip chargingSound;
+        [Tooltip("The held loop once the charge chirp has finished.")]
+        public bool chargeLoopSoundEnabled = true;
+        public AudioClip chargingLoopSound;
+        [Tooltip("The impact thud on landings and crashes.")]
+        public bool crashSoundEnabled = true;
+        public AudioClip crashSound;
+        [Tooltip("Crash pitch - WELL below 1: pitching the thud down is what makes it heavy. 1 = the old thin slap.")]
+        public float crashPitch = 0.72f;
+        [Tooltip("Crash volume, 0-1.")]
+        [Range(0f, 1f)] public float crashVolume = 1f;
+
+        AudioSource crashSource;
+        bool audioWasGrounded;
+        float nextCrashSoundTime;
+
+        void OnLaunchFired()
+        {
+            if (!flyingSoundEnabled || playerSounds == null || flyingSound == null) return;
+            playerSounds.Stop();
+            playerSounds.loop = true;
+            playerSounds.clip = flyingSound;
+            playerSounds.Play();
+        }
+
+        void PlayCrashSound()
+        {
+            if (!crashSoundEnabled || crashSound == null || crashSource == null) return;
+            // Landing and CrashRegistered can both report the same impact - one thud each.
+            if (Time.unscaledTime < nextCrashSoundTime) return;
+            nextCrashSoundTime = Time.unscaledTime + 0.1f;
+
+            if (playerSounds != null && playerSounds.isPlaying && playerSounds.clip == flyingSound)
+            {
+                playerSounds.Stop(); // the flight is over; its whoosh must not ring under the thud
+            }
+            crashSource.pitch = crashPitch;
+            crashSource.PlayOneShot(crashSound, crashVolume);
+        }
+
+        // The charge chirp-then-loop machine (verbatim from the controller), the pause
+        // silence, and the grounded cleanup of leftover charge audio.
+        void UpdateAudio()
+        {
+            if (playerSounds == null) return;
+
+            if (Time.timeScale <= 0f)
+            {
+                if (playerSounds.isPlaying) playerSounds.Stop();
+                return;
+            }
+
+            // A landing that arrives without RegisterCrash (walking off a ledge onto
+            // ground) still thuds - the grounded EDGE is the impact.
+            bool grounded = controller.IsGrounded;
+            if (grounded && !audioWasGrounded) PlayCrashSound();
+            audioWasGrounded = grounded;
+
+            if (controller.IsAimingOrCharging)
+            {
+                bool chargeClipUp = playerSounds.clip == chargingSound || playerSounds.clip == chargingLoopSound;
+                if (chargeClipUp)
+                {
+                    if (!playerSounds.isPlaying && chargeLoopSoundEnabled && chargingLoopSound != null)
+                    {
+                        playerSounds.clip = chargingLoopSound;
+                        playerSounds.loop = true;
+                        playerSounds.Play();
+                    }
+                }
+                else if (chargingSoundEnabled && chargingSound != null)
+                {
+                    playerSounds.Stop();
+                    playerSounds.clip = chargingSound;
+                    playerSounds.loop = false;
+                    playerSounds.Play();
+                }
+            }
+            else if (grounded && playerSounds.isPlaying
+                && (playerSounds.clip == chargingSound || playerSounds.clip == chargingLoopSound))
+            {
+                playerSounds.Stop(); // aim closed on the ground: no leftover charge hum
+            }
+        }
+
         [Header("Motion Trail")]
         [Tooltip("The world-space ribbon behind the player (the 'Trail' child - wired by the setup method).")]
         public TrailRenderer motionTrail;
@@ -297,6 +390,11 @@ namespace KineticEnergy.Player
             ApplyDebrisTuning();
             ApplyTrailShape();
 
+            // The crash's own source: heavy pitch on this one never touches the loops.
+            crashSource = gameObject.AddComponent<AudioSource>();
+            crashSource.playOnAwake = false;
+            if (playerSounds != null) crashSource.spatialBlend = playerSounds.spatialBlend;
+
             // The blur rides its own runtime-built global Volume, so the scene's shared
             // profile asset is never written to. Weight 0 = the override does not exist;
             // easing the weight is the whole fade machinery.
@@ -327,7 +425,11 @@ namespace KineticEnergy.Player
         void OnEnable()
         {
             if (controller == null) controller = GetComponent<KineticCubeController>();
-            if (controller != null) controller.CrashRegistered += OnCrash;
+            if (controller != null)
+            {
+                controller.CrashRegistered += OnCrash;
+                controller.LaunchFired += OnLaunchFired;
+            }
         }
 
         void OnCrash(Vector3 position)
@@ -348,6 +450,7 @@ namespace KineticEnergy.Player
             }
 
             SpawnCrashDecal();
+            PlayCrashSound();
 
             if (crashDebris && !CrashSurfaceDealsDamage())
             {
@@ -501,7 +604,11 @@ namespace KineticEnergy.Player
 
         void OnDisable()
         {
-            if (controller != null) controller.CrashRegistered -= OnCrash;
+            if (controller != null)
+            {
+                controller.CrashRegistered -= OnCrash;
+                controller.LaunchFired -= OnLaunchFired;
+            }
             // A respawn, scene change or quit mid-buzz must not leave the motors running.
             rumbleTimer = 0f;
             if (Gamepad.current != null) Gamepad.current.ResetHaptics();
@@ -517,6 +624,7 @@ namespace KineticEnergy.Player
             ApplyScreenShake();
             if (controller != null) UpdateScreenspaceTrail();
             if (controller != null) UpdateMotionTrail();
+            if (controller != null) UpdateAudio();
 
             if (visual == null || controller == null) return;
 

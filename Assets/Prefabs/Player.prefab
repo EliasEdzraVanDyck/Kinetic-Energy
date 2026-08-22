@@ -4821,12 +4821,6 @@ MonoBehaviour:
   maxLaunchDamping: 1
   downLaunchDamping: 0.2
   plainFallDamping: 0.2
-  enableAudio: 1
-  playerSounds: {fileID: 2049351145183922922}
-  flyingSound: {fileID: 8300000, guid: 78cf081f30aae61439e996ff63afdcc1, type: 3}
-  chargingSound: {fileID: 8300000, guid: e62fccd53101e6b43bfb273535862e4b, type: 3}
-  chargingLoopSound: {fileID: 8300000, guid: c4dd4d1fdb2ddd6488adf36d882bac02, type: 3}
-  crashSound: {fileID: 8300000, guid: b4d713f985ad47449a0763f89eb7f511, type: 3}
   groundedAimCameraFollow: 0
   groundedAimFollowThreshold: 60
   groundedAimFollowBand: 5
@@ -5011,6 +5005,17 @@ MonoBehaviour:
   maxDecals: 40
   screenspaceTrail: 1
   trailImage: {fileID: 6421481331109567342}
+  playerSounds: {fileID: 2049351145183922922}
+  flyingSoundEnabled: 1
+  flyingSound: {fileID: 8300000, guid: 78cf081f30aae61439e996ff63afdcc1, type: 3}
+  chargingSoundEnabled: 1
+  chargingSound: {fileID: 8300000, guid: e62fccd53101e6b43bfb273535862e4b, type: 3}
+  chargeLoopSoundEnabled: 1
+  chargingLoopSound: {fileID: 8300000, guid: c4dd4d1fdb2ddd6488adf36d882bac02, type: 3}
+  crashSoundEnabled: 1
+  crashSound: {fileID: 8300000, guid: b4d713f985ad47449a0763f89eb7f511, type: 3}
+  crashPitch: 0.72
+  crashVolume: 1
   motionTrail: {fileID: 7801135997219884100}
   trailStartWidth: 0.5
   trailSeconds: 0.3
