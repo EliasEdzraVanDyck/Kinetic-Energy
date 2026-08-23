@@ -214,7 +214,10 @@ namespace KineticEnergy.Player
                     * Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(launchBoomStartSpend, 1f, spend));
                 if (boom > 0.02f)
                 {
-                    crashSource.pitch = Mathf.Lerp(1.1f, 0.8f, weight);
+                    // One octave below the original range (1.1..0.8 halved) - the boom is
+                    // all chest now, in every case, and no longer shares a register with
+                    // the landing thud.
+                    crashSource.pitch = Mathf.Lerp(0.55f, 0.4f, weight);
                     crashSource.PlayOneShot(crashSound, boom);
                 }
                 if (spend >= 0.999f && launchOverchargeVolume > 0.02f && crashSubSource != null)
