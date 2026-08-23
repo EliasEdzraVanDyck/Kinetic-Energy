@@ -2996,9 +2996,11 @@ namespace KineticEnergy.EditorSetup
                     data.rendererFeatures.Add(feature);
                 }
                 feature.passMaterial = material;
-                // BEFORE post-processing, so bloom and the vignette composite over clean
-                // lines instead of the lines cutting through them.
-                feature.injectionPoint = UnityEngine.Rendering.Universal.FullScreenPassRendererFeature.InjectionPoint.BeforeRenderingPostProcessing;
+                // BEFORE TRANSPARENTS: the depth-exempt visuals (laser beams, aim dots)
+                // draw AFTER the outline, so background silhouette lines can never cut
+                // across them - which is exactly what read as "the beams are transparent".
+                // Post-processing still composites over everything afterwards.
+                feature.injectionPoint = UnityEngine.Rendering.Universal.FullScreenPassRendererFeature.InjectionPoint.BeforeRenderingTransparents;
                 feature.requirements = UnityEngine.Rendering.Universal.ScriptableRenderPassInput.Depth
                     | UnityEngine.Rendering.Universal.ScriptableRenderPassInput.Normal;
                 feature.fetchColorBuffer = true; // the shader reads the scene through _BlitTexture

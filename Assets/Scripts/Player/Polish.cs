@@ -94,11 +94,24 @@ namespace KineticEnergy.Player
         public float outlineFadeEaseSpeed = 6f;
         float outlineFade = 1f;
 
+        [Tooltip("Metres around the player's own depth the fade covers - keeps the dim scoped to the ball's rim while every other outline in the frame stays full.")]
+        public float outlineFadeWindow = 1.5f;
+
         void UpdateOutlineFade()
         {
             outlineFade = Mathf.Lerp(outlineFade, isFlying ? launchOutlineFade : 1f,
                 1f - Mathf.Exp(-outlineFadeEaseSpeed * Time.unscaledDeltaTime));
             Shader.SetGlobalFloat("_OutlineGlobalFade", outlineFade);
+            Shader.SetGlobalFloat("_OutlineFadeWindow", outlineFadeWindow);
+
+            // The player's depth along the camera's view axis - what the shader compares
+            // each edge's near side against.
+            UnityEngine.Camera cam = UnityEngine.Camera.main;
+            if (cam != null)
+            {
+                float depth = Vector3.Dot(transform.position - cam.transform.position, cam.transform.forward);
+                Shader.SetGlobalFloat("_OutlinePlayerDepth", depth);
+            }
         }
 
         [Header("Screen Shake")]

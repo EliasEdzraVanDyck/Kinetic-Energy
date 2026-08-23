@@ -45,8 +45,10 @@ Shader "Custom/URP/EdgeOutline"
             float _Threshold;
             float _NormalFadeDistance;
             float _DepthAbsSensitivity;
-            // GLOBAL, driven by Polish via Shader.SetGlobalFloat - not a material property.
+            // GLOBALS, driven by Polish via Shader.SetGlobalFloat - not material properties.
             float _OutlineGlobalFade;
+            float _OutlinePlayerDepth;  // the player's view depth - the fade is scoped HERE
+            float _OutlineFadeWindow;   // +/- metres around it that the fade covers
 
             float EyeDepth(float2 uv)
             {
@@ -114,12 +116,28 @@ Shader "Custom/URP/EdgeOutline"
                 float edge = smoothstep(_Threshold, _Threshold * 2.0,
                     max(max(depthEdge, normalEdge), stepEdge));
 
-                // A launch with the camera trailing shrinks the player to a handful of
-                // pixels, and even a 2px OUTSET ring dwarfs a ball that small - the game
-                // fades the whole outline down during flight through this global (unset =
-                // 0 = treated as full strength, so scenes without the driver still draw).
+                // SKY is never inked. Sky pixels are "infinitely behind" everything, so
+                // the far-side rule painted a smeared black band along any large surface's
+                // horizon edge (the damage floor's far rim - the smudge at the end of the
+                // level). An edge against the sky adds nothing: the silhouette against a
+                // bright sky is already the strongest contrast in the frame.
+                float rawCentre = SampleSceneDepth(uv);
+                #if UNITY_REVERSED_Z
+                float skyMask = step(0.000001, rawCentre);
+                #else
+                float skyMask = step(rawCentre, 0.999999);
+                #endif
+                edge *= skyMask;
+
+                // The launch fade, scoped to the PLAYER: Polish publishes the player's
+                // view depth, and only edges whose NEAR side sits within the window of it
+                // dim - the ball's own rim fades while the camera trails, and every other
+                // outline in the frame stays at full strength. Unset globals (0) read as
+                // "no fade", so scenes without the driver draw normally.
                 float globalFade = _OutlineGlobalFade <= 0.001 ? 1.0 : saturate(_OutlineGlobalFade);
-                edge *= globalFade;
+                float window = max(_OutlineFadeWindow, 0.001);
+                float playerProximity = 1.0 - saturate(abs(nearTap - _OutlinePlayerDepth) / window);
+                edge *= lerp(1.0, globalFade, playerProximity);
 
                 half4 scene = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv);
                 return lerp(scene, _OutlineColor, edge * _OutlineColor.a);
