@@ -2734,6 +2734,79 @@ namespace KineticEnergy.EditorSetup
             AddBandRequirement(instance, palette, pipMaterial, instance.GetComponentInChildren<Renderer>());
         }
 
+        // The laser-charging loop: bakes the FIRST 5 SECONDS of the imported mp3 into a
+        // WAV asset and wires it as the charge loop. Trimmed at the asset, not at runtime:
+        // the clip LOOPS, and the source's ~2 trailing silent seconds would have put a
+        // hole in every cycle.
+        [MenuItem("Tools/Kinetic Energy/Bake Laser Charging Loop")]
+        public static void BakeLaserChargingLoop()
+        {
+            const string sourcePath = "Assets/Audio/LaserCharging.mp3";
+            const string bakedPath = "Assets/Audio/LaserChargingLoop.wav";
+            const float keepSeconds = 5f;
+
+            AudioImporter importer = AssetImporter.GetAtPath(sourcePath) as AudioImporter;
+            if (importer == null) throw new Exception("KineticEnergySetup: " + sourcePath + " missing.");
+            AudioImporterSampleSettings settings = importer.defaultSampleSettings;
+            settings.loadType = AudioClipLoadType.DecompressOnLoad; // GetData needs raw samples
+            importer.defaultSampleSettings = settings;
+            importer.SaveAndReimport();
+
+            AudioClip source = AssetDatabase.LoadAssetAtPath<AudioClip>(sourcePath);
+            if (source == null) throw new Exception("KineticEnergySetup: clip failed to import.");
+            source.LoadAudioData();
+
+            int keepFrames = Mathf.Min(Mathf.RoundToInt(keepSeconds * source.frequency), source.samples);
+            float[] samples = new float[keepFrames * source.channels];
+            if (!source.GetData(samples, 0)) throw new Exception("KineticEnergySetup: GetData failed - check the clip's load type.");
+
+            WriteWav(bakedPath, samples, source.channels, source.frequency);
+            AssetDatabase.ImportAsset(bakedPath);
+            AudioClip baked = AssetDatabase.LoadAssetAtPath<AudioClip>(bakedPath);
+            if (baked == null) throw new Exception("KineticEnergySetup: baked wav failed to import.");
+
+            string prefabPath = PrefabFolder + "/Player.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                Polish polish = root.GetComponent<Polish>();
+                if (polish == null) throw new Exception("KineticEnergySetup: Player has no Polish.");
+                polish.chargingLoopSound = baked;
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: laser charging loop baked OK (" + keepFrames + " frames @" + source.frequency
+                + "Hz, " + source.channels + "ch, source " + source.length.ToString("F2") + "s)");
+        }
+
+        // Minimal 16-bit PCM WAV writer - enough for Unity's importer.
+        static void WriteWav(string assetPath, float[] samples, int channels, int frequency)
+        {
+            using (var stream = new FileStream(assetPath, FileMode.Create))
+            using (var writer = new BinaryWriter(stream))
+            {
+                int dataBytes = samples.Length * 2;
+                writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+                writer.Write(36 + dataBytes);
+                writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+                writer.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
+                writer.Write(16);
+                writer.Write((short)1); // PCM
+                writer.Write((short)channels);
+                writer.Write(frequency);
+                writer.Write(frequency * channels * 2);
+                writer.Write((short)(channels * 2));
+                writer.Write((short)16);
+                writer.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+                writer.Write(dataBytes);
+                foreach (float sample in samples)
+                {
+                    writer.Write((short)(Mathf.Clamp(sample, -1f, 1f) * short.MaxValue));
+                }
+            }
+        }
+
         // The speed-lines look, matched to the manga reference: MANY needle-thin lines, a
         // wide clear centre, streaming outward - and far subtler than before.
         [MenuItem("Tools/Kinetic Energy/Tune Trail Speed Lines")]
@@ -2811,7 +2884,6 @@ namespace KineticEnergy.EditorSetup
                 // clips its old fields referenced (mapped by guid before the fields went).
                 polish.playerSounds = root.GetComponentInChildren<AudioSource>(true);
                 polish.flyingSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Whoosh.mp3");
-                polish.chargingSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Charge.mp3");
                 polish.chargingLoopSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/ChargeLoop.wav");
                 polish.crashSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Thud.wav");
 

@@ -141,10 +141,7 @@ namespace KineticEnergy.Player
         [Tooltip("Whoosh loop while airborne after a launch.")]
         public bool flyingSoundEnabled = true;
         public AudioClip flyingSound;
-        [Tooltip("The one-shot chirp when a charge/aim opens.")]
-        public bool chargingSoundEnabled = true;
-        public AudioClip chargingSound;
-        [Tooltip("The held loop once the charge chirp has finished.")]
+        [Tooltip("The charging loop, playing the whole time an aim is open - grounded or midair, dial or no dial. (The old intro chirp is gone; this carries the identity alone.)")]
         public bool chargeLoopSoundEnabled = true;
         public AudioClip chargingLoopSound;
         [Tooltip("The impact thud on landings and crashes.")]
@@ -178,8 +175,16 @@ namespace KineticEnergy.Player
         [Tooltip("The 100% EXTRA: at a genuinely full-tank launch, a second boom lands two octaves down on top of everything - the overcharge tell. 0 disables it.")]
         [Range(0f, 1f)] public float launchOverchargeVolume = 1f;
 
+        [Tooltip("Seconds the charge loop takes to swell from its quiet start to its maximum.")]
+        public float chargeLoopRampSeconds = 2f;
+        [Tooltip("Fraction of the loop's MAXIMUM the swell starts at - the rise from here is the charge audibly building.")]
+        [Range(0f, 1f)] public float chargeLoopStartVolume = 0.25f;
+        [Tooltip("The loop's MAXIMUM volume, as a fraction of the audio source's own - the ceiling the swell rises to. 0.7 = 30% under the source's authored level.")]
+        [Range(0f, 1f)] public float chargeLoopMaxVolume = 0.7f;
+
         AudioSource crashSource;
         AudioSource crashSubSource; // the octave-down layer needs its own pitch, hence its own source
+        float chargeLoopStartTime;  // the swell's clock
         float airborneSeconds;      // continuous air time - the grounded-edge thud's genuineness gate
         float loopSourcePitch = 1f;  // the source's authored pitch/volume, restored whenever
         float loopSourceVolume = 1f; // a non-launch clip takes the source back
@@ -281,34 +286,31 @@ namespace KineticEnergy.Player
             airborneSeconds = grounded ? 0f : airborneSeconds + Time.deltaTime;
             audioWasGrounded = grounded;
 
-            if (controller.IsAimingOrCharging)
+            // The loop runs the WHOLE time an aim is open - grounded aim, midair aim, the
+            // hold-charges - regardless of the dial, the buttons or the tank. No intro
+            // chirp any more: the loop alone is the charge's voice, and its swell (quiet
+            // in, full after the ramp) is the build-up the chirp used to fake.
+            if (controller.IsAimingOrCharging && chargeLoopSoundEnabled && chargingLoopSound != null)
             {
-                bool chargeClipUp = playerSounds.clip == chargingSound || playerSounds.clip == chargingLoopSound;
-                if (chargeClipUp)
-                {
-                    if (!playerSounds.isPlaying && chargeLoopSoundEnabled && chargingLoopSound != null)
-                    {
-                        playerSounds.clip = chargingLoopSound;
-                        playerSounds.loop = true;
-                        playerSounds.Play();
-                    }
-                }
-                else if (chargingSoundEnabled && chargingSound != null)
+                if (playerSounds.clip != chargingLoopSound || !playerSounds.isPlaying)
                 {
                     playerSounds.Stop();
-                    // The charge sounds play at the source's own settings - the launch's
-                    // spend-warped pitch and volume belong to the whoosh alone.
+                    // At the source's own pitch - the launch's spend-warp belongs to the whoosh.
                     playerSounds.pitch = loopSourcePitch;
-                    playerSounds.volume = loopSourceVolume;
-                    playerSounds.clip = chargingSound;
-                    playerSounds.loop = false;
+                    playerSounds.clip = chargingLoopSound;
+                    playerSounds.loop = true;
+                    playerSounds.volume = loopSourceVolume * chargeLoopMaxVolume * chargeLoopStartVolume;
                     playerSounds.Play();
+                    chargeLoopStartTime = Time.unscaledTime;
                 }
+                float swell = Mathf.Clamp01((Time.unscaledTime - chargeLoopStartTime)
+                    / Mathf.Max(chargeLoopRampSeconds, 0.01f));
+                playerSounds.volume = loopSourceVolume * chargeLoopMaxVolume
+                    * Mathf.Lerp(chargeLoopStartVolume, 1f, swell);
             }
-            else if (grounded && playerSounds.isPlaying
-                && (playerSounds.clip == chargingSound || playerSounds.clip == chargingLoopSound))
+            else if (playerSounds.isPlaying && playerSounds.clip == chargingLoopSound)
             {
-                playerSounds.Stop(); // aim closed on the ground: no leftover charge hum
+                playerSounds.Stop(); // the aim closed - however it closed
             }
         }
 
