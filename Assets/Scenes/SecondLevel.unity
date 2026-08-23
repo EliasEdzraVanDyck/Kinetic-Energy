@@ -5984,7 +5984,10 @@ MonoBehaviour:
 
     Everything at once. Energy is the real resource here: every kill
     has a price, and the meter''s marker shows whether this shot can pay it.'
+  sectionTextsGamepad: []
+  proximitySteps: []
   panelWidth: 440
+  gamepadStickDeadzone: 0.35
 --- !u!4 &955590618
 Transform:
   m_ObjectHideFlags: 0
@@ -6486,6 +6489,7 @@ MonoBehaviour:
   totalLossStepPerLevel: 0.1
   totalLossSafetyTriggerFraction: 0.4
   totalLossSafetyCeilingFraction: 0.4
+  showIntroOnBoot: 1
   introKey: levelelements
   introText: 'LEVEL ELEMENTS TEST
 

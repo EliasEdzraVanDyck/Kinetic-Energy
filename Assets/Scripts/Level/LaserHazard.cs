@@ -83,7 +83,9 @@ namespace KineticEnergy.Level
 
             Vector3 shove = Vector3.Lerp(back, Vector3.up, Mathf.Clamp01(upwardBias)).normalized;
 
-            player.ApplyEnemyHit(shove * knockbackForce, energyDrain, launchLockSeconds);
+            // canEmptyRespawn false: a hazard shoves and drains, but never ends the run -
+            // draining the last drop leaves the player at zero, alive, to walk it off.
+            player.ApplyEnemyHit(shove * knockbackForce, energyDrain, launchLockSeconds, canEmptyRespawn: false);
         }
     }
 }

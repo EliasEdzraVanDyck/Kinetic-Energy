@@ -629,6 +629,11 @@ namespace KineticEnergy.Player
         public event System.Action<float, UnityEngine.Vector3> MidairAimFired;
         public event System.Action MidairAimReleased;
         public event System.Action<UnityEngine.Vector3> CrashRegistered;
+        // Feel hooks for Polish: a launch just killed an enemy / something just hurt the
+        // player (every hurt source routes through ApplyEnemyHit, so one event covers
+        // enemies, lasers, damage shells and projectiles alike).
+        public event System.Action EnemyKilled;
+        public event System.Action PlayerHurt;
         bool suppressAimReleasedEvent; // the fire path closes the aim without a "released"
         bool justUnpaused; // swallow the first unpaused frame - menu clicks must not leak into gameplay
         KineticEnergy.Camera.AimCameraVariantController aimVariants; // the playtest harness, same object
@@ -1713,8 +1718,14 @@ namespace KineticEnergy.Player
         // drains some energy. The hit interrupts any aim/charge, breaks a crash-stick, and
         // suppresses grounded movement briefly - without that window the walk code would
         // erase the shove on the very next physics tick.
-        public void ApplyEnemyHit(Vector3 impulse, float energyLoss, float launchLockSeconds)
+        // canEmptyRespawn: whether draining the tank DRY here may end the run (the enemy
+        // rule). Environmental hazards - lasers, damage shells - pass false: they shove and
+        // drain but never respawn, even on the last drop. A shell hit on a near-empty tank
+        // used to zero it and trigger the checkpoint respawn, which read as "the shell
+        // respawned me" (direct report).
+        public void ApplyEnemyHit(Vector3 impulse, float energyLoss, float launchLockSeconds, bool canEmptyRespawn = true)
         {
+            PlayerHurt?.Invoke();
             launchLockTimer = Mathf.Max(launchLockTimer, launchLockSeconds);
             poundWindowTimer = 0f; // getting hit forfeits any post-pound window outright
             if (airAiming) CancelAirAim();
@@ -1749,7 +1760,7 @@ namespace KineticEnergy.Player
                 // Drained dry by an attack: with no energy there is no launch and no way
                 // out, so the run is over here rather than leaving the player stranded.
                 // The scene's respawn owner decides WHERE back is.
-                if (energyFraction <= 0f) EnergyEmptiedByHit?.Invoke();
+                if (energyFraction <= 0f && canEmptyRespawn) EnergyEmptiedByHit?.Invoke();
             }
         }
 
@@ -2311,7 +2322,7 @@ namespace KineticEnergy.Player
                     {
                         if (enemy.CanBeKilledByLaunch)
                         {
-                            if (launchSpend >= enemy.MinKillEnergyFraction) enemy.OnHitByLaunch();
+                            if (launchSpend >= enemy.MinKillEnergyFraction) { enemy.OnHitByLaunch(); EnemyKilled?.Invoke(); }
                             else enemy.PunishFailedKill();
                         }
                     }
@@ -2328,6 +2339,7 @@ namespace KineticEnergy.Player
                         if (flyer.LaunchKillAllowedFor(collision.collider) && launchSpend >= flyer.minKillEnergyFraction - 0.0001f)
                         {
                             flyer.OnHitByLaunch();
+                            EnemyKilled?.Invoke();
                         }
                         else
                         {
@@ -2359,7 +2371,7 @@ namespace KineticEnergy.Player
                             }
                         }
                     }
-                    else if (launchSpend >= turret.minKillEnergyFraction - 0.0001f) turret.OnHitByLaunch();
+                    else if (launchSpend >= turret.minKillEnergyFraction - 0.0001f) { turret.OnHitByLaunch(); EnemyKilled?.Invoke(); }
                 }
                 return;
             }

@@ -2829,6 +2829,91 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: trail speed lines tuned OK");
         }
 
+        // Normalizes the hurt clip: the source mp3 is mastered QUIET (its peak sits well
+        // under full scale), and no volume slider can push a source past 1 - so the
+        // loudness has to be baked into the asset. Peak-normalized to 0.98 and wired.
+        [MenuItem("Tools/Kinetic Energy/Bake Player Hurt Sound")]
+        public static void BakePlayerHurtSound()
+        {
+            const string sourcePath = "Assets/Audio/PlayerHurt.mp3";
+            const string bakedPath = "Assets/Audio/PlayerHurtLoud.wav";
+
+            AudioImporter importer = AssetImporter.GetAtPath(sourcePath) as AudioImporter;
+            if (importer == null) throw new Exception("KineticEnergySetup: " + sourcePath + " missing.");
+            AudioImporterSampleSettings settings = importer.defaultSampleSettings;
+            settings.loadType = AudioClipLoadType.DecompressOnLoad;
+            importer.defaultSampleSettings = settings;
+            importer.SaveAndReimport();
+
+            AudioClip source = AssetDatabase.LoadAssetAtPath<AudioClip>(sourcePath);
+            source.LoadAudioData();
+            float[] samples = new float[source.samples * source.channels];
+            if (!source.GetData(samples, 0)) throw new Exception("KineticEnergySetup: GetData failed.");
+
+            float peak = 0f;
+            foreach (float s in samples) peak = Mathf.Max(peak, Mathf.Abs(s));
+            float gain = peak > 0.0001f ? 0.98f / peak : 1f;
+            for (int i = 0; i < samples.Length; i++) samples[i] = Mathf.Clamp(samples[i] * gain, -1f, 1f);
+
+            WriteWav(bakedPath, samples, source.channels, source.frequency);
+            AssetDatabase.ImportAsset(bakedPath);
+            AudioClip baked = AssetDatabase.LoadAssetAtPath<AudioClip>(bakedPath);
+
+            string prefabPath = PrefabFolder + "/Player.prefab";
+            GameObject root = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                Polish polish = root.GetComponent<Polish>();
+                polish.playerHurtSound = baked;
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: hurt sound baked OK (source peak " + peak.ToString("F3")
+                + ", gain x" + gain.ToString("F2") + ")");
+        }
+
+        // Audit + repair: every DamageWalls in the scene that is NOT the hazard floor gets
+        // converted to the shove-and-drain LaserHazard. Some shells survived the earlier
+        // name-matched conversion (anything not named 'DamageShell*'), and those still
+        // hard-respawned the player.
+        [MenuItem("Tools/Kinetic Energy/Convert All Lethal Shells")]
+        public static void ConvertAllLethalShells()
+        {
+            foreach (string scenePath in new[] { "Assets/Scenes/LevelElementsTest3.unity", "Assets/Scenes/SecondLevel.unity" })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                int converted = 0;
+                foreach (DamageWalls lethal in UnityEngine.Object.FindObjectsByType<DamageWalls>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    string n = lethal.gameObject.name;
+                    // The FLOOR is the one intended respawn source; laser gate beams were
+                    // already converted per-scene and carry LaserWall parents if any remain.
+                    if (n == "DamageFloor") continue;
+                    Debug.Log("SHELLFIX converting '" + n + "' at " + lethal.transform.position.ToString("F0") + " in " + scenePath);
+                    GameObject go = lethal.gameObject;
+                    UnityEngine.Object.DestroyImmediate(lethal);
+                    if (go.GetComponent<LaserHazard>() == null) go.AddComponent<LaserHazard>();
+                    EditorUtility.SetDirty(go);
+                    converted++;
+                }
+                // The section controller's hazards array held references to the components
+                // just destroyed - rebuilt from what actually remains, or the respawn
+                // repointing walks into nulls.
+                LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
+                if (sections != null)
+                {
+                    sections.hazards = UnityEngine.Object.FindObjectsByType<DamageWalls>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+                    EditorUtility.SetDirty(sections);
+                }
+
+                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: " + scenePath + " - " + converted + " lethal shells converted");
+            }
+        }
+
         // The crash decal: imports the stamp texture, builds its unlit-transparent material
         // (a real asset, so the shader survives WebGL stripping - the pip lesson), and
         // wires it onto the Player prefab's Polish in place.
@@ -2889,6 +2974,12 @@ namespace KineticEnergy.EditorSetup
                 polish.chargingLoopSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/LaserChargingLoop.wav");
                 polish.crashSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Thud.wav");
                 polish.energyClickSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/EnergyClick.wav");
+                polish.enemyKillSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/EnemyBreak.mp3");
+                // The NORMALIZED bake, not the quiet source mp3 (the laser-loop lesson:
+                // this wiring re-runs, and must never regress a baked clip).
+                AudioClip hurtLoud = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/PlayerHurtLoud.wav");
+                polish.playerHurtSound = hurtLoud != null ? hurtLoud
+                    : AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/PlayerHurt.mp3");
 
                 // The world-space ribbon behind the player. TWO children are named
                 // "Trail", so the one actually CARRYING a TrailRenderer is the anchor -

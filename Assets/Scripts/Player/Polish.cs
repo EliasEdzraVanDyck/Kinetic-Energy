@@ -186,6 +186,49 @@ namespace KineticEnergy.Player
         public AudioClip energyClickSound;
         [Tooltip("The click's loudness relative to the charge loop's volume AT THAT MOMENT. 1.5 = half again as loud as the hum it interrupts.")]
         public float energyClickVolumeScale = 1.5f;
+        [Tooltip("The crate-break when a launch KILLS an enemy - ground, flyer and turret alike.")]
+        public bool enemyKillSoundEnabled = true;
+        public AudioClip enemyKillSound;
+        [Range(0f, 1f)] public float enemyKillVolume = 1f;
+        [Tooltip("The bass impact when something HURTS the player - enemy hits, lasers, damage shells, projectiles: everything that shoves and drains.")]
+        public bool playerHurtSoundEnabled = true;
+        public AudioClip playerHurtSound;
+        [Tooltip("Above 1 the clip is LAYERED onto itself for the extra gain (a source cannot exceed 1 on its own) - 2 plays it twice at once, roughly +6dB.")]
+        [Range(0f, 3f)] public float playerHurtVolume = 1.5f;
+
+        void OnEnemyKilled()
+        {
+            if (!enemyKillSoundEnabled || enemyKillSound == null || crashSource == null) return;
+            crashSource.pitch = 1f;
+            crashSource.PlayOneShot(enemyKillSound, enemyKillVolume);
+        }
+
+        AudioSource hurtSource;
+
+        void OnPlayerHurt()
+        {
+            if (!playerHurtSoundEnabled || playerHurtSound == null) return;
+            // A dedicated, always-2D source. The shared one-shot sources inherit the loop
+            // source's spatial blend - if that is 3D, the distance to the camera's listener
+            // quietly rolls a bass-heavy clip down to almost nothing. Being hurt is a
+            // message to the PLAYER, not a sound in the world; it plays flat, full, always.
+            if (hurtSource == null)
+            {
+                hurtSource = gameObject.AddComponent<AudioSource>();
+                hurtSource.playOnAwake = false;
+                hurtSource.spatialBlend = 0f;
+            }
+            hurtSource.pitch = 1f;
+            // PlayOneShot caps at 1, so gain past 100% is built by LAYERING: full-volume
+            // copies for each whole unit, the remainder as the last, quieter layer.
+            // Identical in-phase copies sum, so two layers is roughly +6dB.
+            float remaining = Mathf.Clamp(playerHurtVolume, 0f, 3f);
+            while (remaining > 0.01f)
+            {
+                hurtSource.PlayOneShot(playerHurtSound, Mathf.Min(remaining, 1f));
+                remaining -= 1f;
+            }
+        }
 
         AudioSource crashSource;
         AudioSource crashSubSource; // the octave-down layer needs its own pitch, hence its own source
@@ -548,6 +591,8 @@ namespace KineticEnergy.Player
             {
                 controller.CrashRegistered += OnCrash;
                 controller.LaunchFired += OnLaunchFired;
+                controller.EnemyKilled += OnEnemyKilled;
+                controller.PlayerHurt += OnPlayerHurt;
             }
         }
 
@@ -730,6 +775,8 @@ namespace KineticEnergy.Player
             {
                 controller.CrashRegistered -= OnCrash;
                 controller.LaunchFired -= OnLaunchFired;
+                controller.EnemyKilled -= OnEnemyKilled;
+                controller.PlayerHurt -= OnPlayerHurt;
             }
             // A respawn, scene change or quit mid-buzz must not leave the motors running.
             rumbleTimer = 0f;
