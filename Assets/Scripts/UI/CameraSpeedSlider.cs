@@ -1,13 +1,10 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace KineticEnergy.UI
 {
-    // One pause-menu camera-speed slider (mouse or gamepad). The Slider itself runs on
-    // WHOLE NUMBERS 10..30, each step being 5% - that way Unity's own dragging AND its
-    // navigation handling (left stick left/right while the slider is selected) both move
-    // in exact 5% increments without any custom input code.
+
     [RequireComponent(typeof(Slider))]
     public class CameraSpeedSlider : MonoBehaviour
     {
@@ -32,8 +29,8 @@ namespace KineticEnergy.UI
         {
             slider = GetComponent<Slider>();
             slider.wholeNumbers = true;
-            slider.minValue = Mathf.Round(CameraSpeedSettings.MinScale / CameraSpeedSettings.Step); // 10 = 50%
-            slider.maxValue = Mathf.Round(CameraSpeedSettings.MaxScale / CameraSpeedSettings.Step); // 30 = 150%
+            slider.minValue = Mathf.Round(CameraSpeedSettings.MinScale / CameraSpeedSettings.Step);
+            slider.maxValue = Mathf.Round(CameraSpeedSettings.MaxScale / CameraSpeedSettings.Step);
             slider.value = Mathf.Round(CurrentScale / CameraSpeedSettings.Step);
             slider.onValueChanged.AddListener(OnSliderChanged);
             ApplySelectionTint(false);
@@ -57,8 +54,7 @@ namespace KineticEnergy.UI
 
         void Update()
         {
-            // Selection can change from anywhere (gamepad navigation, a mouse click), so
-            // the tint follows the EventSystem rather than the pointer events.
+
             bool selected = EventSystem.current != null
                 && EventSystem.current.currentSelectedGameObject == gameObject;
             if (selected != wasSelected)
@@ -84,3 +80,4 @@ namespace KineticEnergy.UI
         }
     }
 }
+

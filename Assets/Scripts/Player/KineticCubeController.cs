@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -7,14 +7,7 @@ using System.Collections.Generic;
 
 namespace KineticEnergy.Player
 {
-    // How the midair-aim slow-down is paid for. Levels pick one:
-    //  - Unlimited:  slowing down while aiming is free (The Quarry - the toy test).
-    //  - AimBudget:  a separate resource of aimBudgetSeconds is drained while slowed;
-    //                it refills on every crash. (The Gauntlet, Variant A.)
-    //  - EnergyTank: slowing down drains the regular energy tank at tankDrainPerSecond.
-    //                Thinking and moving compete for the same fuel. (Variant B.)
-    // While the resource is empty the midair aim STAYS USABLE - the cube just no longer
-    // freezes and time no longer slows, so aiming happens in real time mid-fall.
+
     public enum SlowdownMode
     {
         Unlimited,
@@ -22,28 +15,6 @@ namespace KineticEnergy.Player
         EnergyTank,
     }
 
-    // The launch-cube: charge a launch, fly, crash-stick, launch again.
-    //
-    // CONTROLS (the one scheme this project kept - grounded and midair are separate):
-    //  Grounded - hold Left Trigger / Right Mouse to aim (arrow + dotted trail, charge grows
-    //             over time), Right Trigger / Left Mouse fires. Holding South / Space instead
-    //             charges a straight-UP launch, released to fire.
-    //  Midair   - hold Left Trigger / Right Mouse to aim in first person: the energy dial is
-    //             adjusted with the right stick (up/down) or the mouse wheel, and Right
-    //             Trigger / Left Mouse CONFIRMS the launch along the camera's look direction.
-    //             West / E charges the GROUND POUND: a straight-down launch that smashes
-    //             through breakable crack panes.
-    //  Left Bumper cancels any charge. Right Bumper shows/hides the trajectory trail.
-    //
-    // CRASH RULES: any surface stops the cube dead and sticks it there. Near-flat ground can
-    // always be walked away from. Walls/ceilings hold permanently only when they carry a
-    // StickySurface component - anything else clings for nonStickyWallStickDuration seconds
-    // and then drops the cube back into gravity. A NonStickSurface never registers a crash.
-    //
-    // ENERGY: every launch spends the charge it was fired with. Crashing refunds by the rule
-    // that survived playtesting: a grounded launch pays back exactly what it cost, a midair
-    // launch pays spend * (1 + midairRefundSpendFactor * spend), and the ground pound pays
-    // spend * groundPoundRefundMultiplier (at least groundPoundMinRefund of the tank).
     [RequireComponent(typeof(Rigidbody))]
     public class KineticCubeController : MonoBehaviour
     {
@@ -54,37 +25,20 @@ namespace KineticEnergy.Player
         public float maxLaunchForce = 130f;
         [Tooltip("Seconds of charging that count as a full charge.")]
         public float maxChargeTime = 1.5f;
-        // Damping is interpolated by charge alongside force: linear drag eats proportionally
-        // more of a slow shot's range than a fast one's, so a single constant can't keep both
-        // ends of the charge range landing at sensible distances. Verified empirically with
-        // real-physics batch simulations back when this pair was tuned.
+
         [Tooltip("Rigidbody linear damping applied to a zero-charge launch.")]
         public float minLaunchDamping = 2.8f;
         [Tooltip("Rigidbody linear damping applied to a full-charge launch.")]
         public float maxLaunchDamping = 1.0f;
-        // The arc-shaping damping curve above would fight gravity to a near-constant fall
-        // speed on a purely vertical shot - a fixed low drag keeps gravity visibly in charge
-        // of a downward launch instead.
+
         [Tooltip("Fixed low damping used by downward (ground pound) launches instead of the charge curve.")]
         public float downLaunchDamping = 0.2f;
-        // A PLAIN fall (walked off a ledge, dropped from a cling - no launch in flight) must
-        // not inherit the last launch's arc-shaping drag: at damping 2.8 terminal velocity is
-        // only ~11 m/s, which reads as a parachute.
+
         [Tooltip("Damping applied while airborne with no launch in flight, so plain falls accelerate naturally.")]
         public float plainFallDamping = 0.2f;
 
-        // All player audio moved to Polish, per-clip toggles included.
-
-        // The screenspace trail overlay moved to Polish, which derives launch-until-grounded
-        // from public state instead of being told at each transition.
-        // Screenshake lives in Polish now - the old version here wrote localPosition from
-        // Update and fought the orbit camera's LateUpdate pose write, which is why it read
-        // as vertical-only drift.
-
-        // Crash debris moved to Polish, alongside the decal, shake and rumble it fires with.
-
         [Header("Control Scheme Variants (QuarryAim lab - all default OFF)")]
-        // Toggled by ControlSchemeVariantController; every other scene keeps the classics.
+
         [Tooltip("Grounded aim: the camera slowly pans horizontally after the aim swings past the follow threshold to either side.")]
         public bool groundedAimCameraFollow = false;
         [Tooltip("Degrees of horizontal aim-vs-camera deviation before the follow starts.")]
@@ -99,20 +53,14 @@ namespace KineticEnergy.Player
         public bool bumperEnergyDial = false;
 
         [Header("Overcharge Scatter (economy test - 0 = off)")]
-        // Economy variant 3: committing MORE energy makes the launch less precise. The
-        // fired direction is offset by a random angle inside a cone whose radius grows
-        // with the charge. The aim preview deliberately shows the intended line - the
-        // scatter is the "faulty launch" risk, visualised separately while aiming.
+
         [Tooltip("Cone radius (degrees) at FULL charge. 0 disables scatter entirely.")]
         public float launchScatterMaxAngle = 0f;
         [Tooltip("Charge fraction where the cone starts growing - below this, launches stay exact.")]
         [Range(0f, 1f)] public float launchScatterStartFraction = 0.25f;
 
         [Header("Zero-Damping Test Mode")]
-        // A/B test flag (the QuarryNoDamping scene): launches fire with ZERO damping, at a
-        // force solved per launch so the landing distance exactly matches what the damped
-        // tuning would have flown - same dial, same distances, different flight feel.
-        // Ground pounds are exempt (straight down - distance is fixed by geometry anyway).
+
         [Tooltip("TEST MODE: fire all launches with zero damping, using the matched min/max forces computed at startup. Leave OFF outside the dedicated test scene.")]
         public bool zeroDampingMatchedLaunches = false;
         [Tooltip("Computed at startup (when the test mode is on): the zero-damping launch force whose 45-degree flat-ground distance matches a zero-charge damped launch. Charge lerps between this and the max, exactly like the damped pair.")]
@@ -123,9 +71,7 @@ namespace KineticEnergy.Player
         [Header("Energy")]
         [Tooltip("Fraction of the tank the player starts the level with.")]
         [Range(0f, 1f)] public float startingEnergyFraction = 0.2f;
-        // MUST stay 1: at exactly 1, the charge bar can never show more than the stored
-        // energy, and the amount charged IS the amount deducted, by construction. Use
-        // chargeAccumulationRate to make charging feel cheaper/slower instead.
+
         [Tooltip("Fraction of the whole tank a FULL charge costs. Keep at 1 - see the code comment.")]
         public float energyCostPerFullCharge = 1f;
         [Tooltip("GROUNDED launches can never spend the tank below this reserve. Midair launches may commit everything.")]
@@ -138,17 +84,10 @@ namespace KineticEnergy.Player
         public bool addPreAimVelocityToLaunch = false;
         [Tooltip("Under the momentum option, a launch from a WALL stick synthesizes a carry velocity equal to a launch at AT LEAST this charge fraction (the previous launch's charge wins when higher) - a wall stick holds zero velocity, so without this wall relaunches got no momentum treatment at all. 0 = off; the merged economy harness stamps the recharge baseline here.")]
         [Range(0f, 1f)] public float wallLaunchMomentumFloorFraction = 0f;
-        float previousLaunchChargeFraction; // the charge of the launch BEFORE the current one
-        // LATCHED at the wall crash, consumed by the next launch: the live stuck state
-        // flickers during the aim (the ground BoxCast clips a hugged wall and the
-        // grounded-restore path runs), which made the carry vanish a few frames in -
-        // the ARMED flag survives all of that until the launch actually fires.
+        float previousLaunchChargeFraction;
+
         bool wallCarryArmed;
 
-        // The synthesized WALL-launch momentum carry along the fire direction - the
-        // stand-in for the velocity a midair relaunch would have kept (a wall stick
-        // holds zero). Armed by a steep-surface crash, consumed by the next launch,
-        // active only under the momentum option with the floor stamped by the scene.
         Vector3 WallMomentumCarry(Vector3 direction)
         {
             if (!addPreAimVelocityToLaunch || !wallCarryArmed || wallLaunchMomentumFloorFraction <= 0f) return Vector3.zero;
@@ -158,22 +97,14 @@ namespace KineticEnergy.Player
         }
         [Tooltip("Multiplies real seconds of holding into charge-seconds - the main knob for how fast charging feels.")]
         public float chargeAccumulationRate = 0.3f;
-        // The grounded aim charge, the forward hold-charge, and the midair energy dial all
-        // ACCELERATE: rate multiplier = 1 + sustainedSeconds * this. On the dial, flipping
-        // between adding and removing resets the ramp, so lowering energy also speeds up the
-        // longer you keep lowering. (Up/down charges use their own base+growth ramp - see
-        // groundPoundChargeBaseSpeed/groundPoundChargeSpeedGrowth.)
+
         [Tooltip("How quickly a charge input's rate ramps up while sustained (1 = rate doubles after one second). Ramp resets when the dial flips direction.")]
         public float chargeAcceleration = 1f;
         [Tooltip("GROUNDED aim only: overrides chargeAcceleration for the hold-to-charge ramp when >= 0 (the aim-lab scenes set a steeper value - the bullet-time's scaled fill mutes the shared default there). -1 = use chargeAcceleration, identical everywhere.")]
         public float groundedAimChargeAcceleration = -1f;
         [Tooltip("Test-level switch: the tank is pinned at 100% and refunds/costs are ignored.")]
         public bool infiniteEnergy = false;
-        // Test-level switch (Level 1): a launch's cost drains from the meter OVER the
-        // flight instead of instantly - 0% drained at fire, 100% by landing, paced by the
-        // flight time the aim predicted. Firing a new launch midair stops the old drain, so
-        // the not-yet-spent remainder stays in the meter and funds the next launch (halfway
-        // through the path = half the energy still available).
+
         [Tooltip("Drain a launch's cost over the flight instead of instantly (see comment). Off = classic instant deduction.")]
         public bool gradualLaunchDrain = false;
         [Tooltip("Yellow energy / blue charge meter, top right - wired per scene by the setup script.")]
@@ -190,18 +121,11 @@ namespace KineticEnergy.Player
         public float poundFlightRefundMultiplier = 1f;
 
         [Header("Ground Pound (the EnergyEconomy4 mechanic)")]
-        // The pound doesn't stick - it BOUNCES: a free hop of groundPoundHopHeight, then a
-        // slow-mo window of groundPoundSlowDuration real seconds during which the cube hangs
-        // frozen. The crash refunds the flight's WHOLE spend as a wash immediately; the
-        // pound's boost EXTRA (poundSpend * (boostMultiplier - 1)) stays on offer - claimed
-        // by opening a midair aim inside the window (which also starts that aim FULLY
-        // charged and holds gravity off for its duration), forfeited if the window lapses.
-        // An aim that closes without firing gives the extra back.
+
         public float groundPoundBoostMultiplier = 1.5f;
         public float groundPoundHopHeight = 0.2f;
         public float groundPoundSlowDuration = 0.5f;
-        // The pound/up charge speed ramp: rate multiplier = base + growth * secondsHeld
-        // (real seconds, matching the unscaled charge).
+
         public float groundPoundChargeBaseSpeed = 1.5f;
         public float groundPoundChargeSpeedGrowth = 5f;
 
@@ -210,9 +134,7 @@ namespace KineticEnergy.Player
         public SlowdownMode slowdownMode = SlowdownMode.Unlimited;
         [Tooltip("AimBudget mode: total real seconds of slow-down available. Refills on every crash.")]
         public float aimBudgetSeconds = 2f;
-        // Default drains a FULL tank in aimBudgetSeconds (1 / 2s = 0.5/s), so a full tank buys
-        // approximately the same total slow-time as Variant A's budget - the tuning-parity rule
-        // this comparison test depends on. Log the actual values used with every test run.
+
         [Tooltip("EnergyTank mode: tank fraction drained per real second of slow-down.")]
         public float tankDrainPerSecond = 0.5f;
         [Tooltip("Optional bar showing the remaining aim budget (AimBudget mode only) - wired by the setup script.")]
@@ -224,9 +146,7 @@ namespace KineticEnergy.Player
         public float aimRotationSpeed = 90f;
         public float minAimPitch = -80f;
         public float maxAimPitch = 80f;
-        // Negative pitch tilts UP in this project's Quaternion.Euler convention (verified
-        // empirically, the sign is easy to get backwards) - -30 starts the aim 30 degrees
-        // above horizontal.
+
         [Tooltip("Pitch the grounded aim starts at every time it opens. Negative = upward.")]
         public float defaultAimPitch = -30f;
         public Transform cameraTransform;
@@ -251,10 +171,7 @@ namespace KineticEnergy.Player
         public LandingPreviewController landingPreview;
 
         [Header("Mouse Aim Option")]
-        // DEFAULT ON: the grounded aim follows raw mouse delta, and WASD drives the camera
-        // while aiming. Gamepad input is untouched either way - a stick that is actively
-        // aiming keeps its normal role (checked per frame via the move action's active
-        // device), so controller players get the exact same controls as always.
+
         public bool groundedAimWithMouse = true;
         public float groundedMouseAimSensitivity = 0.15f;
         [Tooltip("WASD-as-camera turns this much faster while Always Mouse is on - keys are all-or-nothing, unlike a stick.")]
@@ -265,14 +182,10 @@ namespace KineticEnergy.Player
         public float chargeTimeScale = 0.2f;
         [Tooltip("Base global time scale while a launch is in flight and nothing is charging.")]
         public float launchFlightTimeScale = 2f;
-        // The flight speed-up scales with commitment: base 200%, plus 1% of game speed for
-        // every 1% of the tank the launch spent (a full-tank launch flies at 300%).
+
         [Tooltip("Added to the flight time scale per full tank of energy spent on the launch (1 = +1% speed per 1% energy).")]
         public float flightTimeScaleEnergyBonus = 1f;
-        // Falling adds ANOTHER ramp on top: from the first descending frame the game speeds
-        // up by fallSpeedUpStart, growing in even steps to fallSpeedUpEnd at the moment of
-        // impact - measured as descent progress from the flight's apex down to the landing
-        // height the aim predicted at fire time.
+
         [Tooltip("Extra game speed on the first falling frame of a flight (0.01 = +1%).")]
         public float fallSpeedUpStart = 0.01f;
         [Tooltip("Extra game speed at the moment of impact (0.5 = +50%).")]
@@ -281,29 +194,20 @@ namespace KineticEnergy.Player
         [Header("Launch Limit")]
         [Tooltip("Launches allowed since last standing/crashing (a crash resets the budget). 0 = unlimited.")]
         public int maxLaunchesPerFlight = 2;
-        // Level-1 test rule: a crash on a surface that does NOT ground you (a wall, a
-        // platform's side, a floating object, a target - anything whose face is too steep
-        // to stand on) grants only this many launches until you're genuinely grounded
-        // again. Between two floating walls that means exactly one midair launch per hop.
-        // 0 = off: every crash restores the full launch budget, as always.
+
         [Tooltip("Launches granted by a NON-grounding crash (walls/sides/floating objects) until truly grounded again. 0 = off.")]
         public int wallCrashLaunchAllowance = 0;
 
         [Header("Crash Guards")]
-        // A large impulse can make PhysX re-report the launch platform's own continuous
-        // contact as a fresh OnCollisionEnter - any contact this soon after firing is
-        // necessarily spurious (no real landing is possible this fast at this game's speeds).
+
         public float launchGraceDuration = 0.15f;
-        // Second, independent guard: a shallow shot can genuinely re-touch its own platform
-        // after the grace window - also require this much distance from the launch point.
+
         public float minLaunchClearDistance = 2f;
         [Tooltip("How close a surface normal must be to world-up (dot) to count as walkable flat ground.")]
         [Range(0f, 1f)] public float flatGroundStickThreshold = 0.9f;
         [Tooltip("How steeply downward a launch must aim (dot with down) to count as a slam that bypasses the guards above.")]
         [Range(0f, 1f)] public float slamDownwardThreshold = 0.7f;
-        // Backstop for a launch that never separates from the ground at all (slides to a stop
-        // under friction) - after this many consecutive grounded physics ticks mid-"flight",
-        // register the crash that OnCollisionEnter never got an event for.
+
         public int stuckOnGroundTickThreshold = 10;
         [Tooltip("How long a NON-sticky wall/ceiling holds a crash before dropping the cube back into gravity.")]
         public float nonStickyWallStickDuration = 0.3f;
@@ -312,8 +216,7 @@ namespace KineticEnergy.Player
         public float fallResetY = -30f;
 
         [Header("Physics")]
-        // Applied to the global Physics.gravity on Awake and OnValidate, so it doubles as a
-        // live testing knob. Keep in sync with ProjectSettings/DynamicsManager.asset.
+
         public float gravity = -30f;
 
         [Header("Input")]
@@ -334,138 +237,98 @@ namespace KineticEnergy.Player
         public InputActionReference airLaunchAction;
 
         [Header("Controls Text")]
-        // The top-left corner hint is NOT script-written (direct request) - author its text
-        // directly on the ControlsHintLabel object in the scene. Only the pause menu's
-        // detailed Controls panel body is still filled in at runtime.
-        public Text controlsPanelBody;
 
-        // ---------- Runtime state ----------
+        public Text controlsPanelBody;
 
         Rigidbody rb;
         BoxCollider boxCollider;
         KineticCubeControllerFreeMove freeMoveController;
 
-        // Grounded aim state.
         bool isAiming;
-        bool waitingForAimRelease; // one-shot-per-hold: the aim button must be genuinely released after a fire/cancel
+        bool waitingForAimRelease;
         float aimYaw;
         float aimPitch;
 
-        // Hold-to-charge state (straight up, ground pound, and the direction-switched forward).
         enum HoldChargeDirection { None, Up, Down }
         HoldChargeDirection holdChargeDirection = HoldChargeDirection.None;
-        float holdChargeHeldSeconds; // real seconds this charge has been held - drives the rate ramp
-        float aimChargeHeldSeconds;  // ditto for the grounded aim's charge
+        float holdChargeHeldSeconds;
+        float aimChargeHeldSeconds;
 
-        // Midair dial ramp state: how long the dial has been moving in one direction, and
-        // which direction that is (+1 adding, -1 removing, 0 idle). A flip resets the ramp.
         float dialRampSeconds;
         int dialRampDirection;
 
-        // Midair first-person aim state. Aiming (the camera/reticle) and charging are separate
-        // on purpose: the aim can stay open across the energy dial's whole adjustment.
         bool airAiming;
-        // The flight velocity captured the instant the midair aim opened (the freeze zeroes
-        // it) - restored when the aim is released WITHOUT firing, so the original arc
-        // resumes instead of dropping straight down.
+
         Vector3 preAirAimVelocity;
 
-        // Shared charge amount for whichever charge system is active, in seconds of charging.
         float chargeTime;
 
-        // After a launch or cancel, a still-held aim button counts for nothing until genuinely
-        // released once - prevents a held trigger from instantly reopening the aim.
         bool aimButtonSpent;
 
-        // Wall-crash launch limit state: -1 = inactive (the normal maxLaunchesPerFlight
-        // budget applies); otherwise the exact launches left until genuinely grounded.
         int launchesRemainingOverride = -1;
 
-        // Flight state.
         bool hasLaunched;
-        bool currentFlightIsDownward; // slams are EXPECTED to instantly re-strike their own surface - bypasses the crash guards
-        bool currentFlightIsVertical; // up-charge or pound - the camera trails these with its tighter vertical smoothing
-        float currentFlightIntensity; // charge fraction of the launch - weak launches get extra camera lag time
-        bool exactFlightNoNudge;      // a midair-aimed launch flies the predicted line exactly - the stick must not bend it
+        bool currentFlightIsDownward;
+        bool currentFlightIsVertical;
+        float currentFlightIntensity;
+        bool exactFlightNoNudge;
         float launchGraceTimer;
         Vector3 launchStartPosition;
         int groundedTicksSinceLaunch;
         int launchesSinceGrounded;
-        Vector3 velocityBeforePhysicsStep; // clean pre-collision velocity for the crash refund
+        Vector3 velocityBeforePhysicsStep;
 
-        // Crash-stick state.
         bool isStuck;
         Vector3 stuckSurfaceNormal;
         float nonStickyReleaseTimer;
         bool isGrounded;
         bool groundedLastFrame;
 
-        // Queued launch, applied on the next physics tick.
         bool launchQueued;
         Vector3 queuedDirection;
         float queuedForce;
         float queuedDamping;
-        Vector3 queuedExtraVelocity; // the wall-launch momentum carry, delivered WITH the impulse
+        Vector3 queuedExtraVelocity;
 
-        // Energy.
         float energyFraction;
         float lastLaunchEnergySpent;
         bool lastLaunchWasGrounded;
 
-        // Which control fired the most recent launch. The checkpoint buttons gate on it: a
-        // press must be EARNED with a midair aim (or a pound) - neither a grounded launch
-        // that happens to arc down steeply nor a straight up-charge falling back onto the
-        // pad counts as a deliberate press.
         public enum LaunchKind { GroundedAim, HoldCharge, AirAim }
         public LaunchKind LastLaunchKind { get; private set; }
         bool lastLaunchWasPound;
-        // Running total spent across every launch since the last landing - the pound's wash
-        // refund pays back the WHOLE flight, not just the pound itself.
+
         float flightEnergySpent;
 
-        // Ground-pound bounce state: the post-pound slow-mo window, the boost extra still on
-        // offer, the provisional extra paid at aim-open (backed out if the aim closes without
-        // firing), and whether an aim opened inside the window is holding gravity off.
         float poundWindowTimer;
         float poundPendingRefund;
-        // Whether the open window came from an actual POUND. A wall crash opens the same
-        // window to claim the same energy boost, but earns none of the pound's other
-        // affordances - it must not open the aim pre-charged or hold gravity off.
+
         bool poundWindowFromPound;
         float poundBoostExtra;
         bool poundAimHoldingGravityOff;
 
-        // This flight's time scale - base plus the energy-spend bonus, fixed at fire time.
         float activeFlightTimeScale = 1f;
-        // The descent ramp's endpoints: the highest point this flight has reached, and the
-        // landing height the aim predicted when it fired.
+
         float flightApexY;
         float flightPredictedLandingY;
 
-        // Gradual-drain state: how much of the current launch's cost is still undrained,
-        // and how fast it drains (cost / predicted flight seconds). A new launch overwrites
-        // both - the old remainder is simply never taken.
         float gradualDrainRemaining;
         float gradualDrainPerSecond;
-        // Predicted flight duration of the last previewed shot, captured for the drain pace.
+
         float lastPredictedFlightSeconds;
-        // The same duration as estimated REAL seconds - game seconds divided by the flight
-        // speed-up the current dial would produce (plus the average descent ramp).
+
         float lastPredictedFlightRealSeconds;
 
-        // Slowdown resource.
         float aimBudgetRemaining;
         float slowdownSecondsUsed;
         bool slowdownWasAvailable;
 
-        // Landing prediction.
         Vector3[] trajectoryBuffer;
         Vector3 lastPredictedLanding;
         bool hasValidPredictedLanding;
         int lastTrajectoryStepCount;
         Vector3 lastPredictedLandingNormal = Vector3.up;
-        // The real scene collider the predicted flight ends on (mapped back from its
-        // physics-scene proxy) - lets the preview judge the landing's outcome.
+
         Collider lastPredictedLandingSource;
         GameObject predictionClone;
         Rigidbody predictionRb;
@@ -480,25 +343,12 @@ namespace KineticEnergy.Player
         Vector3 spawnCacheStart;
         Vector3 spawnCacheResult;
 
-        // ---------- Read-only state and events for companion components ----------
-
         public float EnergyFraction => energyFraction;
         public bool IsStuck => isStuck;
         public bool IsGrounded => isGrounded;
-        // The surface normal of the current crash-stick - lets outside systems tell a
-        // WALL stick from a flat landing (the ground BoxCast can clip a hugged wall).
+
         public Vector3 StuckSurfaceNormal => stuckSurfaceNormal;
 
-        // A TURNING surface carries whatever is stuck to it. The stick pins velocity to
-        // zero every tick, so a rider would otherwise hang in world space while the face
-        // rotates out from under them. The surface calls this each physics tick with where
-        // the rider should now be; the stuck normal turns with it, so the launch that
-        // follows still fires away from the face rather than into it.
-        // A turning surface carries its rider by VELOCITY, never by writing a position.
-        // Moving the body directly - however it was queued or smoothed - fights the stick's
-        // per-tick velocity pin and resets interpolation every frame, which is what made
-        // the ride vibrate. Handing the pin a velocity instead means the rider is moved by
-        // the physics step itself, exactly the way a moving platform carries you.
         public void CarryStuckRider(Vector3 riderVelocity, Quaternion rotationDelta)
         {
             if (!isStuck) return;
@@ -514,71 +364,46 @@ namespace KineticEnergy.Player
         public bool HasLaunched => hasLaunched;
         public int LaunchesSinceGrounded => launchesSinceGrounded;
 
-        // Total real seconds of midair slow-down consumed this scene - read by the run logger.
         public float SlowdownSecondsUsed => slowdownSecondsUsed;
         public float AimBudgetRemaining => aimBudgetRemaining;
 
-        // Read by MovingPlatform's lead arrow: whether the midair aim is open, and the
-        // currently previewed shot's predicted flight duration - in game seconds, and
-        // converted to estimated REAL seconds (flights run sped-up, platforms run on real
-        // time, so the lead must be in the platform's clock).
         public bool IsAirAiming => airAiming;
 
-        // The moving platform currently underfoot, if any - a platform reads this to know
-        // it is the one being ridden (and so should show no lead ghost of itself).
         public MovingPlatform GroundPlatform => freeMoveController != null ? freeMoveController.GroundPlatform : null;
 
-        // Economy-variant harness hooks (EconomyVariantController) - read-only state plus
-        // one guarded energy mutator, so the harness never reaches into private fields.
         public float LastLaunchEnergySpent => lastLaunchEnergySpent;
 
         float crashEnergySpent;
         int crashEnergySpentFrame = -1;
 
-        // What the launch that is arriving RIGHT NOW paid, for anything gating on a price
-        // from inside its own collision callback. Script order between two OnCollisionEnter
-        // handlers is undefined, so this survives either order: read before RegisterCrash
-        // runs, the live figure is still standing; read after, the frame-stamped copy is.
-        // The stamp is what keeps a previous crash's (possibly larger) spend from leaking
-        // into this one.
         public float ArrivalEnergySpent => crashEnergySpentFrame == Time.frameCount
             ? Mathf.Max(lastLaunchEnergySpent, crashEnergySpent)
             : lastLaunchEnergySpent;
 
         public Vector3 LastPredictedLanding => lastPredictedLanding;
-        // The collider the predicted landing terminates ON - what the player is aiming AT.
+
         public Collider PredictedLandingSource => lastPredictedLandingSource;
-        // What the aimed launch would spend if fired right now, as a tank fraction - THE
-        // affordability figure: the crash gates, the meter's charge tint and the preview's
-        // enemy verdict all compare exactly this.
+
         public float ProjectedLaunchSpend => energyCostPerFullCharge > 0f
             ? Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge)
             : SpendableEnergy();
         public bool HasValidPredictedLanding => hasValidPredictedLanding;
-        // The landing FACE's normal - the scatter ring lies flat against it.
+
         public Vector3 LastPredictedLandingNormal => lastPredictedLandingNormal;
         public float CurrentChargeFraction => ChargeFraction();
-        // (EnergyFraction already exists further up.)
 
-        // DROPS the player out of a midair aim: the aim closes and the cube falls from
-        // where it hung. Unlike releasing the aim button, the suspended flight is NOT
-        // resumed - the velocity the aim froze is forfeited, which is the whole point
-        // (the combo window running dry mid-flight cuts you loose).
         public void ForceEndAirAimAndFall()
         {
             if (!airAiming) return;
             CancelAirAim();
-            rb.linearVelocity = Vector3.zero; // no flight resume - you fall from a standstill
+            rb.linearVelocity = Vector3.zero;
             rb.useGravity = true;
-            // ...and the fall is COMMITTED: no reopening the aim on the way down. Only
-            // touching the ground again gives the aim back.
+
             airAimLockedUntilGrounded = true;
             cameraOrbit?.SnapToThirdPersonOrbit();
         }
 
-        // Set by a combo-window drop, cleared the moment the player is grounded again.
         bool airAimLockedUntilGrounded;
-
 
         public void AddEnergy(float delta)
         {
@@ -586,9 +411,6 @@ namespace KineticEnergy.Player
             energyFraction = Mathf.Clamp01(energyFraction + delta);
         }
 
-        // Where the CURRENT flight will be gameSecondsAhead from now, sampled from the
-        // trajectory captured at fire (midair fires follow it exactly; grounded fires and
-        // nudged flights track it closely). Hunters use this to intercept airborne players.
         public bool TryGetFlightPositionAhead(float gameSecondsAhead, out Vector3 position)
         {
             position = transform.position;
@@ -599,17 +421,13 @@ namespace KineticEnergy.Player
             return true;
         }
 
-        float flightElapsedSeconds; // game-seconds since the current launch fired
+        float flightElapsedSeconds;
 
-        // Landing PiP support (LandingPipCamera): a vantage point along the CURRENT
-        // predicted arc. Fraction 0 = at the player, 1 = at the landing. Only meaningful
-        // while the midair aim is open with a valid landing prediction.
         public bool TryGetPredictedArcPoint(float fraction, out Vector3 point, out Vector3 landing)
         {
             point = Vector3.zero;
             landing = lastPredictedLanding;
-            // Both aim types feed the trajectory buffer - the landing window works for
-            // GROUNDED aims too (direct request), not just the midair aim.
+
             if ((!airAiming && !isAiming) || !hasValidPredictedLanding || lastTrajectoryStepCount < 2) return false;
             int index = Mathf.Clamp(Mathf.RoundToInt(lastTrajectoryStepCount * fraction), 0, lastTrajectoryStepCount - 1);
             point = trajectoryBuffer[index];
@@ -618,43 +436,29 @@ namespace KineticEnergy.Player
         public float PredictedFlightSecondsLive => lastPredictedFlightSeconds;
         public float PredictedFlightRealSecondsLive => lastPredictedFlightRealSeconds;
 
-        // Fired the frame a midair aim opens / the slowdown resource runs dry / a launch
-        // fires - the Gauntlet's run logger subscribes to these.
         public event System.Action MidairAimOpened;
         public event System.Action SlowdownDepleted;
         public event System.Action LaunchFired;
-        // Aim-camera playtest instrumentation (AimCameraLogger): fired carries the energy
-        // fraction and the predicted landing point; released covers every no-fire close
-        // (manual release, grounded touch, enemy hit); crash reports the actual stop spot.
+
         public event System.Action<float, UnityEngine.Vector3> MidairAimFired;
         public event System.Action MidairAimReleased;
         public event System.Action<UnityEngine.Vector3> CrashRegistered;
-        // Feel hooks for Polish: a launch just killed an enemy / something just hurt the
-        // player (every hurt source routes through ApplyEnemyHit, so one event covers
-        // enemies, lasers, damage shells and projectiles alike).
+
         public event System.Action EnemyKilled;
         public event System.Action PlayerHurt;
-        bool suppressAimReleasedEvent; // the fire path closes the aim without a "released"
-        bool justUnpaused; // swallow the first unpaused frame - menu clicks must not leak into gameplay
-        KineticEnergy.Camera.AimCameraVariantController aimVariants; // the playtest harness, same object
+        bool suppressAimReleasedEvent;
+        bool justUnpaused;
+        KineticEnergy.Camera.AimCameraVariantController aimVariants;
 
-        // E/F free-look variants: the view rotates independently of the aim, and the
-        // energy dial moves to the bumpers (the right stick is busy free-looking).
         bool FreeLookAimActive => aimVariants != null && aimVariants.ActivePreset != null
             && aimVariants.ActivePreset.UsesFreeLook;
 
-        // Split in two because the two things the free-move component can do carry very
-        // different risk. Directly SETTING velocity (walking) must be blocked for a launch's
-        // whole flight - a shallow shot can read "grounded" mid-flight and be silently
-        // overwritten. An ADDITIVE nudge only needs to wait out the brief post-launch grace.
         public bool AllowGroundedMovement => !IsAimingOrCharging && !hasLaunched && !isStuck
-            // An enemy hit's knockback window - the walk code must not stomp the shove.
+
             && knockbackTimer <= 0f;
         public bool AllowAirborneNudge => !IsAimingOrCharging && !isStuck && launchGraceTimer <= 0f
-            // A midair-aimed launch promises the predicted line exactly - see exactFlightNoNudge.
-            && !exactFlightNoNudge;
 
-        // ---------- Lifecycle ----------
+            && !exactFlightNoNudge;
 
         void Awake()
         {
@@ -666,7 +470,7 @@ namespace KineticEnergy.Player
             ApplyGravity();
             energyFraction = infiniteEnergy ? 1f : startingEnergyFraction;
             aimBudgetRemaining = aimBudgetSeconds;
-            // Defensive: a scene saved mid-stuck must not start the game with gravity off.
+
             rb.useGravity = true;
 
             GetComponent<Polish>()?.ResetCrashParticles();
@@ -721,28 +525,19 @@ namespace KineticEnergy.Player
             if (predictionSceneReady && predictionScene.IsValid()) SceneManager.UnloadSceneAsync(predictionScene);
         }
 
-        // ---------- Per-frame flow ----------
-
         void Update()
         {
-            // The cursor is locked during play (the midair aim is mouse-driven) and released
-            // only while paused, when the menus need a visible, free cursor.
+
             bool paused = Time.timeScale <= 0f;
             Cursor.lockState = paused ? CursorLockMode.None : CursorLockMode.Locked;
             Cursor.visible = paused;
 
-            // timeScale 0 freezes deltaTime-scaled logic for free, but not raw edge-detected
-            // input - nothing below may run while the pause menu is up.
             if (paused)
             {
                 justUnpaused = true;
                 return;
             }
 
-            // The frame AFTER unpausing is swallowed too: clicking Resume (or submitting it
-            // with Space/South) restores the timescale during UI event processing, and this
-            // very Update would otherwise read that same press as a fresh gameplay edge -
-            // Space resumed the menu AND started an up-charge.
             if (justUnpaused)
             {
                 justUnpaused = false;
@@ -753,15 +548,8 @@ namespace KineticEnergy.Player
 
             if (infiniteEnergy) energyFraction = 1f;
 
-            // Re-arm the spent-aim-button latch only once both aim buttons are genuinely up.
             if (aimButtonSpent && !AimButtonHeld()) aimButtonSpent = false;
 
-            // A press that lands while the aim CANNOT open (enemy-hit launch lock, empty
-            // tank, no launch available) is dead for its entire hold - release and re-press
-            // once the block ends. Without this, holding the button through the block bought
-            // raw slow-mo the moment the lock expired, with no aim ever opening.
-            // The post-pound window is exempt: its aim may open even on an empty tank,
-            // because claiming the boost is what refills it.
             bool poundBoostClaimable = poundWindowTimer > 0f && poundPendingRefund > 0f;
             if (AimButtonPressedThisFrame() && !poundBoostClaimable
                 && (launchLockTimer > 0f || energyFraction <= 0f || !CanStartNewLaunch()))
@@ -769,9 +557,6 @@ namespace KineticEnergy.Player
                 aimButtonSpent = true;
             }
 
-            // The post-ground-pound slow-mo window - real seconds, so it isn't stretched by
-            // the slow-mo it is itself causing. Lapsing with no aim opened forfeits the
-            // boost extra for good (the plain wash refund was already paid at the crash).
             if (poundWindowTimer > 0f)
             {
                 poundWindowTimer -= Time.unscaledDeltaTime;
@@ -790,11 +575,9 @@ namespace KineticEnergy.Player
             UpdateCameraCoordination();
             UpdateEnergyMeters();
 
-            // The one control scheme: grounded aim / hold-charges / midair first-person aim.
             if (isAiming)
             {
-                // Pressing the up-launch button mid-aim converts the aim into the straight-up
-                // hold-charge, carrying the accumulated charge over.
+
                 if (UpChargePressedThisFrame())
                 {
                     float carriedCharge = chargeTime;
@@ -813,18 +596,13 @@ namespace KineticEnergy.Player
             }
             else if (airAiming)
             {
-                // The first-person aim exists only midair - the moment the cube is grounded
-                // again the ordinary grounded controls take over, even mid-hold. EXCEPT the
-                // post-pound aim: the bounce hop (0.2) is lower than the ground check (0.6),
-                // so the cube COUNTS as grounded while legitimately hanging in the window.
+
                 if (isGrounded && !poundAimHoldingGravityOff) CancelAirAim();
                 else UpdateAirAim();
             }
             else if (isGrounded && poundWindowTimer <= 0f)
             {
-                // NOT during the post-pound window: the bounce hop is lower than the ground
-                // check, so the cube reads as grounded there - but a window aim must open
-                // the MIDAIR aim (which claims the boost), never the grounded one.
+
                 if (energyFraction > 0f && CanStartNewLaunch() && UpChargePressedThisFrame())
                 {
                     StartHoldCharge(HoldChargeDirection.Up);
@@ -836,9 +614,7 @@ namespace KineticEnergy.Player
             }
             else
             {
-                // Midair, nothing active: West/E starts the ground pound, Space/South starts
-                // a straight-UP charge (same commit-from-a-fresh-press rule as the pound),
-                // and the aim button opens the first-person aim - three launch options.
+
                 if (energyFraction > 0f && CanStartNewLaunch() && PoundPressedThisFrame())
                 {
                     StartHoldCharge(HoldChargeDirection.Down);
@@ -853,21 +629,11 @@ namespace KineticEnergy.Player
                 }
             }
 
-            // Arriving somewhere clears a combo-drop aim lock. This MUST live out here in
-            // the dispatch, not inside UpdateAirAim - that method is only reached from the
-            // not-grounded branch, so a clear placed inside it could never run and the lock
-            // survived every landing: grounded aiming kept working while midair aiming was
-            // dead for the rest of the run. A crash-stick counts as arriving too, or a
-            // locked player stuck to a sticky wall would have no way off it at all.
             if (isGrounded || isStuck) airAimLockedUntilGrounded = false;
 
             groundedLastFrame = isGrounded;
         }
 
-        // ---------- Slowdown resource ----------
-
-        // Whether the slow-down (and the midair freeze that goes with it) is currently paid
-        // for. Grounded aiming is always free - the resource only meters MIDAIR deliberation.
         bool SlowdownAvailable()
         {
             switch (slowdownMode)
@@ -878,9 +644,6 @@ namespace KineticEnergy.Player
             }
         }
 
-        // Only the midair first-person AIM counts as metered deliberation. The ground pound
-        // and the up-charge are committed actions, not thinking - they always freeze and
-        // charge exactly as they always have, in every slowdown mode.
         bool MidairDeliberationActive()
         {
             return !isGrounded && airAiming;
@@ -912,40 +675,22 @@ namespace KineticEnergy.Player
             slowdownWasAvailable = availableNow;
         }
 
-        // ---------- Time scale ----------
-
         void ApplyChargeTimeScale()
         {
-            // The midair first-person aim slows time only while the slowdown resource can
-            // pay for it (the raw aim-button hold is included so there's no gap between the
-            // press and the state change). Grounded aiming runs at full speed on purpose.
-            // The raw aim-button hold only bridges press-to-open - with no launch available
-            // the aim can't open, so the hold must not slow time either.
-            // Mirrors the FULL aim-open gate (energy AND launch availability) - if the aim
-            // can never open, the bridging hold must not buy slow-mo either.
-            // Mirrors the FULL aim-open gate, the combo-drop lock included. Without that
-            // last term a locked aim still bought slow-mo: time crawled and the combo
-            // window drained while the aim refused to open, so there were no visuals and
-            // no launch - the "I can't aim but everything slows down" state.
+
             bool rawAimHeld = AimButtonHeld() && !aimButtonSpent && energyFraction > 0f
                 && CanStartNewLaunch() && !airAimLockedUntilGrounded;
             bool airAimSlow = !isGrounded && (airAiming || rawAimHeld) && SlowdownAvailable();
-            // The post-ground-pound window holds the slow-mo for its duration - part of the
-            // pound itself, so never metered by the slowdown resource.
+
             bool poundWindowSlow = poundWindowTimer > 0f;
-            // Hold-charges (up-launch, ground pound, forward) ALWAYS slow time, grounded or
-            // midair, in every slowdown mode - their meters run on unscaled time, so the
-            // bullet-time is what makes them read as fast.
+
             bool holdChargeSlow = holdChargeDirection != HoldChargeDirection.None;
 
             float flightScale = 1f;
             if (hasLaunched)
             {
                 flightScale = activeFlightTimeScale;
-                // The descent ramp: track the apex, and while falling scale the speed-up by
-                // how far down the descent has come relative to the predicted landing.
-                // Deliberately NOT applied to downward (ground pound) launches - those are
-                // one continuous dive and feel right at the plain flight speed.
+
                 flightApexY = Mathf.Max(flightApexY, transform.position.y);
                 if (rb.linearVelocity.y < 0f && !currentFlightIsDownward)
                 {
@@ -954,22 +699,11 @@ namespace KineticEnergy.Player
                     flightScale *= 1f + Mathf.Lerp(fallSpeedUpStart, fallSpeedUpEnd, descentProgress);
                 }
             }
-            // An enemy hit (or a laser) TAKES the flight away from you, so the launch
-            // speed-up ends with it: the rest of the tumble plays at normal speed, right
-            // through to landing. At 1.5-2x the knockback threw the player across the level
-            // far faster than it could be read, on top of the shove itself.
-            //
-            // Cleared only once the player is settled back on the ground AND the hit's own
-            // timers have run out. Clearing it on ANY grounded frame wiped the flag in the
-            // very frame the hit landed - which is exactly what happens clipping a laser
-            // while running a gate on foot - so the speed-up came straight back.
+
             if (isGrounded && knockbackTimer <= 0f && launchLockTimer <= 0f) flightSpeedUpSuppressed = false;
-            // The hit's own windows force normal speed outright, so the rule holds even if
-            // something clears the flag early.
+
             if (flightSpeedUpSuppressed || knockbackTimer > 0f || launchLockTimer > 0f) flightScale = 1f;
 
-            // The enemy-hit launch lock vetoes ALL slow-mo sources for its duration - if the
-            // player can't aim or launch, they must not be able to buy time either.
             bool slowRequested = (airAimSlow || holdChargeSlow || poundWindowSlow) && launchLockTimer <= 0f;
             Time.timeScale = slowRequested ? chargeTimeScale : flightScale;
         }
@@ -988,28 +722,13 @@ namespace KineticEnergy.Player
             return false;
         }
 
-        // ---------- Camera coordination ----------
-
         void UpdateCameraCoordination()
         {
             if (cameraOrbit == null) return;
 
-            // While the midair aim is open the LEFT stick steers the camera (the right stick
-            // is the energy dial there); while the mouse steers the grounded aim, WASD
-            // drives the camera instead. The WASD capture engages ONLY when the keyboard is
-            // genuinely the device driving movement - checking "not gamepad-driven" was
-            // wrong, because a CENTERED left stick actuates nothing (activeControl is null),
-            // which silently swallowed the right stick's camera look on controllers until
-            // the left stick moved.
             bool moveIsKeyboardDriven = moveAction != null && moveAction.action != null
                 && moveAction.action.activeControl != null && moveAction.action.activeControl.device is Keyboard;
 
-            // The midair aim is steered by the MOUSE (keyboard players) or the LEFT STICK
-            // (gamepad players). Keyboard WASD must NEVER steer it: A/D are digital +/-1,
-            // which rotated the aim at full speed continuously - the "camera loops when
-            // aiming to the sides" bug, triggered everywhere once the free-look variants
-            // taught players to press WASD during aims. WASD's only midair-aim role is the
-            // E/F free-look channel below.
             bool freeLookAim = FreeLookAimActive && airAiming;
             bool aimWithMoveStick = (airAiming && !moveIsKeyboardDriven)
                 || (groundedAimWithMouse && isAiming && moveIsKeyboardDriven);
@@ -1025,7 +744,7 @@ namespace KineticEnergy.Player
                 {
                     freeLook += moveAction.action.ReadValue<Vector2>();
                 }
-                freeLook += GamepadLookValue(); // right stick - freed up by the bumper dial
+                freeLook += GamepadLookValue();
             }
             cameraOrbit.SetFreeLook(freeLookAim, freeLook);
             if (aimStick.sqrMagnitude < aimDeadzone * aimDeadzone) aimStick = Vector2.zero;
@@ -1033,61 +752,44 @@ namespace KineticEnergy.Player
             cameraOrbit.SetAimStickOverride(aimWithMoveStick, aimStick,
                 groundedAimWithMouse && isAiming && moveIsKeyboardDriven);
 
-            // While the mouse steers the grounded aim it must not also orbit the camera.
             cameraOrbit.SetMouseLookSuppressed(groundedAimWithMouse && isAiming);
 
-            // The straight-up and ground-pound charges keep the camera at full speed through
-            // the bullet-time.
             cameraOrbit.SetIgnoreSlowMo(holdChargeDirection == HoldChargeDirection.Up || holdChargeDirection == HoldChargeDirection.Down);
 
-            // Launch flights use the lazier follow smoothing - the camera visibly trails the
-            // launch for a moment instead of being glued to it. Vertical flights report
-            // themselves so the camera can use its slightly tighter vertical value.
             cameraOrbit.SetLaunchInFlight(hasLaunched, currentFlightIsVertical, currentFlightIntensity);
-            // How long until the predicted landing - the camera tightens its chase inside
-            // the final stretch so it has arrived when the impact (and its shake) lands.
+
             cameraOrbit.SetRemainingFlight(hasLaunched && lastPredictedFlightSeconds > 0.05f
                 ? Mathf.Max(lastPredictedFlightSeconds - flightElapsedSeconds, 0f)
                 : float.PositiveInfinity);
             cameraOrbit.SetPlayerGrounded(isGrounded);
 
-            // First-person midair aim looks at the cursor at the end of the dotted line.
             bool framingAim = !isGrounded && hasValidPredictedLanding && airAiming;
             cameraOrbit.SetTrajectoryFraming(framingAim, lastPredictedLanding);
         }
 
         void UpdateEnergyMeters()
         {
-            // Each meter disables itself while its corresponding mode is off: the energy
-            // meter under infinite energy, the slowdown bar outside AimBudget mode.
+
             if (energyMeter != null)
             {
                 energyMeter.SetVisible(!infiniteEnergy);
                 energyMeter.SetEnergy(energyFraction);
-                // The tank stays blue in every state - it is the ceiling the hot charge bar
-                // is read against, never a rival for the same heat language.
+
                 energyMeter.SetEnergyTint();
                 energyMeter.SetLaunchLocked(launchLockTimer > 0f);
                 bool charging = isAiming || holdChargeDirection != HoldChargeDirection.None || airAiming;
                 energyMeter.SetCharge(ChargeFraction(), charging);
-                // While the pound's boost extra is still on offer, preview it in orange
-                // poking out past the end of the yellow fill.
+
                 energyMeter.SetBonus(
                     energyFraction + poundPendingRefund * (groundPoundBoostMultiplier - 1f),
                     poundPendingRefund > 0f && poundWindowTimer > 0f);
 
-                // Aiming at something with an energy requirement marks its threshold on
-                // the meter, in the tier's colour - the display mapping is linear (every
-                // block is exactly 10%), so the raw fraction IS the bar position.
                 KineticEnergy.Level.EnergyRequirement aimedRequirement = null;
                 if (IsAimingOrCharging && hasValidPredictedLanding && lastPredictedLandingSource != null)
                 {
                     aimedRequirement = lastPredictedLandingSource.GetComponentInParent<KineticEnergy.Level.EnergyRequirement>();
                 }
-                // Exactly what a launch fired this instant would pay - the same figure the
-                // gates on the far end compare against (see lastLaunchEnergySpent), so the
-                // band the charge bar reports is directly comparable to a requirement.
-                // Covers grounded and midair alike: both routes charge through this.
+
                 float projectedSpend = energyCostPerFullCharge > 0f
                     ? Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge)
                     : SpendableEnergy();
@@ -1110,12 +812,10 @@ namespace KineticEnergy.Player
             }
         }
 
-        // ---------- Grounded aim (hold to aim and charge, fire button launches) ----------
-
         void UpdateGroundedAim()
         {
             bool aimPressed = groundedAimAction != null && groundedAimAction.action != null && groundedAimAction.action.IsPressed();
-            // Under the bumper energy scheme LB dials energy DOWN - it must not also cancel.
+
             bool cancelPressed = !bumperEnergyDial
                 && cancelChargeAction != null && cancelChargeAction.action != null && cancelChargeAction.action.WasPressedThisFrame();
 
@@ -1126,16 +826,12 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // One-shot-per-hold: after a fire/cancel the aim button must be genuinely
-            // released before it can open a new aim session.
             if (waitingForAimRelease)
             {
                 if (!aimPressed) waitingForAimRelease = false;
                 return;
             }
 
-            // Energy alone gates STARTING a new aim - never an already-active one, which
-            // could otherwise spuriously cancel mid-session.
             bool canStartNewAim = energyFraction > 0f && CanStartNewLaunch();
             bool aimHeld = isAiming ? aimPressed : (aimPressed && canStartNewAim);
 
@@ -1146,22 +842,20 @@ namespace KineticEnergy.Player
                     isAiming = true;
                     chargeTime = 0f;
                     aimChargeHeldSeconds = 0f;
-                    // Stop dead instantly - FixedUpdate keeps re-applying this for the whole
-                    // aim, so an airborne aim session doesn't sag under gravity.
+
                     rb.linearVelocity = Vector3.zero;
                     rb.angularVelocity = Vector3.zero;
                     SeedAimFromCamera();
                     aimArrow?.SetVisible(true);
                     landingPreview?.SetVisible(true);
-                    // The cursor at the end of the line shows for grounded aims too.
+
                     landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
                     if (!isGrounded) MidairAimOpened?.Invoke();
                 }
 
                 if (groundedDialControls)
                 {
-                    // Control lab variant A: the grounded launch strength is DIALLED like
-                    // the midair aim - wheel steps, bumpers hold (RB adds, LB removes).
+
                     float groundedDial = 0f;
                     if (Gamepad.current != null)
                     {
@@ -1178,9 +872,7 @@ namespace KineticEnergy.Player
                 }
                 else
                 {
-                    // Classic: the charge rate ramps up the longer the aim is held - same
-                    // acceleration principle as the up/down hold-charges. Scenes may give
-                    // the grounded ramp its own steeper coefficient.
+
                     aimChargeHeldSeconds += Time.unscaledDeltaTime;
                     float groundedRamp = groundedAimChargeAcceleration >= 0f
                         ? 1f + aimChargeHeldSeconds * groundedAimChargeAcceleration
@@ -1188,15 +880,12 @@ namespace KineticEnergy.Player
                     AccumulateCharge(Time.deltaTime * chargeAccumulationRate * groundedRamp);
                 }
 
-                // Aim adjustment runs on unscaled time - responsiveness must not slow down
-                // with the bullet-time.
                 float aimDt = Time.unscaledDeltaTime;
                 var refinement = KineticEnergy.Camera.AimRefinementSettings.Active;
                 if (groundedAimWithMouse && Mouse.current != null)
                 {
                     Vector2 mouseDelta = Mouse.current.delta.ReadValue();
-                    // Aim lab: the same fine-aim response curve the camera aim has - slow,
-                    // deliberate mouse motion steers the arrow proportionally finer.
+
                     if (refinement != null && refinement.groundedFineAimEnabled && mouseDelta.sqrMagnitude > 0.0001f)
                     {
                         float t = Mathf.Clamp01(mouseDelta.magnitude / Mathf.Max(refinement.groundedFineAimMouseReference, 0.01f));
@@ -1205,8 +894,7 @@ namespace KineticEnergy.Player
                     aimYaw = Mathf.Repeat(aimYaw + mouseDelta.x * groundedMouseAimSensitivity, 360f);
                     aimPitch = Mathf.Clamp(aimPitch - mouseDelta.y * groundedMouseAimSensitivity, minAimPitch, maxAimPitch);
                 }
-                // Under Always Mouse only KEYBOARD movement is repurposed for the camera - a
-                // gamepad stick still aims.
+
                 Vector2 stick = moveAction != null && moveAction.action != null
                     ? moveAction.action.ReadValue<Vector2>()
                     : Vector2.zero;
@@ -1214,17 +902,12 @@ namespace KineticEnergy.Player
                     && moveAction.action.activeControl != null && moveAction.action.activeControl.device is Gamepad;
                 if ((!groundedAimWithMouse || moveIsGamepad) && stick.sqrMagnitude > aimDeadzone * aimDeadzone)
                 {
-                    // Aim lab: the conditioned stick (re-scaled deadzone + response curve)
-                    // steers the arrow - fine control in the lower stick range.
+
                     if (refinement != null) stick = refinement.ConditionStick(stick);
                     aimYaw = Mathf.Repeat(aimYaw + stick.x * aimRotationSpeed * aimDt, 360f);
                     aimPitch = Mathf.Clamp(aimPitch - stick.y * aimRotationSpeed * aimDt, minAimPitch, maxAimPitch);
                 }
 
-                // Control lab variant A: the aim is HARD-CLAMPED at threshold+band degrees
-                // (65) off the camera, and inside the 60-65 band the camera pans after it,
-                // ramping to full speed at the clamp edge - hold the aim at the edge and
-                // the whole view turns with it.
                 if (groundedAimCameraFollow && cameraOrbit != null)
                 {
                     float cameraYaw = cameraOrbit.CurrentYaw;
@@ -1244,12 +927,7 @@ namespace KineticEnergy.Player
                 float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, chargeFraction);
                 float damping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, chargeFraction);
                 ApplyZeroDampingMatch(chargeFraction, ref force, ref damping);
-                // The wall-launch momentum carry is part of the flight - shown here so
-                // the cursor stays honest about it.
-                // The MOVER's carry is excluded, exactly as the launch itself excludes it.
-                // Standing on a platform makes rb.linearVelocity the platform's motion, so
-                // the previewed arc leaned with the ride while the real shot flew straight
-                // down the arrow - the two disagreed the whole time you were on a mover.
+
                 Vector3 previewBase = rb.linearVelocity;
                 if (freeMoveController != null && isGrounded) previewBase -= freeMoveController.GroundPlatformVelocity;
                 ShowLandingPreview(direction * force / rb.mass + previewBase + WallMomentumCarry(direction), damping);
@@ -1265,7 +943,7 @@ namespace KineticEnergy.Player
             }
             else if (isAiming)
             {
-                // Aim button released without firing - a plain cancel.
+
                 CloseGroundedAim();
             }
         }
@@ -1280,8 +958,7 @@ namespace KineticEnergy.Player
 
         void SeedAimFromCamera()
         {
-            // Yaw starts wherever the camera currently faces; pitch starts at a fixed,
-            // predictable default rather than the camera's arbitrary vertical angle.
+
             aimYaw = cameraTransform != null ? cameraTransform.eulerAngles.y : 0f;
             aimPitch = Mathf.Clamp(defaultAimPitch, minAimPitch, maxAimPitch);
         }
@@ -1290,8 +967,6 @@ namespace KineticEnergy.Player
         {
             return Quaternion.Euler(aimPitch, aimYaw, 0f) * Vector3.forward;
         }
-
-        // ---------- Hold-to-charge launches (straight up / ground pound / forward) ----------
 
         bool UpChargePressedThisFrame()
         {
@@ -1334,10 +1009,6 @@ namespace KineticEnergy.Player
 
             bool keyboardAvailable = Keyboard.current != null;
 
-            // STATE-based release, not edge-based: "the button is not held" fires the
-            // charge. WasReleasedThisFrame is a one-frame edge, and an edge that lands on
-            // a frame this code doesn't run (pausing mid-charge, most commonly) was lost
-            // forever - the charge stuck ON with the key up until a fresh press+release.
             bool releasedNow = holdChargeDirection switch
             {
                 HoldChargeDirection.Up => !((upLaunchAction != null && upLaunchAction.action != null && upLaunchAction.action.IsPressed())
@@ -1347,13 +1018,10 @@ namespace KineticEnergy.Player
                 _ => false,
             };
 
-            // Every hold-charge ACCELERATES - the rate grows the longer the button is held,
-            // filling in REAL time (the bullet-time must not slow the meter).
             holdChargeHeldSeconds += Time.unscaledDeltaTime;
             float chargeSpeed = groundPoundChargeBaseSpeed + groundPoundChargeSpeedGrowth * holdChargeHeldSeconds;
             AccumulateCharge(Time.unscaledDeltaTime * chargeAccumulationRate * chargeSpeed);
 
-            // Both hold-charges fire dead vertical.
             Vector3 direction = holdChargeDirection == HoldChargeDirection.Down ? Vector3.down : Vector3.up;
 
             float chargeFraction = ChargeFraction();
@@ -1368,7 +1036,6 @@ namespace KineticEnergy.Player
                 ApplyZeroDampingMatch(chargeFraction, ref force, ref damping);
             }
 
-            // Velocity is held at zero for the whole charge, so the preview starts from rest.
             ShowLandingPreview(direction * force / rb.mass, damping);
 
             if (releasedNow)
@@ -1381,8 +1048,6 @@ namespace KineticEnergy.Player
             }
         }
 
-        // ---------- Midair first-person aim (dial the energy, confirm to fire) ----------
-
         void UpdateAirAim()
         {
             bool aimHeld = airAimAction != null && airAimAction.action != null && airAimAction.action.IsPressed();
@@ -1391,19 +1056,14 @@ namespace KineticEnergy.Player
             {
                 if (airAiming)
                 {
-                    // Released without firing: the suspended flight RESUMES on its original
-                    // path - the velocity captured at aim-open is handed back. (Not after a
-                    // pound bounce or on the ground, where there is no flight to resume.)
+
                     bool resumeFlight = hasLaunched && !isGrounded && !poundAimHoldingGravityOff;
                     CancelAirAim();
                     if (resumeFlight)
                     {
                         rb.linearVelocity = preAirAimVelocity;
                     }
-                    // Same treatment as firing: exit to the third-person orbit slot in one
-                    // cut. Without this, a resumed flight kept the LAUNCH-lag smoothing
-                    // while the camera was still sitting at the player's eyeball - it
-                    // drifted lazily outward during the whole fall, which read as broken.
+
                     cameraOrbit?.SnapToThirdPersonOrbit();
                 }
                 return;
@@ -1411,67 +1071,46 @@ namespace KineticEnergy.Player
 
             if (!airAiming)
             {
-                // Dropped by a combo window running dry: the fall is yours to ride out.
+
                 if (airAimLockedUntilGrounded) return;
-                // No energy, or no launch available (the wall-crash limit / launch budget
-                // spent) - then there is nothing to aim WITH, so aim mode must not open.
-                // The post-pound window is exempt: claiming its boost IS the energy source.
+
                 bool poundBoostClaimable = poundWindowTimer > 0f && poundPendingRefund > 0f;
                 if (!poundBoostClaimable && (energyFraction <= 0f || !CanStartNewLaunch())) return;
-                // Opening the aim always needs a FRESH press - a button still held from
-                // before a launch/crash does nothing until released and re-pressed.
+
                 if (!(airAimAction != null && airAimAction.action != null && airAimAction.action.WasPressedThisFrame())) return;
 
                 airAiming = true;
-                preAirAimVelocity = rb.linearVelocity; // captured before the freeze zeroes it
-                chargeTime = 0f; // each fresh aim starts from a clean dial
+                preAirAimVelocity = rb.linearVelocity;
+                chargeTime = 0f;
                 dialRampSeconds = 0f;
                 dialRampDirection = 0;
-                // The aim opens looking WHERE THE CAMERA ALREADY WAS. The camera is the
-                // player's during the whole flight, so wherever they have pointed it is
-                // where they intend to shoot - overriding that with the launch heading
-                // threw away the aim they had already lined up.
+
                 cameraOrbit?.SetFirstPersonMode(true);
                 landingPreview?.SetVisible(true);
                 landingPreview?.SetMode(PredictionMode.TrailAndCrosshair);
                 MidairAimOpened?.Invoke();
 
-                // An aim opened inside the window claims the boost extra. A POUND's window
-                // additionally starts the aim FULLY charged - everything the tank can pay,
-                // instantly - with gravity held off for the whole aim. A wall crash's
-                // window claims the energy and nothing else: the dial starts at zero and is
-                // built by hand like any other midair aim.
                 if (poundWindowTimer > 0f)
                 {
                     PayPoundBoostedRefund();
                     if (poundWindowFromPound)
                     {
-                        // The flag must be up BEFORE the ceiling is computed - SpendableEnergy
-                        // keys off it to drop the grounded reserve. Computing the ceiling first
-                        // (the old order) held the reserve back, so the aim didn't always start
-                        // with ALL current energy.
+
                         poundAimHoldingGravityOff = true;
                         rb.useGravity = false;
-                        // Starts charged with ALL current energy (boost included) - the pound
-                        // aim spends the whole tank, no grounded reserve (see SpendableEnergy).
+
                         chargeTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
                     }
                 }
             }
 
-            // The energy dial: right stick up/down adds/removes charge continuously, mouse
-            // wheel steps it per notch. Live for the whole aim - the launch button is purely
-            // a confirm. The dial ACCELERATES like every other charge input: the rate grows
-            // the longer it keeps moving in one direction, and FLIPPING between adding and
-            // removing resets the ramp - so lowering energy also lowers faster over time.
             float dialDelta = 0f;
-            // The gamepad dial charges faster than the wheel here (direct request) - the
-            // stick/bumper rate only, midair only - and accelerates on its OWN curve.
+
             float padDialRate = dialStickRate * gamepadMidairDialRateMultiplier;
             bool dialIsGamepad = false;
             if (FreeLookAimActive || bumperEnergyDial)
             {
-                // E/F (or the control lab's bumper scheme): RB adds energy, LB removes it.
+
                 if (Gamepad.current != null)
                 {
                     float bumpers = (Gamepad.current.rightShoulder.isPressed ? 1f : 0f)
@@ -1506,9 +1145,7 @@ namespace KineticEnergy.Player
                     dialRampDirection = dialDirection;
                 }
                 dialRampSeconds += Time.unscaledDeltaTime;
-                // The gamepad dial rides its own acceleration curve; the wheel keeps the
-                // shared one. Either way the ramp clock was reset above on a direction
-                // flip, so reversing always restarts at the base speed.
+
                 float dialRamp = dialIsGamepad
                     ? 1f + dialRampSeconds * Mathf.Max(gamepadMidairDialAcceleration, 0f)
                     : ChargeRateRamp(dialRampSeconds);
@@ -1516,67 +1153,45 @@ namespace KineticEnergy.Player
                     0f, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
             }
 
-            // The tank can SHRINK while the aim is open (the EnergyTank drain) - the dial
-            // must follow it down continuously, not only on dial input, or the blue charge
-            // preview keeps showing a maximum the tank can no longer pay.
             chargeTime = Mathf.Min(chargeTime, Mathf.Min(maxChargeTime, EnergyChargeCeiling()));
 
-            // What would actually fire: the dialed charge, capped by what the tank can pay.
             Vector3 direction = cameraOrbit != null ? cameraOrbit.AimForward : transform.forward;
             float fireFraction = Mathf.Min(ChargeFraction(), energyCostPerFullCharge > 0f ? SpendableEnergy() / energyCostPerFullCharge : 1f);
             float force = Mathf.Lerp(minLaunchForce, maxLaunchForce, fireFraction);
             float damping = Mathf.Lerp(minLaunchDamping, maxLaunchDamping, fireFraction);
             ApplyZeroDampingMatch(fireFraction, ref force, ref damping);
 
-            // The camera zooms in with the dialed charge, so a long shot's distant landing
-            // spot stays legible.
             cameraOrbit?.SetAimZoom(fireFraction);
 
-            // The launch impulse ADDS to the current motion. While the slowdown resource
-            // holds, the cube is frozen (velocity zero) - once it runs dry the cube keeps
-            // falling through the aim and the preview accounts for that live velocity.
-            // The MOMENTUM option additionally carries the velocity the cube had when the
-            // aim opened - included here so the cursor stays honest about it.
-            // The momentum carry keeps the SPEED brought into the aim but follows the
-            // AIM direction - vector-adding the old heading made the reach direction-
-            // dependent (far with the carry, near-dead against it), so a redirected
-            // carry gives the same boost in all 360 degrees.
             Vector3 momentumCarry = addPreAimVelocityToLaunch
                 ? direction.normalized * preAirAimVelocity.magnitude
                 : Vector3.zero;
-            momentumCarry += WallMomentumCarry(direction); // wall-opened aims carry the synthesized stake
+            momentumCarry += WallMomentumCarry(direction);
             ShowLandingPreview(rb.linearVelocity + momentumCarry + direction * force / rb.mass, damping);
-
-            // (The real-seconds flight estimate the platforms lead by is maintained inside
-            // ShowLandingPreview now, so every aim keeps it fresh - not just this one.)
 
             bool firePressed = airLaunchAction != null && airLaunchAction.action != null && airLaunchAction.action.WasPressedThisFrame();
             if (firePressed && energyFraction > 0f && CanStartNewLaunch())
             {
-                chargeTime = fireFraction * maxChargeTime; // pay exactly for what fires
+                chargeTime = fireFraction * maxChargeTime;
                 QueueLaunch(direction, force, damping);
                 LastLaunchKind = LaunchKind.AirAim;
-                // Momentum option: the SPEED carried into the aim, REDIRECTED along the
-                // fire direction (see the preview above - the same sum it showed).
+
                 if (addPreAimVelocityToLaunch)
                 {
                     rb.linearVelocity += direction.normalized * preAirAimVelocity.magnitude;
                 }
-                exactFlightNoNudge = true; // the shot follows the predicted line exactly
+                exactFlightNoNudge = true;
                 MidairAimFired?.Invoke(fireFraction, lastPredictedLanding);
                 suppressAimReleasedEvent = true;
                 CancelAirAim();
-                // Start the launch trailing from the third-person orbit slot, exactly like a
-                // grounded launch - see the camera method's own comment.
+
                 cameraOrbit?.SnapToThirdPersonOrbit();
             }
         }
 
         void CancelAirAim()
         {
-            // A post-pound aim that closes WITHOUT firing gives the boost extra back (the
-            // plain wash refund underneath stays), releases the gravity hold, and ends the
-            // window - no lingering freeze.
+
             if (poundAimHoldingGravityOff)
             {
                 poundAimHoldingGravityOff = false;
@@ -1586,20 +1201,15 @@ namespace KineticEnergy.Player
             }
             airAiming = false;
             chargeTime = 0f;
-            aimButtonSpent = true; // closing the aim spends the hold - release before re-aiming
+            aimButtonSpent = true;
             landingPreview?.SetVisible(false);
             cameraOrbit?.SetFirstPersonMode(false);
             cameraOrbit?.SetAimZoom(0f);
 
-            // Every no-fire close counts as "released" for the aim-camera logging; the
-            // fire path suppresses this (it reports MidairAimFired instead).
             if (suppressAimReleasedEvent) suppressAimReleasedEvent = false;
             else MidairAimReleased?.Invoke();
         }
 
-        // The pound's boost EXTRA (the plain wash was already paid at the crash) lands the
-        // moment a midair aim opens inside the window. Remembered as provisional - measured
-        // against what was actually banked, so a full tank can't be over-debited on revert.
         void PayPoundBoostedRefund()
         {
             if (poundPendingRefund <= 0f) return;
@@ -1616,8 +1226,6 @@ namespace KineticEnergy.Player
             poundBoostExtra = 0f;
         }
 
-        // The right stick's raw value, gamepad-only - the look action carries mouse deltas
-        // too, and those must never leak into the energy dial.
         Vector2 GamepadLookValue()
         {
             InputActionReference look = cameraOrbit != null ? cameraOrbit.lookAction : null;
@@ -1626,13 +1234,9 @@ namespace KineticEnergy.Player
             return look.action.ReadValue<Vector2>();
         }
 
-        // ---------- Charge bookkeeping ----------
-
         float ChargeFraction()
         {
-            // Auto-max mode: every consumer of the charge (fire force, spend, scatter,
-            // aim arrow, meter) sees the maximum the tank can pay right now - the dialed
-            // chargeTime becomes irrelevant, so no input regulates energy.
+
             if (alwaysMaxCharge)
             {
                 float maxTime = Mathf.Min(maxChargeTime, EnergyChargeCeiling());
@@ -1641,15 +1245,11 @@ namespace KineticEnergy.Player
             return maxChargeTime > 0f ? Mathf.Clamp01(chargeTime / maxChargeTime) : 1f;
         }
 
-        // The shared acceleration curve for every charge input - see chargeAcceleration.
         float ChargeRateRamp(float sustainedSeconds)
         {
             return 1f + sustainedSeconds * Mathf.Max(chargeAcceleration, 0f);
         }
 
-        // chargeTime is capped by BOTH the per-shot maximum and however much energy is left,
-        // expressed as an equivalent charge-time ceiling - the blue charge bar can never show
-        // more than the stored energy, by construction.
         void AccumulateCharge(float delta)
         {
             chargeTime = Mathf.Min(chargeTime + delta, maxChargeTime, EnergyChargeCeiling());
@@ -1660,42 +1260,29 @@ namespace KineticEnergy.Player
             return energyCostPerFullCharge > 0f ? (SpendableEnergy() / energyCostPerFullCharge) * maxChargeTime : maxChargeTime;
         }
 
-        // GROUNDED launches keep a small reserve so you can never strand yourself standing
-        // still; a MIDAIR launch may commit the whole tank as a save-throw. The post-pound
-        // aim counts as midair even though the tiny bounce hop sits inside the ground
-        // check's reach - its launch may commit ALL current energy.
         float SpendableEnergy()
         {
             bool treatAsGrounded = isGrounded && !poundAimHoldingGravityOff;
             return treatAsGrounded ? Mathf.Max(energyFraction - minEnergyReserve, 0f) : energyFraction;
         }
 
-        // On landing only: never end a flight with less than the reserve.
         void ClampEnergyFloor()
         {
             if (energyFraction < minEnergyReserve) energyFraction = minEnergyReserve;
         }
 
-        // Test-level hook (EnergyClampTrigger): force the tank down to at most this fraction.
         public void ClampEnergyTo(float fraction)
         {
             if (infiniteEnergy) return;
             energyFraction = Mathf.Min(energyFraction, Mathf.Clamp01(fraction));
         }
 
-        // The floor counterpart: raises the tank to at least this much, never spends it
-        // down. Arriving at a checkpoint that costs 40% hands you those 40% back, so the
-        // section is always enterable at the price it charges - see
-        // LevelSectionController.GrantCheckpointEnergy.
         public void EnsureEnergyAtLeast(float fraction)
         {
             if (infiniteEnergy) return;
             energyFraction = Mathf.Max(energyFraction, Mathf.Clamp01(fraction));
         }
 
-        // Sets the tank OUTRIGHT, up or down. Claiming a checkpoint normalises the run to
-        // that checkpoint's own price, so every attempt at the section that follows starts
-        // from the same tank however rich or poor the approach was.
         public void SetEnergyTo(float fraction)
         {
             if (infiniteEnergy) return;
@@ -1708,26 +1295,17 @@ namespace KineticEnergy.Player
         [Tooltip("Seconds of lost ground control after an enemy hit, so the knockback actually carries (grounded movement overwrites velocity every tick otherwise).")]
         public float enemyHitControlLossSeconds = 0.35f;
         float knockbackTimer;
-        float launchLockTimer; // enemy hits block launching briefly - duration set by the enemy
-        // An enemy hit ends the launch's game-speed bonus for the rest of the fall.
+        float launchLockTimer;
+
         bool flightSpeedUpSuppressed;
         Vector3 pendingEnemyKnockback;
         bool hasPendingEnemyKnockback;
 
-        // Enemy attack hook: a launching enemy that body-checks the player SHOVES them and
-        // drains some energy. The hit interrupts any aim/charge, breaks a crash-stick, and
-        // suppresses grounded movement briefly - without that window the walk code would
-        // erase the shove on the very next physics tick.
-        // canEmptyRespawn: whether draining the tank DRY here may end the run (the enemy
-        // rule). Environmental hazards - lasers, damage shells - pass false: they shove and
-        // drain but never respawn, even on the last drop. A shell hit on a near-empty tank
-        // used to zero it and trigger the checkpoint respawn, which read as "the shell
-        // respawned me" (direct report).
         public void ApplyEnemyHit(Vector3 impulse, float energyLoss, float launchLockSeconds, bool canEmptyRespawn = true)
         {
             PlayerHurt?.Invoke();
             launchLockTimer = Mathf.Max(launchLockTimer, launchLockSeconds);
-            poundWindowTimer = 0f; // getting hit forfeits any post-pound window outright
+            poundWindowTimer = 0f;
             if (airAiming) CancelAirAim();
             CancelHoldCharge();
             CloseGroundedAim();
@@ -1738,44 +1316,31 @@ namespace KineticEnergy.Player
             nonStickyReleaseTimer = 0f;
             rb.useGravity = true;
             rb.linearDamping = plainFallDamping;
-            // The hit WIPES your momentum before it shoves: whatever speed you carried in
-            // (a full-power flight, a fall) is gone, so the knockback is the only thing
-            // moving you and always lands at its own strength. Without this the solver's
-            // contact impulse from the enemy stacked on top of the flight and flung the
-            // player away far too fast to react to.
+
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
-            // The shove itself is NOT applied here: OnCollisionEnter fires mid-physics-step,
-            // after the solver has already slammed the player with the kinematic enemy's
-            // contact impulse - a velocity written now loses to it. Deferred one tick so the
-            // shove is the last word (see FixedUpdate).
+
             pendingEnemyKnockback = impulse;
             hasPendingEnemyKnockback = true;
             knockbackTimer = enemyHitControlLossSeconds;
-            flightSpeedUpSuppressed = true; // normal game speed until the player lands
+            flightSpeedUpSuppressed = true;
 
             if (!infiniteEnergy)
             {
                 energyFraction = Mathf.Max(energyFraction - energyLoss, 0f);
-                // Drained dry by an attack: with no energy there is no launch and no way
-                // out, so the run is over here rather than leaving the player stranded.
-                // The scene's respawn owner decides WHERE back is.
+
                 if (energyFraction <= 0f && canEmptyRespawn) EnergyEmptiedByHit?.Invoke();
             }
         }
 
-        // Raised when an enemy attack or projectile empties the tank outright.
         public event System.Action EnergyEmptiedByHit;
 
-        // Hazard hook (DamageWalls): a full instant respawn - every aim, charge, flight and
-        // stick state is wound down, the tank returns to its starting level, and the player
-        // reappears at the given point standing still under normal gravity.
         public void RespawnAtPoint(Vector3 position)
         {
             if (airAiming) CancelAirAim();
             CancelHoldCharge();
             CloseGroundedAim();
-            waitingForAimRelease = true; // held buttons must be re-pressed after a respawn
+            waitingForAimRelease = true;
             aimButtonSpent = true;
 
             hasLaunched = false;
@@ -1792,27 +1357,21 @@ namespace KineticEnergy.Player
             poundAimHoldingGravityOff = false;
             previousLaunchChargeFraction = 0f;
             wallCarryArmed = false;
-            airAimLockedUntilGrounded = false; // a respawn always hands the aim back
+            airAimLockedUntilGrounded = false;
 
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
             rb.useGravity = true;
             rb.linearDamping = plainFallDamping;
-            // A pending shove must not survive the respawn and fling the fresh spawn.
+
             hasPendingEnemyKnockback = false;
             knockbackTimer = 0f;
             launchLockTimer = 0f;
             flightSpeedUpSuppressed = false;
 
-            // BOTH the transform and the BODY. Unity defers transform-to-physics syncing
-            // (autoSyncTransforms is off), so a transform-only write leaves the rigidbody
-            // holding its old position - and the next physics step puts the player back
-            // where they were. During a PAUSED teleport (the section menu) no step runs in
-            // between to sync it, which is why those jumps only sometimes took effect.
             transform.position = position;
             rb.position = position;
-            // Interpolation blends from a previous pose; without clearing it the cube
-            // visibly streaks in from wherever it used to be.
+
             RigidbodyInterpolation previousInterpolation = rb.interpolation;
             rb.interpolation = RigidbodyInterpolation.None;
             rb.interpolation = previousInterpolation;
@@ -1820,27 +1379,19 @@ namespace KineticEnergy.Player
             energyFraction = infiniteEnergy ? 1f : startingEnergyFraction;
             Time.timeScale = 1f;
 
-            // The camera TELEPORTS with the respawn AND resets to the scene-start pose
-            // (position and angles alike, direct request) - a respawn looks exactly like
-            // the level start.
             cameraOrbit?.ResetToStartPose();
         }
 
         bool CanStartNewLaunch()
         {
-            // Freshly hit by an enemy - launching is locked out for a moment.
+
             if (launchLockTimer > 0f) return false;
-            // The wall-crash limit, when armed, replaces the normal budget outright.
+
             if (launchesRemainingOverride == 0) return false;
             if (launchesRemainingOverride > 0) return true;
             return maxLaunchesPerFlight <= 0 || launchesSinceGrounded < maxLaunchesPerFlight;
         }
 
-        // ---------- Firing ----------
-
-        // Zero-damping test mode. The matched min/max forces are solved ONCE at startup
-        // (see ComputeZeroDampingForces); firing just lerps between them by charge -
-        // structurally identical to the damped pair, so the dial feels the same.
         void ApplyZeroDampingMatch(float chargeFraction, ref float force, ref float damping)
         {
             if (!zeroDampingMatchedLaunches || damping <= 0f) return;
@@ -1848,9 +1399,6 @@ namespace KineticEnergy.Player
             damping = 0f;
         }
 
-        // Solves the two zero-damping endpoint forces at startup: each matches the flat-
-        // ground distance of its damped counterpart on a 45-degree reference arc (the
-        // angle where range is maximal and charge-to-distance is cleanest to compare).
         void ComputeZeroDampingForces()
         {
             Vector3 reference = new Vector3(0f, Mathf.Sin(45f * Mathf.Deg2Rad), Mathf.Cos(45f * Mathf.Deg2Rad));
@@ -1859,7 +1407,6 @@ namespace KineticEnergy.Player
             Debug.Log($"[ZeroDampingTest] matched forces solved at startup: min {minLaunchForce} -> {zeroDampingMinLaunchForce:F2}, max {maxLaunchForce} -> {zeroDampingMaxLaunchForce:F2}");
         }
 
-        // Bisection: the undamped force whose reference-arc range equals the damped one's.
         float SolveMatchedForce(Vector3 direction, float dampedForce, float damping)
         {
             SimulateFlatFlight(direction * (dampedForce / rb.mass), damping, out float targetRange, out _);
@@ -1874,9 +1421,6 @@ namespace KineticEnergy.Player
             return dampedForce * (low + high) * 0.5f;
         }
 
-        // Semi-implicit Euler with PhysX's damping model (velocity += gravity, then the
-        // 1/(1+damping*dt) drag, then position), flown from the origin until it falls back
-        // through its start height. Returns horizontal distance covered and apex height.
         static void SimulateFlatFlight(Vector3 v0, float damping, out float range, out float apex)
         {
             float dt = Time.fixedDeltaTime;
@@ -1892,7 +1436,7 @@ namespace KineticEnergy.Player
                 if (p.y > apex) apex = p.y;
                 if (p.y < 0f && v.y < 0f)
                 {
-                    // Interpolate the ground crossing for sub-step-accurate range.
+
                     float t = prev.y / Mathf.Max(prev.y - p.y, 0.0001f);
                     Vector3 landing = Vector3.Lerp(prev, p, t);
                     range = new Vector3(landing.x, 0f, landing.z).magnitude;
@@ -1902,21 +1446,6 @@ namespace KineticEnergy.Player
             range = new Vector3(p.x, 0f, p.z).magnitude;
         }
 
-        // The scatter cone's current radius for a given charge (0 while scatter is off).
-        //
-        // SQUARE-ROOT curve, in exactly the requested form: x is the PERCENTAGE of energy
-        // committed to the launch (0..100), the core function is sqrt(x), and a FACTOR
-        // normalises it so a full-energy launch lands on the editor's maximum:
-        //
-        //     factor = launchScatterMaxAngle / sqrt(100)
-        //     cone   = sqrt(x) * factor
-        //
-        // so f(100) = sqrt(100) * factor == launchScatterMaxAngle by construction, and the
-        // maximum stays a plain editor value. The curve is steep early and flattens near
-        // the top: the first energy committed costs the most precision.
-        //
-        // launchScatterStartFraction shifts where the curve leaves zero (0 = the pure
-        // form above, where x IS the committed energy percentage).
         public float ScatterConeAngleFor(float chargeFraction)
         {
             if (launchScatterMaxAngle <= 0f) return 0f;
@@ -1930,7 +1459,7 @@ namespace KineticEnergy.Player
 
         static Vector3 RandomDirectionInCone(Vector3 direction, float coneAngleDegrees)
         {
-            // Uniform over the cone's disk: random spin, sqrt-distributed radius.
+
             float offsetAngle = coneAngleDegrees * Mathf.Sqrt(Random.value);
             float spin = Random.value * 360f;
             Quaternion tilt = Quaternion.AngleAxis(offsetAngle, Vector3.Cross(direction, Random.onUnitSphere).normalized);
@@ -1939,7 +1468,7 @@ namespace KineticEnergy.Player
 
         void QueueLaunch(Vector3 direction, float force, float damping)
         {
-            // Overcharge scatter (economy variant 3): the committed charge buys imprecision.
+
             float scatterCone = ScatterConeAngleFor(ChargeFraction());
             if (scatterCone > 0.01f)
             {
@@ -1948,43 +1477,26 @@ namespace KineticEnergy.Player
             queuedDirection = direction;
             queuedForce = force;
             queuedDamping = damping;
-            // Wall launches under the momentum option: the synthesized carry stands in
-            // for the momentum a midair relaunch would have kept. Queued rather than
-            // applied now - a velocity written while STILL STUCK gets wiped by the
-            // stick's pinning before the physics tick (it "worked only briefly"), so
-            // the carry is delivered together with the impulse instead.
+
             queuedExtraVelocity = WallMomentumCarry(direction);
-            wallCarryArmed = false; // consumed by this launch
+            wallCarryArmed = false;
             launchQueued = true;
             hasLaunched = true;
             launchesSinceGrounded++;
             if (launchesRemainingOverride > 0) launchesRemainingOverride--;
-            exactFlightNoNudge = false;   // re-armed by the midair fire path right after this call
-            aimButtonSpent = true;        // a held aim button does nothing further until released
-            // A pound-window launch counts as MIDAIR no matter what the ground check says -
-            // the bounce hop sits inside the check's reach, but the whole post-pound flow
-            // (refund rules included) is a midair launch by design.
+            exactFlightNoNudge = false;
+            aimButtonSpent = true;
+
             lastLaunchWasGrounded = isGrounded && !poundAimHoldingGravityOff;
-            lastLaunchWasPound = false;   // re-set by the pound's own fire path
+            lastLaunchWasPound = false;
             currentFlightIsDownward = Vector3.Dot(direction.normalized, Vector3.down) >= slamDownwardThreshold;
-            // Vertical either way (up-charge or pound) - the camera trails these with its
-            // slightly tighter vertical smoothing. Same threshold as the slam check, mirrored.
+
             currentFlightIsVertical = Mathf.Abs(Vector3.Dot(direction.normalized, Vector3.up)) >= slamDownwardThreshold;
-            // Weak launches are SLOW, so a fixed smoothing time makes their camera lag
-            // near-invisible - the camera stretches its lag time for them (see
-            // ThirdPersonOrbitCamera.shortLaunchLagMultiplier).
+
             currentFlightIntensity = ChargeFraction();
 
-            // Deduct what was ACTUALLY spendable, not the theoretical charge cost - the
-            // refund can then never fabricate energy a nearly-empty tank didn't really spend.
             lastLaunchEnergySpent = Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge);
 
-            // Firing out of a post-pound aim: the shot is taken, so the boost is earned and
-            // kept; the gravity hold and the window end with the launch. Cleared only NOW -
-            // the midair classification and the spendable-energy read above both key off the
-            // flag, and clearing it first (the old order, at the top of this method) made
-            // pound-window launches count as grounded after all: wrong refund formula AND a
-            // reserve-capped spend.
             if (poundAimHoldingGravityOff)
             {
                 poundAimHoldingGravityOff = false;
@@ -1996,9 +1508,7 @@ namespace KineticEnergy.Player
             {
                 if (gradualLaunchDrain)
                 {
-                    // The cost leaves the meter over the flight instead of now. Starting a
-                    // new launch overwrites any old drain - the undrained remainder of the
-                    // previous launch is still in the meter, funding this one.
+
                     gradualDrainRemaining = lastLaunchEnergySpent;
                     gradualDrainPerSecond = lastLaunchEnergySpent / lastPredictedFlightSeconds;
                 }
@@ -2007,73 +1517,40 @@ namespace KineticEnergy.Player
                     energyFraction = Mathf.Clamp01(energyFraction - lastLaunchEnergySpent);
                 }
             }
-            flightEnergySpent += lastLaunchEnergySpent; // running total for the pound's whole-flight wash
+            flightEnergySpent += lastLaunchEnergySpent;
 
-            // The flight speed-up grows with commitment: +1% game speed per 1% of the tank
-            // this launch spent (see flightTimeScaleEnergyBonus).
             activeFlightTimeScale = launchFlightTimeScale + lastLaunchEnergySpent * flightTimeScaleEnergyBonus;
-            // Real-seconds estimate of THIS flight, for every launch type (the air aim also
-            // maintains it live) - hunters schedule their just-in-time dodges from this.
+
             lastPredictedFlightRealSeconds = lastPredictedFlightSeconds / Mathf.Max(activeFlightTimeScale, 0.01f);
             flightElapsedSeconds = 0f;
 
-            // Arm the descent ramp: apex starts here, and the landing height is whatever the
-            // aim just predicted (a shot into the void ramps toward the fall-reset instead).
             flightApexY = transform.position.y;
             flightPredictedLandingY = hasValidPredictedLanding ? lastPredictedLanding.y : fallResetY;
 
-            // Armed here already (not just when FixedUpdate applies the impulse) so
-            // AllowGroundedMovement/AllowAirborneNudge are correct the instant firing is
-            // decided - the free-move component's FixedUpdate can run before ours.
             launchGraceTimer = launchGraceDuration;
 
-            previousLaunchChargeFraction = ChargeFraction(); // the NEXT launch's wall carry reads this
+            previousLaunchChargeFraction = ChargeFraction();
 
-            // Launching again takes the flight BACK: a fresh launch is yours, so it runs at
-            // the launch speed-up again even if the last thing that happened was being
-            // knocked about by an enemy, a projectile or a laser.
             flightSpeedUpSuppressed = false;
 
-            LaunchFired?.Invoke(); // Polish starts the flight loop off this event
+            LaunchFired?.Invoke();
         }
-
-        // ---------- Physics step ----------
 
         void FixedUpdate()
         {
             UpdateIgnoredCheckpointButton();
 
-            // Freeze the cube for the whole duration of any aim/charge (and while crash-
-            // stuck) - continuously, not just on the opening frame, so gravity can't sag an
-            // airborne aim downward tick by tick. Only the midair first-person AIM's freeze
-            // is conditional on the slowdown resource; hold-charges (up-launch, ground
-            // pound) and the grounded aim always freeze, exactly as they always have.
             bool airAimFrozen = airAiming && (isGrounded || SlowdownAvailable());
-            // The post-ground-pound window also freezes the cube in place - the free hop
-            // just hangs there until the window lapses or an aim opens.
+
             bool frozenThisTick = isAiming || holdChargeDirection != HoldChargeDirection.None || airAimFrozen || isStuck
                 || poundWindowTimer > 0f;
             if (frozenThisTick)
             {
-                // On a moving platform, "frozen" means frozen RELATIVE TO THE PLATFORM -
-                // the ride continues through a grounded aim instead of the platform
-                // sliding out from under it.
-                // Frozen means frozen RELATIVE TO WHATEVER CARRIES YOU: a moving platform
-                // underfoot, or a rotating surface you are stuck to. Both are expressed as
-                // the velocity the pin holds, so the physics step does the moving and the
-                // ride stays as smooth as the platform's.
+
                 Vector3 carryVelocity = Vector3.zero;
                 if (hasPendingCarry && isStuck) carryVelocity = stuckCarryVelocity;
                 else if (isGrounded && freeMoveController != null) carryVelocity = freeMoveController.GroundPlatformVelocity;
 
-                // A grounded aim on a vertical mover is pinned by POSITION, not velocity.
-                // The velocity carry loses the ride at the summit: the platform flips
-                // downward, the sampled velocity lags a tick, a gap opens underfoot,
-                // isGrounded drops - and with it the carry, so the player hung frozen in
-                // the air while the platform sank away. The platform and the player's
-                // offset on it are latched when the aim opens, and each frozen tick closes
-                // whatever gap exists, so the ride survives the turn-around regardless of
-                // what the ground probe momentarily thinks.
                 if (isAiming)
                 {
                     if (aimRideBody == null && isGrounded && freeMoveController != null
@@ -2092,8 +1569,6 @@ namespace KineticEnergy.Player
                 rb.linearVelocity = carryVelocity;
                 rb.angularVelocity = Vector3.zero;
 
-                // The face turns under you, so the stuck normal turns with it - the launch
-                // that follows still fires away from the surface rather than into it.
                 if (hasPendingCarry && isStuck && stuckSurfaceNormal.sqrMagnitude > 0.0001f)
                 {
                     stuckSurfaceNormal = (pendingCarryRotation * stuckSurfaceNormal).normalized;
@@ -2101,8 +1576,6 @@ namespace KineticEnergy.Player
                 hasPendingCarry = false;
             }
 
-            // Gradual drain: the launch's cost trickles out of the meter as the flight
-            // progresses (paused while frozen mid-aim - the flight isn't progressing then).
             if (gradualLaunchDrain && !infiniteEnergy && hasLaunched && !frozenThisTick && gradualDrainRemaining > 0f)
             {
                 float drainStep = Mathf.Min(gradualDrainPerSecond * Time.fixedDeltaTime, gradualDrainRemaining);
@@ -2116,23 +1589,18 @@ namespace KineticEnergy.Player
             if (launchQueued)
             {
                 launchQueued = false;
-                isStuck = false;             // breaking free of a crashed/stuck position
-                nonStickyReleaseTimer = 0f;  // launching supersedes a pending timed release
-                rb.useGravity = true;        // back on, undoing the crash-stick
+                isStuck = false;
+                nonStickyReleaseTimer = 0f;
+                rb.useGravity = true;
                 rb.linearDamping = queuedDamping;
-                // Shed the MOVER's carry first. The impulse is ADDED to current velocity,
-                // and while riding a platform that velocity is the platform's - so the shot
-                // silently gained the platform's speed and flipped with it at each end of
-                // the trip, which read as the platform steering your aim. The preview never
-                // included it either, so shot and cursor disagreed.
+
                 if (freeMoveController != null && isGrounded)
                 {
                     Vector3 platformCarry = freeMoveController.GroundPlatformVelocity;
                     if (platformCarry.sqrMagnitude > 0.0001f) rb.linearVelocity -= platformCarry;
                 }
                 rb.AddForce(queuedDirection * queuedForce, ForceMode.Impulse);
-                // The wall-launch momentum carry lands in the same tick as the impulse,
-                // AFTER the stuck state released - nothing can wipe it anymore.
+
                 if (queuedExtraVelocity.sqrMagnitude > 0.0001f)
                 {
                     rb.linearVelocity += queuedExtraVelocity;
@@ -2156,17 +1624,10 @@ namespace KineticEnergy.Player
                 hasPendingEnemyKnockback = false;
             }
 
-            // Grounded state from a fresh BoxCast across the cube's own footprint each step -
-            // continuous collision detection can report contact slightly after a real
-            // departure, and a single center ray misses edge landings.
             Vector3 halfExtents = boxCollider != null
                 ? new Vector3(boxCollider.bounds.extents.x * 0.9f, 0.05f, boxCollider.bounds.extents.z * 0.9f)
                 : new Vector3(0.4f, 0.05f, 0.4f);
-            // Triggers are never ground either - finish volumes and checkpoint pads sit
-            // right where the player stands, and standing ON one would be nonsense.
-            // The probe also follows a DESCENDING platform down (see the free-move
-            // controller's matching reach): losing contact tick by tick on a lift dropped
-            // the frozen aim's platform carry too, which is why aiming on a mover drifted.
+
             float descentReach = 0f;
             if (freeMoveController != null && freeMoveController.OnMovingPlatform
                 && freeMoveController.GroundPlatformVelocity.y < 0f)
@@ -2177,48 +1638,27 @@ namespace KineticEnergy.Player
                 transform.rotation, groundCheckDistance + descentReach,
                 Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
 
-            // Standing on the ground with no flight in progress restores the per-flight
-            // launch budget and the energy floor.
             if (isGrounded && !hasLaunched)
             {
                 launchesSinceGrounded = 0;
-                launchesRemainingOverride = -1; // genuinely grounded - the wall-crash limit lifts
+                launchesRemainingOverride = -1;
                 exactFlightNoNudge = false;
-                flightEnergySpent = 0f; // the flight (and its refund basis) ends on the ground
+                flightEnergySpent = 0f;
                 if (!infiniteEnergy) ClampEnergyFloor();
-                // Leaving a wall WITHOUT launching (dropping off a cling onto real
-                // ground) forfeits the armed wall carry. NOT while still stuck - the
-                // ground BoxCast clips a hugged wall, and disarming there was the bug.
+
                 if (!isStuck) wallCarryArmed = false;
             }
 
-            // Plain falls (no launch in flight) shed the last launch's arc-shaping drag -
-            // see plainFallDamping.
             if (!hasLaunched && !isGrounded && !isStuck && rb.linearDamping > plainFallDamping)
             {
                 rb.linearDamping = plainFallDamping;
             }
 
-            // A slam fired from ZERO clearance never actually leaves its surface - PhysX
-            // absorbs the downward impulse into the already-supporting contact and no
-            // OnCollisionEnter ever fires. Handle that crash directly. Standing on a
-            // breakable pane, the same slam smashes it instead so gravity carries the cube
-            // through the fresh hole.
             if (slamJustFired && isGrounded)
             {
-                BreakableCrackWall groundBreakable = groundHit.collider != null ? groundHit.collider.GetComponentInParent<BreakableCrackWall>() : null;
-                if (groundBreakable != null)
-                {
-                    groundBreakable.Smash();
-                }
-                else
-                {
-                    RegisterCrash(groundHit.normal, slamForce, groundHit.collider);
-                }
+                RegisterCrash(groundHit.normal, slamForce, groundHit.collider);
             }
 
-            // Backstop for any other launch that never separates from the ground (slides to a
-            // stop under friction) - the crash OnCollisionEnter never got an event for.
             if (hasLaunched && isGrounded)
             {
                 groundedTicksSinceLaunch++;
@@ -2232,9 +1672,6 @@ namespace KineticEnergy.Player
                 groundedTicksSinceLaunch = 0;
             }
 
-            // A crash-stuck cube resting on genuinely FLAT ground breaks free automatically -
-            // walking away must never require energy. Only near-horizontal surfaces qualify;
-            // walls and ramps hold until the next launch.
             if (isStuck && isGrounded && Vector3.Dot(stuckSurfaceNormal, Vector3.up) >= flatGroundStickThreshold)
             {
                 isStuck = false;
@@ -2242,8 +1679,6 @@ namespace KineticEnergy.Player
                 rb.useGravity = true;
             }
 
-            // Timed release from a non-sticky wall: the cling holds like a normal stick for
-            // its brief duration, then lets go and gravity takes over with low drag.
             if (isStuck && nonStickyReleaseTimer > 0f)
             {
                 nonStickyReleaseTimer -= Time.fixedDeltaTime;
@@ -2255,13 +1690,8 @@ namespace KineticEnergy.Player
                 }
             }
 
-            // Captured LAST, after a same-tick launch impulse, and strictly before the
-            // physics step resolves the upcoming collision - OnCollisionEnter reading
-            // rb.linearVelocity directly gets inconsistently post-collision values.
             velocityBeforePhysicsStep = rb.linearVelocity;
         }
-
-        // ---------- Collisions ----------
 
         void OnTriggerEnter(Collider other)
         {
@@ -2275,8 +1705,7 @@ namespace KineticEnergy.Player
         void OnCollisionEnter(Collision collision)
         {
             DispatchHazardContact(collision);
-            // RestartWall reloads the level on any touch - checked before every guard so a
-            // grounded walk-in restarts as reliably as a mid-flight crash.
+
             if (collision.collider.GetComponentInParent<RestartWall>() != null)
             {
                 Time.timeScale = 1f;
@@ -2284,21 +1713,6 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // Breakable crack panes are solid to everything EXCEPT a downward launch - a slam
-            // smashes through, restoring the pre-impact velocity PhysX already absorbed.
-            BreakableCrackWall breakable = collision.collider.GetComponentInParent<BreakableCrackWall>();
-            if (breakable != null && hasLaunched && currentFlightIsDownward)
-            {
-                breakable.Smash();
-                rb.linearVelocity = velocityBeforePhysicsStep;
-                return;
-            }
-
-            // Enemies: a launch KILLS the enemy and registers a full crash (refund and the
-            // wall-crash launch limit apply, the flight ends) - but with NO cling window
-            // for now: the enemy is gone, so you drop into a normal fall immediately.
-            // Relaunching happens midair, within whatever launches the crash granted.
-            // Walking into one is harmless; it just shoves you.
             Enemy enemy = collision.collider.GetComponentInParent<Enemy>();
             FlyingEnemy flyer = collision.collider.GetComponentInParent<FlyingEnemy>();
             TurretEnemy turret = collision.collider.GetComponentInParent<TurretEnemy>();
@@ -2306,18 +1720,14 @@ namespace KineticEnergy.Player
             {
                 if (hasLaunched && !isStuck)
                 {
-                    // The kill checks below need THIS launch's spend - RegisterCrash's
-                    // refund zeroes it, so it's captured first.
+
                     float launchSpend = lastLaunchEnergySpent;
                     RegisterCrash(collision.GetContact(0).normal, velocityBeforePhysicsStep.magnitude, collision.collider);
                     isStuck = false;
                     nonStickyReleaseTimer = 0f;
                     rb.useGravity = true;
                     rb.linearDamping = plainFallDamping;
-                    // Ground enemies may carry a KILL WINDOW (hunter variants): outside it
-                    // the crash registers exactly the same, but the enemy survives. The
-                    // sized variants also demand a minimum launch spend - a cheaper launch
-                    // bounces off and hurts the player instead.
+
                     if (enemy != null)
                     {
                         if (enemy.CanBeKilledByLaunch)
@@ -2326,14 +1736,7 @@ namespace KineticEnergy.Player
                             else enemy.PunishFailedKill();
                         }
                     }
-                    // Weak-spot flyers only die to a hit ON their back cube; the base
-                    // flyer allows every collider.
-                    // A hit anywhere but the killing spot STAGGERS the flyer instead of
-                    // doing nothing - it hangs there slumped forward for a moment, which
-                    // is the opening to come back around onto its weak spot.
-                    // Both may also demand a minimum spend (the energy-tier scenes): an
-                    // under-charged hit on the right spot staggers the flyer exactly like
-                    // a wrong-spot hit, and merely registers as a crash on a turret.
+
                     else if (flyer != null)
                     {
                         if (flyer.LaunchKillAllowedFor(collision.collider) && launchSpend >= flyer.minKillEnergyFraction - 0.0001f)
@@ -2344,13 +1747,7 @@ namespace KineticEnergy.Player
                         else
                         {
                             flyer.OnLaunchSurvived();
-                            // The staggered flyer is a PERCH: the hit places the player on
-                            // top of it, standing centred on the WEAK SPOT for the stun's
-                            // duration - the same cube the follow-up shot has to hit, so
-                            // the perch doubles as the aiming reference. Both position
-                            // writes plus the interpolation cycle: autoSyncTransforms is
-                            // off, and the interpolated render pose must not blend across
-                            // a teleport.
+
                             WeakSpotFlyingEnemy weakSpotFlyer = flyer as WeakSpotFlyingEnemy;
                             Collider flyerBody = weakSpotFlyer != null && weakSpotFlyer.weakSpot != null
                                 ? weakSpotFlyer.weakSpot
@@ -2359,9 +1756,7 @@ namespace KineticEnergy.Player
                             if (flyerBody != null)
                             {
                                 float halfHeight = boxCollider != null ? boxCollider.bounds.extents.y : 0.5f;
-                                // Where the spot WILL sit after the stun lean lands - the
-                                // current bounds describe the pre-slump pose, which is why
-                                // the perch used to end up off-centre on the first pound.
+
                                 Vector3 spotCentre;
                                 float spotHalf;
                                 if (weakSpotFlyer != null && weakSpotFlyer.weakSpot != null)
@@ -2391,11 +1786,6 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // Target spheres always register, BEFORE every guard below - a floating target
-            // can never be the launch platform spuriously re-reporting contact, so the
-            // grace/clear-distance guards must not swallow the hit (they did: spheres close
-            // to the launch point were phased through). A launch onto one is a full crash;
-            // touching one with no flight in progress still collects it, without the stick.
             TargetSphere touchedSphere = collision.collider.GetComponentInParent<TargetSphere>();
             if (touchedSphere != null)
             {
@@ -2410,12 +1800,8 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // Only a genuine in-flight crash counts - not pre-launch walking, not an
-            // already-stuck body.
             if (!hasLaunched || isStuck) return;
 
-            // Slams bypass the spurious-recontact guards - immediately re-striking the launch
-            // surface is their whole point. Every other direction keeps both guards.
             if (!currentFlightIsDownward)
             {
                 if (launchGraceTimer > 0f) return;
@@ -2425,32 +1811,15 @@ namespace KineticEnergy.Player
             RegisterCrash(collision.GetContact(0).normal, velocityBeforePhysicsStep.magnitude, collision.collider);
         }
 
-        // Crash-stick: stop dead, freeze in place, gravity off, refund energy. Shared by
-        // OnCollisionEnter and FixedUpdate's zero-clearance slam check.
-        // The surface the most recent registered crash landed on, and the energy that
-        // crash's refund actually added - the economy harness reads both to decide
-        // whether a landing counts (and to take the payout back when it doesn't).
         public Collider LastCrashSurface { get; private set; }
         public float LastCrashRefund { get; private set; }
-        // Whether the most recent registered crash was a GROUND POUND landing - the
-        // economy harness leaves those to the pound pipeline (wash + windowed boost).
+
         public bool LastCrashWasPound { get; private set; }
 
-        // The velocity the player carried INTO the collision being resolved right now -
-        // captured before the physics step, so it is the honest approach vector. Read by
-        // anything that has to judge HOW the player arrived rather than merely that they
-        // did (the checkpoint button's steepness test).
         public Vector3 PreCollisionVelocity => velocityBeforePhysicsStep;
 
-        // The checkpoint button the player may currently phase through. An UNPRESSED button
-        // stands proud of its frame, and a grounded aim right beside it kept clipping the
-        // takeoff: the launch struck the button's side the moment it fired. So while the
-        // player is grounded and aiming, the button at their feet stops colliding - and the
-        // exemption HOLDS through the launch itself, until the next crash re-arms it.
         Collider ignoredCheckpointButton;
 
-        // The mover a grounded aim opened on, and where the player stood on it - the aim's
-        // position pin (see FixedUpdate's frozen branch). Null whenever no aim rides one.
         Rigidbody aimRideBody;
         Vector3 aimRideOffset;
 
@@ -2472,9 +1841,7 @@ namespace KineticEnergy.Player
         {
             if (isGrounded && IsAimingOrCharging)
             {
-                // The button at the player's feet: a short box around the cube, so a button
-                // beside it (stood on the frame, aiming past the protruding button) counts
-                // just like one directly underfoot.
+
                 Vector3 reach = (boxCollider != null ? boxCollider.bounds.extents : Vector3.one * 0.5f)
                     + new Vector3(0.35f, 0.7f, 0.35f);
                 foreach (Collider candidate in Physics.OverlapBox(transform.position, reach,
@@ -2487,20 +1854,15 @@ namespace KineticEnergy.Player
                         return;
                     }
                 }
-                // No button found: keep any active exemption - mid-launch the cube has
-                // usually already left the box while still beside the button.
+
             }
             else if (isGrounded && !hasLaunched)
             {
-                SetIgnoredCheckpointButton(null); // settled and not aiming: collide normally
+                SetIgnoredCheckpointButton(null);
             }
             else if (ignoredCheckpointButton != null)
             {
-                // Airborne: the exemption lasts only until the cube is genuinely CLEAR of
-                // the button, then collisions re-arm mid-flight. Holding it until the next
-                // crash broke the checkpoints outright: the natural press is to stand
-                // BESIDE the button, aim, and slam down onto it - and that aim's own
-                // exemption was still active at the landing, so the press never registered.
+
                 Bounds clearance = ignoredCheckpointButton.bounds;
                 clearance.Expand(1.2f);
                 if (boxCollider != null && !clearance.Intersects(boxCollider.bounds))
@@ -2510,35 +1872,16 @@ namespace KineticEnergy.Player
             }
         }
 
-        // The player-side hazard dispatch: a LaserHazard slab inside a COMPOUND rigidbody
-        // (the rotating walls' edges) never receives its own collision messages - Unity
-        // sends them to the rigidbody root. The player's messages always arrive, so the
-        // hit is delivered from HERE; the hazard's own retrigger delay absorbs the double
-        // delivery on ordinary standalone slabs.
         void DispatchHazardContact(Collision collision)
         {
             LaserHazard hazard = collision.collider.GetComponent<LaserHazard>();
             if (hazard != null) hazard.TryHit(boxCollider);
         }
 
-        // Grinding along a hazard edge produces only Stay contacts after the first frame -
-        // this keeps the re-hits coming at the hazard's own retrigger rhythm.
         void OnCollisionStay(Collision collision)
         {
             DispatchHazardContact(collision);
 
-            // A launch fired while ALREADY touching an enemy has no Enter edge to ride:
-            // perched on a staggered flyer's weak spot, the pound never separated from the
-            // collider, so the kill branch (which lives in OnCollisionEnter) only ran when
-            // the stun wobble happened to break contact for a frame - the follow-up kill
-            // "didn't always work". A persistent contact during an active launch re-enters
-            // the full handler; the enemy branch consumes the launch on first handling
-            // (hasLaunched goes false), so this cannot double-fire.
-            //
-            // ONLY for a launch moving INTO the contact. Without the direction gate this
-            // also caught launches DEPARTING the perch - an up-launch off the weak spot
-            // was consumed by the branch on its first tick, still overlapping, before it
-            // had moved at all (direct report: could not launch upward off the spot).
             if (hasLaunched && !isStuck && collision.contactCount > 0
                 && Vector3.Dot(velocityBeforePhysicsStep, collision.GetContact(0).normal) < -0.5f
                 && (collision.collider.GetComponentInParent<Enemy>() != null
@@ -2551,18 +1894,15 @@ namespace KineticEnergy.Player
 
         void RegisterCrash(Vector3 contactNormal, float crashSpeed, Collider surface)
         {
-            // A NonStickSurface never registers as a crash at all - no freeze, no refund;
-            // physics carries the cube onward.
+
             if (surface != null && surface.GetComponentInParent<NonStickSurface>() != null) return;
 
-            SetIgnoredCheckpointButton(null); // arrival anywhere re-arms button collisions
+            SetIgnoredCheckpointButton(null);
 
             LastCrashSurface = surface;
-            LastCrashRefund = 0f; // stamped by RefundEnergyForCrash when a payout happens
-            LastCrashWasPound = lastLaunchWasPound; // still true here; the bounce clears it below
-            // What this arrival PAID, frame-stamped before the pound branch below zeroes the
-            // running figure. Anything reading the spend from its own OnCollisionEnter (the
-            // checkpoint buttons) races this method - see ArrivalEnergySpent.
+            LastCrashRefund = 0f;
+            LastCrashWasPound = lastLaunchWasPound;
+
             crashEnergySpent = lastLaunchEnergySpent;
             crashEnergySpentFrame = Time.frameCount;
 
@@ -2572,46 +1912,34 @@ namespace KineticEnergy.Player
 
             isStuck = true;
             hasLaunched = false;
-            launchesSinceGrounded = 0; // a crash is a landing - the launch budget resets
-            // ...EXCEPT under the wall-crash rule: a surface too steep to stand on grants
-            // only the small allowance until the player is genuinely grounded again.
+            launchesSinceGrounded = 0;
+
             bool groundingCrash = Vector3.Dot(contactNormal, Vector3.up) >= flatGroundStickThreshold;
             launchesRemainingOverride = wallCrashLaunchAllowance > 0 && !groundingCrash
                 ? wallCrashLaunchAllowance
                 : -1;
             exactFlightNoNudge = false;
 
-            // A crash closes any aim outright and demands a genuine release-and-repress.
             waitingForAimRelease = true;
             if (airAiming) CancelAirAim();
 
             stuckSurfaceNormal = contactNormal;
-            // The wall-carry latch: a STEEP-surface crash arms it, a flat landing clears
-            // it - it stays armed through the whole wall aim until the launch consumes it.
+
             wallCarryArmed = Vector3.Dot(contactNormal, Vector3.up) < 0.7f;
             freeMoveController?.AlignVisualToSurface(stuckSurfaceNormal);
 
-            // Sticky grammar: near-flat ground is always walkable. A wall/ceiling holds
-            // permanently only when it carries StickySurface (with sticky on) - anything else
-            // clings briefly, then drops. A TimedStickyPanel holds for its own duration.
             nonStickyReleaseTimer = 0f;
             TimedStickyPanel timedPanel = surface != null ? surface.GetComponentInParent<TimedStickyPanel>() : null;
             if (timedPanel != null)
             {
-                // Holds like a sticky surface, but only for the panel's own duration - the
-                // panel drops its collider at the same moment this timer releases the stick,
-                // so the player falls even off a flat panel top.
+
                 nonStickyReleaseTimer = timedPanel.holdSeconds;
                 timedPanel.OnPlayerStuck();
             }
             else if (Vector3.Dot(contactNormal, Vector3.up) < flatGroundStickThreshold)
             {
                 StickySurface stickySurface = surface != null ? surface.GetComponentInParent<StickySurface>() : null;
-                // A HAZARD face never inherits its parent's stickiness: the rotating walls'
-                // damage edges are children of a StickySurface wall, and the parent lookup
-                // made the player crash-stick PERMANENTLY to the edge - the stuck pin then
-                // ate the hazard's knockback every tick, so the edges read as broken. The
-                // brief cling keeps them behaving exactly like the turret walls' shells.
+
                 bool hazardFace = surface != null && surface.GetComponent<LaserHazard>() != null;
                 if (hazardFace || stickySurface == null || !stickySurface.sticky)
                 {
@@ -2619,27 +1947,18 @@ namespace KineticEnergy.Player
                 }
             }
 
-            // Gradual drain: landing means the launch is 100% spent - whatever hadn't
-            // trickled out yet is taken now, BEFORE the refund is paid.
             if (gradualLaunchDrain && !infiniteEnergy && gradualDrainRemaining > 0f)
             {
                 energyFraction = Mathf.Max(energyFraction - gradualDrainRemaining, 0f);
                 gradualDrainRemaining = 0f;
             }
 
-            // Breakable crack panes never refund energy - they exist to be smashed through,
-            // not farmed. NoRefundSurface marks other farm-proof surfaces the same way
-            // (the economy scene's big floor, under its refund-boosted variants).
-            bool refundAllowed = surface == null || (surface.GetComponentInParent<BreakableCrackWall>() == null
-                && surface.GetComponentInParent<NoRefundSurface>() == null);
+            bool refundAllowed = surface == null || surface.GetComponentInParent<NoRefundSurface>() == null;
             if (refundAllowed)
             {
                 RefundEnergyForCrash();
             }
 
-            // The ground pound doesn't stick - it BOUNCES: a free hop (no energy cost),
-            // gravity back on, and the slow-mo window during which an aim starts fully
-            // charged. Consumed here so the hop's own landing is not treated as a pound.
             if (lastLaunchWasPound)
             {
                 transform.position += Vector3.up * groundPoundHopHeight;
@@ -2651,28 +1970,16 @@ namespace KineticEnergy.Player
                 lastLaunchWasPound = false;
                 lastLaunchEnergySpent = 0f;
             }
-            // Slamming into a WALL earns the pound's bargain too: the launch that put you
-            // there is banked as a pending boost, and opening the midair aim inside the
-            // window pays it at groundPoundBoostMultiplier, exactly as the pound's does.
-            // A wall stick leaves the cube not-grounded, so the aim already runs through
-            // the midair path where that claim lives - only the window was missing.
-            //
-            // Same steepness line the wall-crash launch allowance uses, so "too steep to
-            // stand on" means one thing throughout. Surfaces that pay no refund grant no
-            // boost either: the whole bonus is measured against a refund that never came.
+
             else if (!groundingCrash && refundAllowed)
             {
                 poundWindowTimer = groundPoundSlowDuration;
                 poundPendingRefund = lastLaunchEnergySpent;
-                poundWindowFromPound = false; // the boost only - no free dial, no held gravity
+                poundWindowFromPound = false;
             }
 
-            flightEnergySpent = 0f; // consumed by the refund above - the next flight starts fresh
+            flightEnergySpent = 0f;
 
-            // Solid target spheres: the crash counts exactly like any other surface (energy
-            // included, handled above), then the sphere vanishes - so the cling release is
-            // armed UNCONDITIONALLY (there is no surface left to rest against; hanging there
-            // forever would be a soft-lock) and the hit is reported for the counter/respawn.
             TargetSphere sphere = surface != null ? surface.GetComponentInParent<TargetSphere>() : null;
             if (sphere != null)
             {
@@ -2680,16 +1987,11 @@ namespace KineticEnergy.Player
                 sphere.OnHitByCrash();
             }
 
-            // Variant A: the aim budget refills on every crash.
             if (slowdownMode == SlowdownMode.AimBudget) aimBudgetRemaining = aimBudgetSeconds;
 
             CrashRegistered?.Invoke(transform.position);
         }
 
-        // The refund rules: EnergyEconomy1's per-launch economy for ordinary crashes, and
-        // the EnergyEconomy4 pound rule - the WHOLE flight's spend comes back as a wash
-        // immediately, with the boost extra deferred to the slow-mo window (see the Ground
-        // Pound header fields).
         void RefundEnergyForCrash()
         {
             if (infiniteEnergy)
@@ -2698,15 +2000,13 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // What this refund ACTUALLY adds (clamps included) - measured, not derived, so
-            // the economy harness can take back exactly what a non-counting landing paid.
             float energyBeforeRefund = energyFraction;
 
             if (lastLaunchWasPound)
             {
                 float flightSpend = flightEnergySpent > 0.0001f ? flightEnergySpent : lastLaunchEnergySpent;
                 energyFraction = Mathf.Clamp01(energyFraction + flightSpend * poundFlightRefundMultiplier);
-                // The boost extra keys off the POUND launch alone, not the whole flight.
+
                 poundPendingRefund = lastLaunchEnergySpent;
                 ClampEnergyFloor();
                 LastCrashRefund = Mathf.Max(energyFraction - energyBeforeRefund, 0f);
@@ -2720,13 +2020,11 @@ namespace KineticEnergy.Player
             }
             else
             {
-                // spend * (base + factor * spend): the multiplier rises with how much was committed.
+
                 gain = lastLaunchEnergySpent * (midairRefundBaseMultiplier + midairRefundSpendFactor * lastLaunchEnergySpent);
             }
             float refunded = Mathf.Clamp01(energyFraction + gain);
-            // The merged economy's premium tank: ORDINARY refunds stop at the ceiling -
-            // only the privileged pipelines (the pound boost, the harness-paid combo
-            // extras) fill past it. Energy already above the ceiling is never clawed back.
+
             if (ordinaryRefundCeiling < 1f)
             {
                 refunded = Mathf.Min(refunded, Mathf.Max(ordinaryRefundCeiling, energyBeforeRefund));
@@ -2736,11 +2034,6 @@ namespace KineticEnergy.Player
             LastCrashRefund = Mathf.Max(energyFraction - energyBeforeRefund, 0f);
         }
 
-        // ---------- Landing prediction ----------
-
-        // The base game speed this shot's flight will run at: the launch scale plus the
-        // bonus for however much energy ACTUALLY fires (the dialled charge, capped by what
-        // the tank can pay) - the exact figure OnLaunchFired will compute.
         float LaunchFlightScaleForCurrentCharge()
         {
             float spend = energyCostPerFullCharge > 0f
@@ -2749,17 +2042,6 @@ namespace KineticEnergy.Player
             return launchFlightTimeScale + spend * flightTimeScaleEnergyBonus;
         }
 
-        // The previewed flight's duration measured on a WORLD MOVER'S clock - what a moving
-        // platform actually advances by while the shot is in the air, and therefore exactly
-        // how far ahead its ghost belongs.
-        //
-        // This is INTEGRATED over the predicted trajectory rather than divided by an average,
-        // because none of the terms are constant: the flight's game speed starts at the
-        // launch scale and then ramps up through the descent (Lerp between fallSpeedUpStart
-        // and fallSpeedUpEnd by how far down the fall has come), while a mover's clock
-        // advances by WorldMotionTime - min(fixed, fixed/timeScale) - every tick. Summing
-        // that per-step reproduces the platform's clock step for step, mirroring
-        // ApplyChargeTimeScale's rules including the pound exemption.
         float PredictedFlightRealSeconds(int steps, bool downwardLaunch)
         {
             if (steps <= 0) return 0f;
@@ -2774,7 +2056,7 @@ namespace KineticEnergy.Player
             for (int i = 0; i < steps; i++)
             {
                 float y = trajectoryBuffer[i].y;
-                if (y > apexY) apexY = y;                      // the apex is tracked as it flies, as in flight
+                if (y > apexY) apexY = y;
                 bool falling = i > 0 && y < trajectoryBuffer[i - 1].y;
 
                 float scale = baseScale;
@@ -2784,8 +2066,7 @@ namespace KineticEnergy.Player
                     float descentProgress = Mathf.Clamp01((apexY - y) / descentSpan);
                     scale *= 1f + Mathf.Lerp(fallSpeedUpStart, fallSpeedUpEnd, descentProgress);
                 }
-                // WorldMotionTime: a mover never runs FASTER than real time, and slows with
-                // the bullet-time - the same clamp, so the sum matches tick for tick.
+
                 realSeconds += Mathf.Min(dt, dt / Mathf.Max(scale, 0.01f));
             }
             return realSeconds;
@@ -2795,15 +2076,6 @@ namespace KineticEnergy.Player
         {
             Vector3 lineStart = transform.position + Vector3.up * previewLineHeight;
 
-            // MOVING PLATFORMS are solved in TWO PASSES. The prediction puts each mover
-            // where it will be when the shot ARRIVES - but that arrival time is the very
-            // thing the prediction measures, so a single pass feeds one frame's answer into
-            // the next and never settles (the cursor promised a landing the flight then
-            // sailed past). Pass one flies against the movers where they are now, purely to
-            // time the flight; pass two re-runs it with every mover advanced by that time,
-            // and that second arc is the one shown and fired.
-            // A pound (steeply downward) shot is exempt from the descent ramp, exactly as
-            // the live flight is - read from the shot itself so the two always agree.
             bool downwardLaunch = initialVelocity.sqrMagnitude > 0.0001f
                 && Vector3.Dot(initialVelocity.normalized, Vector3.down) >= slamDownwardThreshold;
 
@@ -2812,7 +2084,7 @@ namespace KineticEnergy.Player
             {
                 PredictLandingPoint(transform.position, initialVelocity, damping, out int probeSteps, out _);
                 predictionLeadSeconds = PredictedFlightRealSeconds(probeSteps, downwardLaunch);
-                predictionSyncFrame = -1; // force the movers to re-mirror at the lead position
+                predictionSyncFrame = -1;
             }
 
             Vector3 landingPoint = PredictLandingPoint(transform.position, initialVelocity, damping, out int stepCount, out bool didLand);
@@ -2820,16 +2092,9 @@ namespace KineticEnergy.Player
             hasValidPredictedLanding = didLand;
             lastTrajectoryStepCount = stepCount;
             lastPredictedFlightSeconds = Mathf.Max(stepCount * Time.fixedDeltaTime, 0.1f);
-            // Kept live for EVERY aim - the ghost, the lead arrow and the mover proxies all
-            // read this. It used to be refreshed only by the midair aim, so a grounded aim
-            // at a mover led with a stale figure left over from the previous flight.
+
             lastPredictedFlightRealSeconds = PredictedFlightRealSeconds(stepCount, downwardLaunch);
 
-            // Aiming INTO the face you are clinging to: the shot cannot go that way - it
-            // buries itself in the surface the moment it fires. The prediction happily
-            // reports a landing there (often on the very sticky wall you are already on,
-            // which then read as a safe green shot), so the preview is told outright that
-            // this direction is blocked.
             bool blockedByStuckSurface = isStuck
                 && stuckSurfaceNormal.sqrMagnitude > 0.0001f
                 && initialVelocity.sqrMagnitude > 0.0001f
@@ -2837,9 +2102,7 @@ namespace KineticEnergy.Player
 
             if (landingPreview != null && landingPreview.CurrentMode != PredictionMode.None)
             {
-                // The spend this aim would commit if fired now - the exact figure the
-                // enemy kill gates compare on the crash, so the preview's verdict on an
-                // aimed enemy and the actual outcome cannot disagree.
+
                 landingPreview.SetProjectedSpend(energyCostPerFullCharge > 0f
                     ? Mathf.Min(SpendableEnergy(), ChargeFraction() * energyCostPerFullCharge)
                     : SpendableEnergy());
@@ -2848,15 +2111,10 @@ namespace KineticEnergy.Player
             }
         }
 
-        // Runs the ACTUAL Unity physics engine on a hidden stand-in Rigidbody inside an
-        // isolated PhysicsScene, fast-forwarded via manual Simulate() calls - accurate by
-        // construction, since it's the same code path that will move the real cube. Several
-        // formula-based approximations were tried and never quite matched.
         Vector3 PredictLandingPoint(Vector3 startPos, Vector3 initialVelocity, float damping, out int stepCount, out bool didLand)
         {
             EnsurePredictionClone();
-            // Mirror the live scene's geometry once per frame - every prediction within one
-            // frame sees identical geometry anyway.
+
             if (predictionSyncFrame != Time.frameCount)
             {
                 SyncPredictionGeometry();
@@ -2865,17 +2123,10 @@ namespace KineticEnergy.Player
 
             predictionRb.linearDamping = damping;
 
-            // Spawn slightly off the resting surface, along its normal - teleporting the
-            // clone exactly onto (or into) the surface registers an instant false "landed".
-            // The offset direction matters: while stuck to a wall or ceiling, world-up points
-            // along or INTO the surface; the stuck normal is correct in every orientation.
             bool spawnCached = spawnCacheFrame == Time.frameCount && spawnCacheStart == startPos;
             Vector3 clearanceDir = isStuck && stuckSurfaceNormal.sqrMagnitude > 0.0001f ? stuckSurfaceNormal : Vector3.up;
             Vector3 spawnPos = spawnCached ? spawnCacheResult : startPos + clearanceDir * 0.15f;
 
-            // Depenetrate the spawn from static geometry (aiming while pressed against a wall
-            // would otherwise start the clone overlapping it and collapse the trail). The
-            // clone is inflated by a small skin for the pass so "merely touching" also counts.
             if (!spawnCached && predictionCloneCollider != null)
             {
                 const float depenetrationSkin = 0.12f;
@@ -2930,16 +2181,12 @@ namespace KineticEnergy.Player
                 landing = pos;
                 if (stepCount < trajectoryBuffer.Length) trajectoryBuffer[stepCount++] = pos;
 
-                // Only trusted after a couple of real steps - reading velocity before the
-                // first step has genuinely applied could misreport "already at rest".
                 if (i >= 2 && predictionRb.linearVelocity.sqrMagnitude < 0.0001f)
                 {
                     didLand = true;
                     break;
                 }
 
-                // A shot into a bottomless gap never comes to rest - bail once it's fallen
-                // past the fall-reset threshold instead of burning the whole step budget.
                 if (pos.y < fallResetY) break;
             }
 
@@ -2953,8 +2200,6 @@ namespace KineticEnergy.Player
             return landing;
         }
 
-        // The stopper's contact lives in the isolated physics scene - walk the proxy list
-        // back to the real scene collider it mirrors.
         Collider ResolvePredictionSource(Collider proxyCollider)
         {
             if (proxyCollider == null) return null;
@@ -2971,8 +2216,7 @@ namespace KineticEnergy.Player
 
             if (!predictionSceneReady)
             {
-                // A genuinely separate PhysicsScene - manual Simulate() calls on it cannot
-                // possibly touch the real player or camera, no matter how long a prediction runs.
+
                 predictionScene = SceneManager.CreateScene(
                     "KineticEnergyPredictionPhysics_" + (predictionSceneCounter++),
                     new CreateSceneParameters(LocalPhysicsMode.Physics3D));
@@ -2995,14 +2239,9 @@ namespace KineticEnergy.Player
             predictionCloneCollider = predictionClone.AddComponent<BoxCollider>();
             if (boxCollider != null) predictionCloneCollider.size = boxCollider.size;
 
-            // Stops dead on first contact, mirroring the real cube's crash-stick.
             predictionStopper = predictionClone.AddComponent<PredictionCloneStopper>();
         }
 
-        // Colliders can't be shared across PhysicsScenes - build static-geometry stand-ins in
-        // the isolated scene, paired with their sources so SyncPredictionGeometry can mirror
-        // moves/resizes/active-state flips every prediction frame. Inactive objects are
-        // included on purpose, ready for anything that gets enabled later.
         void BuildPredictionGeometryProxies()
         {
             Collider[] colliders = FindObjectsByType<Collider>(FindObjectsInactive.Include);
@@ -3010,16 +2249,12 @@ namespace KineticEnergy.Player
             foreach (Collider col in colliders)
             {
                 if (col == boxCollider) continue;
-                // Dynamic bodies are excluded, but KINEMATIC ones (moving platforms) are
-                // genuine landable geometry - their proxies mirror position every frame.
+
                 Rigidbody colBody = col.attachedRigidbody;
                 if (colBody != null && !colBody.isKinematic) continue;
-                // Marked colliders (the boundary cage) are invisible to the aim - the trail
-                // passes through and the reticle never focuses them.
+
                 if (col.GetComponentInParent<AimPreviewIgnored>() != null) continue;
-                // Trigger volumes (finish lines, beat regions) aren't solid ground. Target
-                // spheres are SOLID colliders, so they're included as ordinary geometry -
-                // the trail terminates on them and the reticle/camera focus them.
+
                 if (col.isTrigger) continue;
 
                 GameObject proxy = new GameObject("PredictionGeometryProxy");
@@ -3041,7 +2276,7 @@ namespace KineticEnergy.Player
                 }
                 else if (col is CapsuleCollider)
                 {
-                    // Cylinder primitives (turrets, laser beams' cousins) carry capsules.
+
                     entry.proxyCapsule = proxy.AddComponent<CapsuleCollider>();
                 }
                 else if (col is MeshCollider meshCol)
@@ -3066,8 +2301,7 @@ namespace KineticEnergy.Player
         {
             public Collider source;
             public GameObject proxy;
-            // Set when the mirrored collider belongs to a moving platform - the proxy is
-            // then offset by that platform's travel over the previewed flight.
+
             public MovingPlatform mover;
             public BoxCollider proxyBox;
             public SphereCollider proxySphere;
@@ -3075,9 +2309,9 @@ namespace KineticEnergy.Player
             public MeshCollider proxyMesh;
         }
         readonly List<PredictionGeometryProxy> geometryProxies = new List<PredictionGeometryProxy>();
-        // How far ahead the mover proxies are placed for the CURRENT prediction pass.
+
         float predictionLeadSeconds;
-        bool predictionHasMovers; // skips the second pass entirely in scenes without movers
+        bool predictionHasMovers;
 
         void SyncPredictionGeometry()
         {
@@ -3097,14 +2331,7 @@ namespace KineticEnergy.Player
         void MirrorGeometryProxy(PredictionGeometryProxy entry)
         {
             Transform sourceTransform = entry.source.transform;
-            // A MOVING platform is mirrored where it WILL BE when this shot arrives, not
-            // where it is now - so the trail and cursor settle on the platform's future
-            // position, which is exactly what its ghost draws. The lead uses the previous
-            // frame's flight estimate (the same figure the ghost and lead arrow use).
-            // ...but NOT the platform being stood on. That one carries the player with it,
-            // so it is never an obstacle ahead - leading it planted a phantom copy of the
-            // floor above (or through) the player and every shot crashed straight into it
-            // instead of reaching the target.
+
             Vector3 leadOffset = Vector3.zero;
             if (entry.mover != null && predictionLeadSeconds > 0f && entry.mover != GroundPlatform)
             {
@@ -3138,8 +2365,6 @@ namespace KineticEnergy.Player
             bool sourceSolid = entry.source.enabled && entry.source.gameObject.activeInHierarchy;
             if (entry.proxy.activeSelf != sourceSolid) entry.proxy.SetActive(sourceSolid);
         }
-
-        // ---------- Controls text ----------
 
         void WriteControlsText()
         {
@@ -3184,3 +2409,4 @@ namespace KineticEnergy.Player
         }
     }
 }
+

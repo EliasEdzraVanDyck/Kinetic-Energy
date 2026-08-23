@@ -1,11 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // The purple challenge hazard: any player contact raises PlayerTouched - the challenge
-    // stage controller respawns the player and resets every hazard. Optionally creeps along
-    // the level at moveSpeed (the chasing-wall stage); seal walls leave it at 0.
+
     public class DeathWall : MonoBehaviour
     {
         [Tooltip("Metres per second the wall advances along Move Direction. 0 = a static wall. With Move Acceleration set, this is the STARTING speed.")]
@@ -17,11 +15,8 @@ namespace KineticEnergy.Level
         [Tooltip("World-space direction of travel (normalised at use).")]
         public Vector3 moveDirection = Vector3.right;
 
-        // Live speed - starts at moveSpeed and grows by moveAcceleration. Reset with the
-        // wall's position, so a retry always faces the chase at its opening pace.
         float currentSpeed;
 
-        // Raised once per touch with the wall itself; the stage controller subscribes.
         public static event System.Action<DeathWall> PlayerTouched;
 
         Rigidbody rb;
@@ -35,9 +30,6 @@ namespace KineticEnergy.Level
             CaptureStart();
         }
 
-        // The start pose may be needed before Awake has run - the stage controller resets
-        // walls that begin the scene deactivated (their Awake is deferred until first
-        // activation, and a blind reset would send them to the world origin).
         void CaptureStart()
         {
             if (startCaptured) return;
@@ -48,8 +40,7 @@ namespace KineticEnergy.Level
         void FixedUpdate()
         {
             if (moveSpeed <= 0f && moveAcceleration <= 0f) return;
-            // A world mover: advances on WorldMotionTime, so the player's aim slow-mo
-            // never freezes the threat (the standing rule for every non-player mover).
+
             float dt = WorldMotionTime.FixedDeltaTime;
             currentSpeed += moveAcceleration * dt;
             if (maxMoveSpeed > 0f) currentSpeed = Mathf.Min(currentSpeed, maxMoveSpeed);
@@ -62,7 +53,7 @@ namespace KineticEnergy.Level
         public void ResetToStart()
         {
             CaptureStart();
-            currentSpeed = moveSpeed; // the chase restarts at its opening pace
+            currentSpeed = moveSpeed;
             if (rb == null) rb = GetComponent<Rigidbody>();
             if (rb != null) rb.position = startPosition;
             transform.position = startPosition;
@@ -75,3 +66,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

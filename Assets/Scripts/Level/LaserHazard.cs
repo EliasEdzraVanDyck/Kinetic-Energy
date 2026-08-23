@@ -1,14 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // A laser beam that HURTS instead of killing: touching it shoves the player, drains
-    // energy and locks launching for a moment - exactly what an enemy body-check or an
-    // enemy projectile does. Sits on the gate's beam root in place of DamageWalls, so a
-    // mistimed run costs you a chunk of tank and your position instead of the whole run.
-    //
-    // Works as a solid collider or a trigger volume alike (the beams are kinematic).
+
     public class LaserHazard : MonoBehaviour
     {
         [Tooltip("Impulse applied to the player on contact. Softer than an enemy projectile's 22 - a beam nudges you off course rather than throwing you.")]
@@ -44,11 +39,6 @@ namespace KineticEnergy.Level
             TryHit(other);
         }
 
-        // PUBLIC because the player dispatches hits here too: on a slab that is part of a
-        // COMPOUND rigidbody (the rotating walls' damage edges - the wall root carries the
-        // Rigidbody), Unity delivers collision messages to the root, so the handlers below
-        // never fire. The player's own OnCollisionEnter always fires, and calls in through
-        // this. retriggerDelay makes the double delivery on ordinary slabs harmless.
         public void TryHit(Collider other)
         {
             if (Time.unscaledTime < nextHitTime) return;
@@ -56,11 +46,6 @@ namespace KineticEnergy.Level
             if (player == null) return;
             nextHitTime = Time.unscaledTime + Mathf.Max(retriggerDelay, 0.05f);
 
-            // Thrown BACK the way you came. Pushing "away from the beam" looked right on
-            // paper but a fast launch is already past the beam's centre by the time the
-            // hit registers, so that vector pointed forwards and the laser flung the
-            // player THROUGH the gate. Reversing their travel always reads as being
-            // stopped. Read before ApplyEnemyHit, which wipes the velocity.
             Rigidbody body = other.attachedRigidbody;
             Vector3 travel = body != null ? body.linearVelocity : Vector3.zero;
             travel.y = 0f;
@@ -72,7 +57,7 @@ namespace KineticEnergy.Level
             }
             else
             {
-                // Standing in the beam: no travel to reverse, so fall back to the geometry.
+
                 Collider ownCollider = GetComponentInChildren<Collider>();
                 Vector3 away = ownCollider != null
                     ? other.bounds.center - ownCollider.ClosestPoint(other.bounds.center)
@@ -83,9 +68,8 @@ namespace KineticEnergy.Level
 
             Vector3 shove = Vector3.Lerp(back, Vector3.up, Mathf.Clamp01(upwardBias)).normalized;
 
-            // canEmptyRespawn false: a hazard shoves and drains, but never ends the run -
-            // draining the last drop leaves the player at zero, alive, to walk it off.
             player.ApplyEnemyHit(shove * knockbackForce, energyDrain, launchLockSeconds, canEmptyRespawn: false);
         }
     }
 }
+

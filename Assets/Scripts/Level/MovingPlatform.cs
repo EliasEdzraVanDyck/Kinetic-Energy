@@ -1,17 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // A platform that ping-pongs between its placed position and placedPosition + moveOffset.
-    // lapSeconds is the time for one FULL lap - there AND back.
-    //
-    // While the player is in the midair aim, a blue arrow grows out of the platform's
-    // centre to the exact spot that centre will occupy when the player's currently
-    // previewed shot lands (the lead time updates live with the aim's predicted flight
-    // duration) - aim at the arrow's TIP and you and the platform arrive together. The
-    // arrow follows the platform's real ping-pong maths, so it stays honest across
-    // direction reversals too.
+
     public class MovingPlatform : MonoBehaviour
     {
         [Tooltip("Where the platform travels to, relative to its placed position.")]
@@ -28,9 +20,7 @@ namespace KineticEnergy.Level
         Vector3 startPosition;
         KineticCubeController player;
         Rigidbody body;
-        // The platform's own clock, advanced by WorldMotionTime - the project-wide rule
-        // for every non-player moving object: follows the bullet-time while aiming, does
-        // NOT accelerate with a launch's speed-up, and freezes cleanly through pauses.
+
         float clock;
         Transform arrowRoot;
         Transform shaft;
@@ -44,10 +34,6 @@ namespace KineticEnergy.Level
             startPosition = transform.position;
             player = FindAnyObjectByType<KineticCubeController>();
 
-            // A KINEMATIC, INTERPOLATED rigidbody drives the motion - moving a plain
-            // transform teleports once per physics tick with nothing drawn in between,
-            // which made the whole scene appear to vibrate while riding. Added at runtime
-            // so existing prefab instances need no editing.
             body = GetComponent<Rigidbody>();
             if (body == null) body = gameObject.AddComponent<Rigidbody>();
             body.isKinematic = true;
@@ -57,23 +43,17 @@ namespace KineticEnergy.Level
             BuildArrow();
         }
 
-        // The platform's velocity this physics tick - the player's movement code reads it
-        // (via the ground check's hit collider) and adds it to his own velocity, which is
-        // how the carry stays perfectly smooth: it rides the rigidbody interpolation
-        // instead of teleporting positions.
         public Vector3 CurrentVelocity { get; private set; }
 
         void FixedUpdate()
         {
             clock += WorldMotionTime.FixedDeltaTime;
             Vector3 target = CentreAt(clock);
-            // Divided by the SCALED step so a carried rider covers the same per-tick
-            // distance as the platform, whatever the current time scale.
+
             CurrentVelocity = (target - body.position) / Time.fixedDeltaTime;
             body.MovePosition(target);
         }
 
-        // Deterministic ping-pong: placed position -> +offset -> back, over lapSeconds.
         Vector3 CentreAt(float time)
         {
             if (lapSeconds <= 0.01f) return startPosition;
@@ -81,16 +61,9 @@ namespace KineticEnergy.Level
             return startPosition + moveOffset * t01;
         }
 
-        // Draws ONLY the part of the ghost that jubts out past the platform. When the lead
-        // is shorter than the platform is long, a full-size ghost sits inside the original
-        // and the two transparent boxes tear through each other - so the ghost is TRIMMED
-        // along its direction of travel and pushed up against the platform's far face. The
-        // slab you see is exactly the new ground the platform is about to cover. Once the
-        // lead exceeds the platform's own length there is nothing to trim and it becomes a
-        // whole second platform again.
         void ShapeGhost(Vector3 direction, float length)
         {
-            // Travel is along one of the platform's own axes - trim that one.
+
             Vector3 localDirection = transform.InverseTransformDirection(direction);
             int axis = 0;
             if (Mathf.Abs(localDirection.y) > Mathf.Abs(localDirection[axis])) axis = 1;
@@ -103,9 +76,6 @@ namespace KineticEnergy.Level
             Vector3 scale = fullScale;
             scale[axis] = thickness;
 
-            // Far face of the platform, then half the slab - so the ghost begins exactly
-            // where the platform ends. The small nudge keeps those two faces off the same
-            // plane, which would otherwise z-fight.
             const float seamNudge = 0.02f;
             Vector3 centre = transform.position
                 + direction * (length + fullThickness * 0.5f - thickness * 0.5f + seamNudge);
@@ -114,9 +84,6 @@ namespace KineticEnergy.Level
             ghost.localScale = scale;
         }
 
-        // How far this platform will have travelled in `seconds` from now. The landing
-        // PREDICTION shifts its stand-in for this platform by exactly this, so the trail and
-        // cursor land where the platform will actually be - which is what the ghost draws.
         public Vector3 LeadOffset(float seconds)
         {
             return CentreAt(clock + seconds) - CentreAt(clock);
@@ -126,30 +93,18 @@ namespace KineticEnergy.Level
         {
             if (arrowRoot == null) return;
 
-            // Nothing to show for the platform being RIDDEN: it carries the player along,
-            // so its future position is not somewhere to aim at - and the prediction
-            // deliberately leaves this one where it is for the same reason.
             bool show = player != null && player.IsAirAiming && player.GroundPlatform != this;
             if (show)
             {
-                // Endpoint = this centre's position at the moment the previewed shot lands.
-                // The platform runs on REAL time, so the lead uses the flight's estimated
-                // real-world duration (the prediction itself is in game-time).
-                // Measured as a DISPLACEMENT from where the platform is drawn, not as an
-                // absolute position on the physics clock: the body renders interpolated
-                // between fixed steps, so an absolute centre would sit a fraction of a tick
-                // away from the platform you can actually see. This is also the exact
-                // expression the landing prediction offsets its stand-in by, so the ghost
-                // and the cursor can never drift apart.
+
                 Vector3 current = transform.position;
                 Vector3 future = current + LeadOffset(player.PredictedFlightRealSecondsLive);
                 Vector3 delta = future - current;
                 float length = delta.magnitude;
-                if (length < 0.05f) show = false; // effectively stationary over the lead time
+                if (length < 0.05f) show = false;
                 else
                 {
-                    // CENTRE to CENTRE: the arrow starts inside the platform and ends inside
-                    // the ghost, so it reads as one object pointing at the other.
+
                     arrowRoot.SetPositionAndRotation(current, Quaternion.LookRotation(delta / length, Vector3.up));
                     shaft.localScale = new Vector3(arrowThickness, arrowThickness, length);
                     shaft.localPosition = new Vector3(0f, 0f, length * 0.5f);
@@ -163,8 +118,6 @@ namespace KineticEnergy.Level
             if (ghost != null && ghost.gameObject.activeSelf != show) ghost.gameObject.SetActive(show);
         }
 
-        // Built in code so the prefab stays a single self-contained piece. No colliders on
-        // the arrow - it must never block flights or join the landing prediction.
         void BuildArrow()
         {
             arrowRoot = new GameObject("MoveLeadArrow").transform;
@@ -190,11 +143,6 @@ namespace KineticEnergy.Level
             BuildGhost();
         }
 
-        // A see-through copy of the platform, parked where it will be when the previewed
-        // shot arrives. NO COLLIDER: the flight must pass straight through it, and the
-        // landing prediction already accounts for the platform's travel by moving its own
-        // stand-in (see MovingPlatform.LeadOffset), so the cursor settles on the ghost
-        // without the ghost itself being solid.
         void BuildGhost()
         {
             GameObject ghostGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -236,3 +184,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Text;
 using UnityEngine;
@@ -7,23 +7,13 @@ using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // Carries the tester's variant choice from the menu (or pause menu) into the Gauntlet
-    // scene. Static so it survives the scene load; consumed once by GauntletRunLogger.
+
     public static class SlowdownVariantSelection
     {
-        // null = no choice pending, keep whatever the scene's Player was saved with.
+
         public static bool? PendingVariantB;
     }
 
-    // The Gauntlet's instrumentation (one per scene). Applies the chosen slowdown variant to
-    // the Player, then records per run:
-    //   - total slow-time used, and slow-time used per beat
-    //   - number of separate midair aims opened, per beat
-    //   - how often the slowdown resource hit zero, and at which beat
-    //   - attempts per beat (re-entering a beat's start region = a fresh attempt)
-    //   - energy remaining at the finish line, and total completion time
-    // Everything is written to the Unity log AND appended as one CSV row per run to
-    // gauntlet_runs.csv in Application.persistentDataPath.
     public class GauntletRunLogger : MonoBehaviour
     {
         [Tooltip("The scene's Player - wired by the setup script.")]
@@ -64,8 +54,7 @@ namespace KineticEnergy.Level
             {
                 controller.MidairAimOpened += OnMidairAimOpened;
                 controller.SlowdownDepleted += OnSlowdownDepleted;
-                // Tuning parity is the whole experiment's precondition - always log the
-                // numbers this run actually used.
+
                 Debug.Log($"GauntletRun: variant={(variantB ? "B (energy tank)" : "A (aim budget)")}, "
                     + $"aimBudgetSeconds={controller.aimBudgetSeconds}, tankDrainPerSecond={controller.tankDrainPerSecond}, "
                     + $"startingEnergy={controller.startingEnergyFraction}");
@@ -90,7 +79,6 @@ namespace KineticEnergy.Level
         {
             if (controller == null || runCompleted) return;
 
-            // Attribute slow-time to whichever beat is currently being attempted.
             float total = controller.SlowdownSecondsUsed;
             float delta = total - lastSlowdownTotal;
             if (delta > 0f) slowTimePerBeat[Mathf.Clamp(currentBeat, 0, BeatCount)] += delta;
@@ -115,7 +103,6 @@ namespace KineticEnergy.Level
             if (!runCompleted) resourceZeroPerBeat[Mathf.Clamp(currentBeat, 0, BeatCount)]++;
         }
 
-        // Called by the finish line. Logs the run summary and appends the CSV row.
         public void CompleteRun()
         {
             if (runCompleted || controller == null) return;
@@ -176,3 +163,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

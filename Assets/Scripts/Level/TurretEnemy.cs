@@ -1,13 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // A stationary TURRET: a cylinder body mounted on a wall or platform (its placement/
-    // rotation is set in the editor - it never moves). Player inside detection range ->
-    // warning flash -> fires the same red-capsule EnemyProjectile as the flying enemy,
-    // with the same intercept lead. Launching into it kills it; player respawn revives it.
-    // Windup/cooldown run on WorldMotionTime, same rule as every non-player actor.
+
     public class TurretEnemy : MonoBehaviour
     {
         [Header("Attack")]
@@ -62,9 +58,6 @@ namespace KineticEnergy.Level
             float dt = WorldMotionTime.FixedDeltaTime;
             if (cooldownRemaining > 0f) cooldownRemaining -= dt;
 
-            // Mid-burst: the shots walk out on their own spacing. The colour is held SOLID
-            // rather than flashing - exactly as the hunter goes solid once it commits.
-            // Blinking is the warning; once the shots are leaving, the warning is over.
             if (bursting)
             {
                 nextShotTimer -= dt;
@@ -98,13 +91,11 @@ namespace KineticEnergy.Level
         {
             windingUp = false;
             bursting = true;
-            if (bodyRenderer != null) bodyRenderer.material.color = windUpColor; // committed - held solid
+            if (bodyRenderer != null) bodyRenderer.material.color = windUpColor;
             shotsLeftInBurst = Mathf.Max(shotsPerBurst, 1);
-            nextShotTimer = 0f; // the first shot leaves the instant the windup ends
+            nextShotTimer = 0f;
         }
 
-        // Spacing is derived so the whole burst spans burstSeconds however many shots it
-        // holds - a single-shot burst has nothing to space and simply fires.
         float BurstShotInterval => shotsPerBurst > 1
             ? Mathf.Max(burstSeconds, 0f) / (shotsPerBurst - 1)
             : 0f;
@@ -119,7 +110,6 @@ namespace KineticEnergy.Level
                 return;
             }
 
-            // Burst spent - back to rest, and the cooldown covers the whole volley.
             bursting = false;
             cooldownRemaining = attackCooldown;
             if (bodyRenderer != null) bodyRenderer.material.color = restColor;
@@ -131,8 +121,6 @@ namespace KineticEnergy.Level
             return (player.transform.position - transform.position).sqrMagnitude <= detectionRadius * detectionRadius;
         }
 
-        // Launches ONE projectile and nothing else - ending the attack and starting the
-        // cooldown belong to the burst, which only finishes on its last shot.
         void Fire()
         {
             if (player == null) return;
@@ -150,8 +138,6 @@ namespace KineticEnergy.Level
         [Tooltip("Minimum launch-energy fraction a kill needs - a cheaper hit just registers as a crash. 0 = any launch kills.")]
         [Range(0f, 1f)] public float minKillEnergyFraction = 0f;
 
-        // The energy-tier hook: repaints the turret's rest colour with the tier's, keeping
-        // the flash logic intact (it lerps from restColor, so the tell adapts too).
         public void SetTier(Color tierColor)
         {
             if (bodyRenderer == null) bodyRenderer = GetComponentInChildren<Renderer>();
@@ -159,7 +145,6 @@ namespace KineticEnergy.Level
             if (bodyRenderer != null && !windingUp && !bursting) bodyRenderer.material.color = tierColor;
         }
 
-        // Same kill/respawn contract as the other enemies.
         public void OnHitByLaunch()
         {
             gameObject.SetActive(false);
@@ -178,3 +163,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

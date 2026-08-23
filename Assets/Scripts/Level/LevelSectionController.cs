@@ -1,16 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // The element-test level's section index. Each section introduces ONE kind of
-    // platform, obstacle or enemy; the pause menu's Sections screen jumps straight to any
-    // of them so a single element can be played over and over without replaying the run.
-    //
-    // Jumping does not reload the scene - it teleports the player and REPOINTS every
-    // hazard's respawn at that section, so dying keeps you where you were testing.
+
     public class LevelSectionController : MonoBehaviour
     {
         [Serializable]
@@ -38,14 +33,11 @@ namespace KineticEnergy.Level
         {
             controller = FindAnyObjectByType<KineticCubeController>();
             CurrentSection = Mathf.Clamp(startingSection, 0, Mathf.Max(sections.Length - 1, 0));
-            // The starting section still repoints the hazards, so a first-section death
-            // does not fall back to whatever the prefab happened to carry.
+
             PointHazardsAt(CurrentSection);
-            CaptureEnemySections(); // before anything can die or be moved
+            CaptureEnemySections();
             ResetCheckpoints();
 
-            // An attack that empties the tank sends the player back to their checkpoint -
-            // with nothing left to launch with there is no way to recover in place.
             if (controller != null) controller.EnergyEmptiedByHit += RespawnAtCheckpoint;
         }
 
@@ -66,15 +58,6 @@ namespace KineticEnergy.Level
             ResetCheckpoints();
         }
 
-        // Arriving at a checkpoint hands you the energy that checkpoint COSTS. The price is
-        // the section's entry fee, so respawning under it would strand you: no launch big
-        // enough to press the pad you are standing on, and none to reach the next one.
-        // The figure comes from the Checkpoint prefab's own public minActivationEnergyFraction,
-        // so retuning a checkpoint in the inspector retunes the spawn with it - and every
-        // scene using the prefab follows the same rule for free.
-        //
-        // RespawnAtPoint has already reset the tank to startingEnergyFraction by the time
-        // this runs, so it only ever raises: a cheap checkpoint never lowers a full tank.
         void GrantCheckpointEnergy(Transform spawn)
         {
             if (controller == null || spawn == null) return;
@@ -96,22 +79,15 @@ namespace KineticEnergy.Level
             DamageWalls.PlayerRespawned -= OnPlayerRespawned;
         }
 
-        // A hazard death restores the level the same way a section jump does - which means
-        // the SAME rule about what comes back, so the enemies behind you stay cleared.
         void OnPlayerRespawned()
         {
-            // A hazard death routes through DamageWalls, which calls RespawnAtPoint itself
-            // and then fires this - so the checkpoint's grant has to be applied here too,
-            // or falling into the floor would be the one way to arrive underfunded.
+
             if (controller == null) controller = FindAnyObjectByType<KineticCubeController>();
             GrantCheckpointEnergy(ActiveRespawn);
             ResetLevelState();
             ResetCheckpoints();
         }
 
-        // Every pad comes back for the retry EXCEPT the one you are respawning at - that
-        // one is already yours, so it stays claimed and stays hidden. Run on a respawn and
-        // on a section jump alike.
         public void ResetCheckpoints()
         {
             foreach (Checkpoint checkpoint in FindObjectsByType<Checkpoint>(FindObjectsInactive.Include))
@@ -120,8 +96,6 @@ namespace KineticEnergy.Level
             }
         }
 
-        // Called by the pause menu's per-section buttons (the index arrives as a string,
-        // which is what a UnityEvent can carry from a persistent listener).
         public void GoToSection(string index)
         {
             if (!int.TryParse(index, out int parsed)) return;
@@ -139,20 +113,13 @@ namespace KineticEnergy.Level
             ResetCheckpoints();
 
             if (controller == null) controller = FindAnyObjectByType<KineticCubeController>();
-            // The controller's own respawn does the whole job: position, velocity, flight
-            // state and the camera pose all reset exactly as they do on a hazard death.
+
             controller?.RespawnAtPoint(section.spawnPoint.position);
             GrantCheckpointEnergy(section.spawnPoint);
 
             ResetLevelState();
         }
 
-        // Enemies return to their spawn and live shots clear, so a section is always entered
-        // in its opening state rather than mid-fight from a previous visit.
-        //
-        // Ground already covered STAYS covered: only enemies belonging to the active section
-        // or a later one come back. Reviving the ones behind you would mean re-clearing a
-        // section you had already beaten every time you died further along.
         public void ResetLevelState()
         {
             int activeIndex = ActiveSectionIndex;
@@ -170,22 +137,17 @@ namespace KineticEnergy.Level
                 if (ShouldRevive(turret, activeIndex)) turret.ResetToSpawn();
             }
 
-            // Neither of these is worth preserving across a death.
             foreach (EnemyProjectile shot in FindObjectsByType<EnemyProjectile>(FindObjectsInactive.Exclude)) Destroy(shot.gameObject);
             foreach (RotatingWall wall in FindObjectsByType<RotatingWall>(FindObjectsInactive.Include)) wall.ResetToStart();
         }
 
         bool ShouldRevive(Component enemy, int activeIndex)
         {
-            // Anything that appeared after the level started is unknown to the map, so it
-            // is revived rather than silently left dead.
+
             if (!enemySection.TryGetValue(enemy, out int ownerIndex)) return true;
             return ownerIndex >= activeIndex;
         }
 
-        // Which section owns a point: the LAST section whose spawn it has reached. The
-        // course runs along +x with the section spawns in order, so this reads as "how far
-        // along the run does this sit".
         int SectionIndexFor(Vector3 position)
         {
             int index = 0;
@@ -197,8 +159,6 @@ namespace KineticEnergy.Level
             return index;
         }
 
-        // Driven by where the player actually comes back to - which a checkpoint can change
-        // without any menu jump, so CurrentSection alone is not enough.
         int ActiveSectionIndex
         {
             get
@@ -212,8 +172,6 @@ namespace KineticEnergy.Level
             }
         }
 
-        // Captured at level start, BEFORE anything can have died or been flung somewhere
-        // else - a corpse's last position is no guide to which section it belonged to.
         void CaptureEnemySections()
         {
             enemySection.Clear();
@@ -239,8 +197,6 @@ namespace KineticEnergy.Level
             SetActiveRespawn(sections[index].spawnPoint);
         }
 
-        // The single place "where back is" lives - claimed either by touching a checkpoint
-        // pad or by jumping to a section from the pause menu.
         public void SetActiveRespawn(Transform spawn)
         {
             if (spawn == null || hazards == null) return;
@@ -254,3 +210,4 @@ namespace KineticEnergy.Level
         public Transform ActiveRespawn { get; private set; }
     }
 }
+

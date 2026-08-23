@@ -1,15 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // A checkpoint you have to EARN: a big button set into a frame that only depresses for
-    // a committed arrival - a ground pound, or a launch coming down steeply enough. Skim
-    // across it on a flat trajectory and nothing happens.
-    //
-    // Exactly one checkpoint is ever pressed. Claiming this one raises every other, and a
-    // respawn or a jump from the Sections screen leaves the section's own button already
-    // sunk, so the button state always reads as "here is where you come back to".
+
     public class Checkpoint : MonoBehaviour
     {
         [Tooltip("Where a death sends the player once this checkpoint is claimed. Empty = this object's own position.")]
@@ -57,13 +51,12 @@ namespace KineticEnergy.Level
         void Start()
         {
             sections = FindAnyObjectByType<LevelSectionController>();
-            ApplyPressedPose(true); // the level opens with the buttons already in position
+            ApplyPressedPose(true);
         }
 
         void Update()
         {
-            // Eased on UNSCALED time so the button still travels while the midair aim's
-            // bullet-time is running.
+
             Vector3 target = raisedLocalPosition + (claimed ? Vector3.down * pressDepth : Vector3.zero);
             Button.localPosition = Vector3.MoveTowards(Button.localPosition, target, pressSpeed * Time.unscaledDeltaTime);
         }
@@ -74,30 +67,19 @@ namespace KineticEnergy.Level
             KineticCubeController player = collision.collider.GetComponent<KineticCubeController>();
             if (player == null || !HitTheButton(collision) || !ArrivedSteeplyEnough(player)) return;
 
-            // Claiming NORMALISES the tank to this checkpoint's own price - the same figure
-            // a respawn here hands you - so the section that follows always begins from an
-            // identical tank, however rich or poor the approach happened to be. Set
-            // outright, so a fat approach is levelled down as well as a thin one topped up.
-            //
-            // The COMBO is deliberately untouched: the chain is a reward for how you have
-            // been playing, not part of the checkpoint's state, so it carries through the
-            // press intact.
             player.SetEnergyTo(minActivationEnergyFraction);
 
             if (sections == null) sections = FindAnyObjectByType<LevelSectionController>();
             if (sections == null)
             {
-                SetClaimed(true); // no section index in this scene - still show the press
+                SetClaimed(true);
                 return;
             }
-            // The controller owns "where back is", and its reset presses THIS button while
-            // raising every other - so the two can never disagree about which is active.
+
             sections.SetActiveRespawn(RespawnTarget);
             sections.ResetCheckpoints();
         }
 
-        // The frame and the button are both solid and both report through this component
-        // (the frame carries the body), so the button face has to be identified explicitly.
         bool HitTheButton(Collision collision)
         {
             if (buttonCollider == null) return true;
@@ -108,30 +90,19 @@ namespace KineticEnergy.Level
             return false;
         }
 
-        // A ground pound always counts. Otherwise the shot has to be coming DOWN: the
-        // approach direction is measured against straight down, so a flat skim across the
-        // pad leaves the button up however fast it was.
         bool ArrivedSteeplyEnough(KineticCubeController player)
         {
-            // The energy gate applies to EVERY arrival, the pound included - the pound
-            // waives the angle test, never the price. ArrivalEnergySpent rather than
-            // LastLaunchEnergySpent: the player's own crash handler zeroes the latter on a
-            // pound, and whether it has already run when this fires is undefined.
+
             if (player.ArrivalEnergySpent < minActivationEnergyFraction - 0.0001f) return false;
 
             if (player.LastCrashWasPound) return true;
-            // The press must be EARNED with a midair aim: a grounded launch that happens to
-            // arc down steeply, or a straight up-charge falling back onto its own pad, is
-            // not a deliberate press and leaves the button up (direct request). The pound
-            // above is the one non-aim press.
+
             if (player.LastLaunchKind != KineticCubeController.LaunchKind.AirAim) return false;
             Vector3 approach = player.PreCollisionVelocity;
             if (approach.sqrMagnitude < 0.01f) return false;
             return Vector3.Dot(approach.normalized, Vector3.down) >= minimumImpactSteepness;
         }
 
-        // The energy-tier hook: the idle button wears the tier colour (pressed keeps its
-        // own green - "claimed" must stay one colour everywhere).
         public void SetTier(Color tierColor)
         {
             idleColor = tierColor;
@@ -153,12 +124,8 @@ namespace KineticEnergy.Level
             }
             if (buttonRenderer != null) buttonRenderer.material.color = claimed ? pressedColor : idleColor;
 
-            // A pressed button stops being an obstacle: its collider switches off, so
-            // launches and the aim prediction pass straight through where it stood (the
-            // prediction mirrors disabled colliders as absent, so the cursor agrees). The
-            // FRAME stays solid, so the player still rests over the top of it rather than
-            // dropping through the checkpoint.
             if (buttonCollider != null) buttonCollider.enabled = !claimed;
         }
     }
 }
+

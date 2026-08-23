@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
@@ -6,14 +6,7 @@ using KineticEnergy.Player;
 
 namespace KineticEnergy.Camera
 {
-    // The depth-perception playtest harness: holds the three aim-camera presets (A/B/C),
-    // applies the active one to ThirdPersonOrbitCamera, and cycles A -> B -> C -> A on
-    // V / D-pad Right. Cycling is blocked while any aim/charge is open so the camera never
-    // pops mid-aim. Also owns the small bottom-right HUD tag naming the active variant
-    // (built at runtime, so every scene gets it without per-scene UI edits).
-    //
-    // Lives on the Player prefab. Scene references (camera rig, controller) are found at
-    // runtime - prefabs can't hold cross-hierarchy references.
+
     public class AimCameraVariantController : MonoBehaviour
     {
         [Tooltip("OFF: this scene is not a camera playtest - the variant is locked to whatever currentVariant says (A for the economy scene), the hotkeys do nothing, and no HUD tag or pause selector shows.")]
@@ -31,14 +24,11 @@ namespace KineticEnergy.Camera
         Text hudLabel;
         Text hudEnergyNote;
 
-        // Raised on every variant change - the pause menu label and the logger listen.
         public event Action<AimCameraVariant, AimCameraPreset> VariantChanged;
 
         public AimCameraPreset ActivePreset => PresetFor(currentVariant);
         public string CurrentLabel => LabelFor(currentVariant, ActivePreset);
 
-        // The controller-energy warning, shown as its OWN text element ABOVE the variant
-        // label (HUD and pause menu alike) - empty for variants with the normal dial.
         public string EnergyControlsNote => ActivePreset != null && ActivePreset.UsesFreeLook
             ? "Controller energy: RB adds / LB removes (this variant only)"
             : "";
@@ -66,12 +56,9 @@ namespace KineticEnergy.Camera
 
         void Update()
         {
-            if (!variantSwitchingEnabled) return; // locked scene (economy test) - no hotkeys
-            if (Time.timeScale <= 0f) return; // paused - the pause menu button handles it there
+            if (!variantSwitchingEnabled) return;
+            if (Time.timeScale <= 0f) return;
 
-            // Shoulder swap (Q / Right Stick Click) - the standard third-person-shooter
-            // answer to "the player always hangs on one side". Deliberately works DURING
-            // the aim (that's its whole point) and is remembered between aims.
             if (currentVariant != AimCameraVariant.Baseline && cameraOrbit != null)
             {
                 bool swapPressed = (Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame)
@@ -79,8 +66,6 @@ namespace KineticEnergy.Camera
                 if (swapPressed) cameraOrbit.ToggleAimShoulder();
             }
 
-            // Variant CYCLING stays blocked during any aim/charge window - swapping the
-            // whole camera mid-aim pops.
             if (controller != null && controller.IsAimingOrCharging) return;
 
             bool forwardPressed = (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
@@ -91,8 +76,6 @@ namespace KineticEnergy.Camera
             else if (backPressed) CycleVariantBack();
         }
 
-        // Also wired to the pause menu's selector button (PauseController.OnCameraVariantClicked).
-        // The aim-window block lives HERE so the pause-menu path obeys it too.
         public void CycleVariant()
         {
             if (!variantSwitchingEnabled) return;
@@ -100,7 +83,6 @@ namespace KineticEnergy.Camera
             SetVariant((AimCameraVariant)(((int)currentVariant + 1) % 6));
         }
 
-        // C / D-pad Left steps BACK through the cycle - same aim-window block.
         public void CycleVariantBack()
         {
             if (!variantSwitchingEnabled) return;
@@ -134,14 +116,12 @@ namespace KineticEnergy.Camera
             return $"Variant {letter} - {name}";
         }
 
-        // Small, visually quiet tag in the bottom-right corner - it must never compete
-        // with the energy bar (top-right).
         void BuildHudTag()
         {
             GameObject root = new GameObject("AimCameraVariantTag");
             UnityEngine.Canvas canvas = root.AddComponent<UnityEngine.Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 40; // under the pause canvas
+            canvas.sortingOrder = 40;
             CanvasScaler scaler = root.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920f, 1080f);
@@ -162,7 +142,6 @@ namespace KineticEnergy.Camera
             hudLabel.color = new Color(1f, 1f, 1f, 0.55f);
             hudLabel.text = CurrentLabel;
 
-            // The controller-energy note sits in its OWN box directly above the label.
             GameObject noteGo = new GameObject("EnergyNote", typeof(RectTransform));
             noteGo.transform.SetParent(root.transform, false);
             RectTransform noteRect = noteGo.GetComponent<RectTransform>();
@@ -176,8 +155,9 @@ namespace KineticEnergy.Camera
             hudEnergyNote.font = hudLabel.font;
             hudEnergyNote.fontSize = 20;
             hudEnergyNote.alignment = TextAnchor.LowerRight;
-            hudEnergyNote.color = new Color(1f, 0.82f, 0.2f, 0.85f); // accent - it's a warning
+            hudEnergyNote.color = new Color(1f, 0.82f, 0.2f, 0.85f);
             hudEnergyNote.text = EnergyControlsNote;
         }
     }
 }
+

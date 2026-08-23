@@ -1,15 +1,8 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace KineticEnergy.Level
 {
-    // A laser GATE: two tall grey columns with red cylinder beams spanning between them,
-    // switching on and off on a settable cycle. While ON, touching a beam does exactly
-    // what touching a DamageWall does (the beams' root carries a DamageWalls component -
-    // respawn + full enemy reset). The columns themselves are ordinary solid geometry.
-    //
-    // The cycle clock runs on WorldMotionTime: the gate slows with the aim's bullet-time
-    // and ignores the launch game-speed-up, like every other non-player actor - so what
-    // you see while planning in slow-mo is exactly the rhythm you get.
+
     public class LaserWall : MonoBehaviour
     {
         [Tooltip("Seconds the beams stay ON per cycle.")]
@@ -37,9 +30,6 @@ namespace KineticEnergy.Level
 
         float clock;
 
-        // Beams are (re)built at RUNTIME from the public fields above, so beam count and
-        // radius are tunable in the Inspector without rebuilding the scene. Any baked
-        // beams under barsRoot are replaced.
         void Start()
         {
             if (barsRoot == null) return;
@@ -58,7 +48,7 @@ namespace KineticEnergy.Level
                 beam.name = "Beam" + i;
                 beam.transform.SetParent(barsRoot.transform, false);
                 beam.transform.localPosition = new Vector3(0f, height, 0f);
-                // Cylinder long axis is Y - rotate it to span the gate along Z.
+
                 beam.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
                 beam.transform.localScale = new Vector3(beamRadius * 2f, beamHalfLength, beamRadius * 2f);
                 if (beamMaterial != null) beam.GetComponent<Renderer>().sharedMaterial = beamMaterial;
@@ -77,3 +67,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

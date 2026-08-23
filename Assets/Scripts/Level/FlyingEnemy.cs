@@ -1,21 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // A FLYING enemy: drifts around a settable radius of its spawn point, and when the
-    // player comes inside its detection range it telegraphs (warning flash, like the
-    // ground enemy) and fires a red capsule projectile (EnemyProjectile) from its centre.
-    //
-    // The shot LEADS a moving player: at the moment of firing it solves the intercept
-    // point from the player's current velocity (ballistic - gravity included while the
-    // player is airborne) against the projectile's own travel speed, iteratively - so a
-    // player who keeps flying their current path gets hit exactly, and relaunching in
-    // time is the dodge. A standing player is simply shot where they stand.
-    //
-    // All movement, windup, and cooldown run on WorldMotionTime (min of scaled/unscaled):
-    // slowed by the aim's bullet-time, unaffected by the launch game-speed-up - the same
-    // rule as every other non-player mover. Launching INTO the flyer still kills it.
+
     public class FlyingEnemy : MonoBehaviour
     {
         [Header("Flight")]
@@ -86,11 +74,10 @@ namespace KineticEnergy.Level
         Vector3 currentTarget;
         float postFireHoldRemaining;
         float stunRemaining;
-        // Read by WeakSpotFlyingEnemy, which only widens its kill hitbox while staggered.
+
         public bool IsStunned => stunRemaining > 0f;
         Quaternion stunRotation = Quaternion.identity;
-        // The pose the stagger is ABOUT to slump into - read by the perch teleport, which
-        // fires before the next physics tick has actually applied the lean.
+
         public Quaternion StunPose => stunRotation;
         float pauseRemaining;
         FlyerState state = FlyerState.Patrol;
@@ -119,17 +106,13 @@ namespace KineticEnergy.Level
             float dt = WorldMotionTime.FixedDeltaTime;
             if (cooldownRemaining > 0f) cooldownRemaining -= dt;
 
-            // Staggered by a hit it survived: hangs exactly where it was, slumped forward,
-            // doing nothing at all until it shakes it off.
             if (stunRemaining > 0f)
             {
                 stunRemaining -= dt;
                 body.MoveRotation(stunRotation);
                 if (bodyRenderer != null)
                 {
-                    // Blue for the whole stun; in the final stretch it BLINKS blue<->red
-                    // (unscaled time, so the tell keeps flashing through bullet-time),
-                    // then hands back the rest colour the moment the stun expires.
+
                     if (stunRemaining <= 0f) bodyRenderer.material.color = restColor;
                     else if (stunRemaining <= stunBlinkSeconds)
                     {
@@ -144,8 +127,7 @@ namespace KineticEnergy.Level
             switch (state)
             {
                 case FlyerState.Patrol:
-                    // The post-shot hold: frozen outright - no drift, no turning, no fresh
-                    // windup. It has committed to the shot and has to sit in it.
+
                     if (postFireHoldRemaining > 0f)
                     {
                         postFireHoldRemaining -= dt;
@@ -163,8 +145,6 @@ namespace KineticEnergy.Level
                     break;
             }
         }
-
-        // ---------- Patrol ----------
 
         void UpdatePatrol(float dt)
         {
@@ -188,8 +168,7 @@ namespace KineticEnergy.Level
             else
             {
                 Vector3 nextPosition = position + toTarget / distance * step;
-                // Even a clear destination can have a wall across the way to it - the drift
-                // is checked step by step, and it re-picks rather than sliding into one.
+
                 if (avoidObstacles && !HasRoomAt(nextPosition, BodyRadius + 0.5f))
                 {
                     PickNewTarget();
@@ -217,14 +196,12 @@ namespace KineticEnergy.Level
                     return;
                 }
             }
-            // Boxed in on every try - hold station rather than pick a spot inside a wall.
+
             currentTarget = body != null ? body.position : transform.position;
         }
 
         float BodyRadius => transform.localScale.x * 0.5f;
 
-        // Clear air at a point? Its own body, the player and other flyers do not count as
-        // obstacles - only the level's geometry, which is what it must not drift into.
         bool HasRoomAt(Vector3 point, float radius)
         {
             foreach (Collider hit in Physics.OverlapSphere(point, radius,
@@ -239,25 +216,16 @@ namespace KineticEnergy.Level
             return true;
         }
 
-        // Turning is only ever toward where it is GOING (while patrolling) or toward the
-        // player (while winding up to shoot) - it never swings round to track an incoming
-        // player on its own. The hunch rides on top of whichever it is, so the body keeps
-        // its nose-down posture through every turn.
         void FaceTowards(Vector3 point, float dt)
         {
             Vector3 look = point - body.position;
-            // FLATTENED before the look rotation: the hunch is the body's ONE pitch. With
-            // the vertical component left in, flying down toward a waypoint stacked the
-            // descent's own tilt on top of the hunch (and climbing subtracted from it), so
-            // the lean visibly deepened and shallowed with the travel direction.
+
             look.y = 0f;
             if (look.sqrMagnitude < 0.001f) return;
             Quaternion target = Quaternion.LookRotation(look.normalized, Vector3.up)
                 * Quaternion.Euler(hunchPitchDegrees, 0f, 0f);
             body.MoveRotation(Quaternion.Slerp(body.rotation, target, turnSpeed * dt));
         }
-
-        // ---------- Attack ----------
 
         bool PlayerInRange()
         {
@@ -295,12 +263,6 @@ namespace KineticEnergy.Level
                 projectileEnergyDrain, projectileLaunchLock);
         }
 
-        // Iterative ballistic intercept: where will the player be when a shot travelling
-        // at projectileSpeed gets there? Converges in a handful of iterations. Uses the
-        // player's REAL velocity (zero while standing/frozen, ballistic while airborne).
-        // The projectile moves on WorldMotionTime while the player moves on scaled time,
-        // so during the launch speed-up its effective speed in GAME seconds shrinks by
-        // the timescale - divided out here so the lead stays exact.
         Vector3 PredictIntercept()
         {
             Vector3 basePosition = player.transform.position;
@@ -321,13 +283,9 @@ namespace KineticEnergy.Level
             return predicted;
         }
 
-        // ---------- Kill / respawn (same contract as the ground enemy) ----------
-
         [Tooltip("Minimum launch-energy fraction a kill needs - a cheaper hit staggers instead. 0 = any launch kills.")]
         [Range(0f, 1f)] public float minKillEnergyFraction = 0f;
 
-        // Whether a launch crash on the given collider may kill this flyer. The base
-        // flyer dies to any hit; the weak-spot variant only through its back cube.
         public virtual bool LaunchKillAllowedFor(Collider hitCollider) => true;
 
         public void OnHitByLaunch()
@@ -335,10 +293,6 @@ namespace KineticEnergy.Level
             gameObject.SetActive(false);
         }
 
-        // A launch that connected but NOT on a killing spot. The flyer is knocked out of
-        // whatever it was doing and left hanging, slumped forward - which is the whole
-        // point: the slump rolls its back uppermost, presenting the weak spot for the
-        // follow-up shot instead of leaving the player to chase a moving target.
         public void OnLaunchSurvived()
         {
             stunRemaining = stunSeconds;
@@ -347,14 +301,13 @@ namespace KineticEnergy.Level
             pauseRemaining = 0f;
             postFireHoldRemaining = 0f;
 
-            // Slumps from wherever it was already pointing, keeping its heading.
             Vector3 heading = body.rotation * Vector3.forward;
             heading.y = 0f;
             if (heading.sqrMagnitude < 0.001f) heading = Vector3.forward;
             stunRotation = Quaternion.LookRotation(heading.normalized, Vector3.up)
                 * Quaternion.Euler(stunLeanDegrees, 0f, 0f);
 
-            if (bodyRenderer != null) bodyRenderer.material.color = stunColor; // stunned reads BLUE from the first frame
+            if (bodyRenderer != null) bodyRenderer.material.color = stunColor;
         }
 
         public void ResetToSpawn()
@@ -372,3 +325,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

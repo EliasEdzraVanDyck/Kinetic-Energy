@@ -1,18 +1,13 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace KineticEnergy.UI
 {
-    // The player-facing camera speed factors, set by the pause menu's two sliders and
-    // read by ThirdPersonOrbitCamera every frame. ONE factor per device multiplies every
-    // form of camera speed that device drives (orbit, midair aim, grounded WASD aim),
-    // so the whole camera scales together instead of drifting out of balance.
-    // Static + PlayerPrefs: the choice survives scene loads and restarts, which is the
-    // only sane behaviour for a settings slider.
+
     public static class CameraSpeedSettings
     {
-        public const float MinScale = 0.5f;   // 50%
-        public const float MaxScale = 1.5f;   // 150%
-        public const float Step = 0.05f;      // 5% increments
+        public const float MinScale = 0.5f;
+        public const float MaxScale = 1.5f;
+        public const float Step = 0.05f;
 
         const string MousePrefKey = "CameraSpeed.Mouse";
         const string GamepadPrefKey = "CameraSpeed.Gamepad";
@@ -53,7 +48,6 @@ namespace KineticEnergy.UI
             return Snap(PlayerPrefs.GetFloat(key, 1f));
         }
 
-        // Clamped to the 50-150% range and quantised to whole 5% steps.
         public static float Snap(float value)
         {
             float clamped = Mathf.Clamp(value, MinScale, MaxScale);
@@ -61,3 +55,4 @@ namespace KineticEnergy.UI
         }
     }
 }
+

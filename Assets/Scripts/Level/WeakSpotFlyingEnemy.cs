@@ -1,9 +1,8 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace KineticEnergy.Level
 {
-    // A flyer that only dies to a launch landing on its back cube. Anything else registers
-    // as an ordinary crash and the flyer survives - staggered, but alive.
+
     public class WeakSpotFlyingEnemy : FlyingEnemy
     {
         [Tooltip("The back cube's collider - the ONLY spot a launch can kill through.")]
@@ -12,9 +11,7 @@ namespace KineticEnergy.Level
         public float weakSpotColliderScale = 1.35f;
 
         [Header("Weak spot tell")]
-        // The spot is ALWAYS the kill window on this enemy, so unlike the hunter - whose
-        // body pulses only while punishable - the tell simply never stops. Same read
-        // though: a pulse toward white says "this is what you hit".
+
         [Tooltip("Colour the weak spot pulses toward, so it reads as the vulnerable part at a glance.")]
         public Color pulseColor = Color.white;
         [Tooltip("Pulses per second of the weak spot's tell. Slower than the hunter's body pulse - this one never stops, so it reads as a steady beacon rather than an urgent flicker.")]
@@ -24,8 +21,7 @@ namespace KineticEnergy.Level
 
         Renderer spotRenderer;
         Color spotRestColor;
-        // The authored hitbox, captured once so the widened one can always be handed back
-        // exactly - never recomputed by dividing, which would drift over repeated stuns.
+
         Vector3 spotBoxSize;
         float spotSphereRadius;
         bool spotWidened;
@@ -37,28 +33,21 @@ namespace KineticEnergy.Level
             else if (weakSpot is SphereCollider sphere) spotSphereRadius = sphere.radius;
             spotRenderer = weakSpot.GetComponent<Renderer>();
             if (spotRenderer == null) spotRenderer = weakSpot.GetComponentInChildren<Renderer>();
-            // Reading .material instances a per-renderer copy, so the shared weak-spot
-            // material asset is never written to.
+
             if (spotRenderer != null) spotRestColor = spotRenderer.material.color;
         }
 
         void Update()
         {
-            // The hitbox follows the STAGGER, not the lifetime: wide while the flyer hangs
-            // there to be finished off, back to its authored size the instant it recovers.
-            // The collider's own size fields are written, never the transform, so the
-            // rendered cube never changes at all.
+
             SetSpotWidened(IsStunned);
 
             if (spotRenderer == null) return;
-            // Unscaled, so the tell keeps beating through the midair aim's bullet-time -
-            // which is exactly when the player is lining the shot up.
+
             float pulse = Mathf.PingPong(Time.unscaledTime * pulseSpeed, pulseAmount);
             spotRenderer.material.color = Color.Lerp(spotRestColor, pulseColor, pulse);
         }
 
-        // Idempotent both ways - guarded on the current state, so the per-frame call never
-        // compounds the growth or fights the authored value.
         void SetSpotWidened(bool widened)
         {
             if (weakSpot == null || spotWidened == widened) return;
@@ -69,15 +58,11 @@ namespace KineticEnergy.Level
             else if (weakSpot is SphereCollider sphere) sphere.radius = spotSphereRadius * scale;
         }
 
-        // A revived flyer must not come back still wearing the stagger's wide hitbox.
         void OnDisable()
         {
             SetSpotWidened(false);
         }
 
-        // The energy-tier hook: recolours the SPOT (material and the pulse's rest colour
-        // together, so the beacon breathes around the tier colour rather than snapping
-        // back to the old gold).
         public void SetSpotTier(Color tierColor)
         {
             if (spotRenderer == null && weakSpot != null)
@@ -89,11 +74,6 @@ namespace KineticEnergy.Level
             if (spotRenderer != null) spotRenderer.material.color = tierColor;
         }
 
-        // Where the weak spot's centre WILL BE once the stun lean has applied. The perch
-        // teleport runs in the same frame as the hit, but the 80-degree slump only lands
-        // on the next physics tick - perching on the CURRENT bounds put the player a spot
-        // radius off centre once the body tipped (direct report: first pound often missed,
-        // the retry - computed against the already-leaned pose - always killed).
         public Vector3 StunnedWeakSpotCentre()
         {
             if (weakSpot == null) return transform.position;
@@ -115,3 +95,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

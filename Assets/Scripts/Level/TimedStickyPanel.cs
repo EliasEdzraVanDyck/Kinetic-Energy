@@ -1,15 +1,9 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace KineticEnergy.Level
 {
-    // A sticky panel that only holds for a while (The Gauntlet, beat 5): crashing onto it
-    // sticks the player exactly like a StickySurface, but after holdSeconds the panel lets
-    // go - the controller releases the crash-stick (see KineticCubeController.RegisterCrash)
-    // and the panel simultaneously drops its colliders, so the player falls even when
-    // standing on the panel's flat top. The panel re-solidifies shortly after, ready for the
-    // next attempt. The landing-prediction proxies mirror collider state automatically, so
-    // the dotted trail never shows a landing on a panel that is currently open.
+
     public class TimedStickyPanel : MonoBehaviour
     {
         [Tooltip("Seconds the panel holds the player before releasing them.")]
@@ -34,7 +28,6 @@ namespace KineticEnergy.Level
             GetComponentsInChildren(true, panelRenderers);
         }
 
-        // Called by KineticCubeController the moment the player crash-sticks to this panel.
         public void OnPlayerStuck()
         {
             holdRemaining = holdSeconds;
@@ -53,7 +46,7 @@ namespace KineticEnergy.Level
                 }
                 else
                 {
-                    // Blink faster as the release approaches.
+
                     float urgency = 1f - Mathf.Clamp01(holdRemaining / Mathf.Max(holdSeconds, 0.01f));
                     float blink = Mathf.PingPong(Time.time * (2f + urgency * 8f), 1f);
                     SetColor(Color.Lerp(armedColor, warningColor, blink * urgency), 1f);
@@ -91,3 +84,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

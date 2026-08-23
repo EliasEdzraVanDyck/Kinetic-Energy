@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -8,19 +8,13 @@ using KineticEnergy.Camera;
 
 namespace KineticEnergy.Player
 {
-    // Minimal per-aim-window instrumentation for the aim-camera depth-perception test.
-    // One CSV row per midair aim: variant, unscaled aim duration, energy dialled at fire,
-    // whether it fired or was released, and - for fired shots - the distance from the
-    // predicted landing point to the actual crash position (the objective measure of
-    // whether depth reading improved; everything else is context). Appended to
-    // aim_camera_runs.csv in Application.persistentDataPath, the same pattern as the
-    // Gauntlet's run logger (which stays untouched - it is beat-structured and bespoke).
+
     public class AimCameraLogger : MonoBehaviour
     {
         KineticCubeController controller;
         AimCameraVariantController variants;
 
-        float aimOpenedAt; // unscaled
+        float aimOpenedAt;
         bool aimOpen;
         bool waitingForLanding;
         float pendingDuration;
@@ -108,8 +102,9 @@ namespace KineticEnergy.Player
             }
             catch (Exception)
             {
-                // Logging must never break play (WebGL file IO in particular).
+
             }
         }
     }
 }
+

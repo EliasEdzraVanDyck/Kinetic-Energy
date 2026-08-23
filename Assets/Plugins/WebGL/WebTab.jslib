@@ -1,10 +1,5 @@
-mergeInto(LibraryManager.library, {
+﻿mergeInto(LibraryManager.library, {
 
-  // Best-effort tab close for the Quit button. Browsers only let a script close a
-  // window that a script opened, and inside itch's iframe the TOP tab is cross-origin -
-  // so every route is tried, and where the browser refuses them all, a full-page notice
-  // tells the player the game has ended and the tab is theirs to close. Nothing here
-  // exists in a Windows build; the .jslib only compiles into WebGL.
   CloseGameTab: function () {
     try { window.top.close(); } catch (e) {}
     try { window.close(); } catch (e) {}
@@ -23,3 +18,4 @@ mergeInto(LibraryManager.library, {
   }
 
 });
+

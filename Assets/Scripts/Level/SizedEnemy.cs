@@ -1,20 +1,14 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace KineticEnergy.Level
 {
     public enum EnemySizeClass
     {
-        Small,  // faster, softer knockback, dies to a 20% launch
-        Medium, // the unmodified base enemy, dies to a 40% launch
-        Large,  // slower, harder knockback, dies to a 60% launch
+        Small,
+        Medium,
+        Large,
     }
 
-    // The sized ground-enemy family: ONE prefab, the class picked per instance in the
-    // inspector. Inherits every behaviour and value from Enemy; the chosen class applies
-    // its multipliers once at Start (Medium multiplies by nothing). All three demand a
-    // minimum launch spend to kill while vulnerable - shown as a billboard percentage
-    // above the body - and a cheaper launch bounces off, hurting the player with the
-    // enemy's own (size-scaled) hit instead.
     public class SizedEnemy : Enemy
     {
         [Header("Size Class")]
@@ -52,12 +46,8 @@ namespace KineticEnergy.Level
         float killEnergyFraction;
         Transform labelTransform;
 
-        // Read by the crash pipeline: the minimum launch-energy fraction a kill needs.
         public override float MinKillEnergyFraction => killEnergyFraction;
 
-        // The same figure straight from the serialized class config - valid BEFORE Start
-        // has run (killEnergyFraction is only assigned there), which is what display code
-        // with an undefined Start order has to read.
         public float ConfiguredKillFraction => sizeClass switch
         {
             EnemySizeClass.Small => smallKillEnergyFraction,
@@ -67,8 +57,7 @@ namespace KineticEnergy.Level
 
         protected override void Start()
         {
-            // The class's twist is applied BEFORE the base wiring runs, so everything
-            // downstream (spawn capture, body half-height from the scale) sees final values.
+
             float cooldownOffset;
             switch (sizeClass)
             {
@@ -92,16 +81,9 @@ namespace KineticEnergy.Level
                     break;
             }
 
-            // The cool-down after an attack, shifted whole. All THREE values move together
-            // because the punish window is max(vulnerableAfterAttackSeconds, attackCooldown)
-            // - on the hunter that is 2.5 against 2.0, so the cooldown dominates and moving
-            // only the vulnerable figure would change nothing at all. Shifting the group
-            // keeps them in their authored relationship while the window itself lands
-            // exactly the requested amount earlier or later, and recoverSeconds keeps the
-            // slumped pose in step with it.
             if (!Mathf.Approximately(cooldownOffset, 0f))
             {
-                const float floor = 0.05f; // never zero or negative, however it is tuned
+                const float floor = 0.05f;
                 recoverSeconds = Mathf.Max(recoverSeconds + cooldownOffset, floor);
                 attackCooldown = Mathf.Max(attackCooldown + cooldownOffset, floor);
                 vulnerableAfterAttackSeconds = Mathf.Max(vulnerableAfterAttackSeconds + cooldownOffset, floor);
@@ -111,8 +93,6 @@ namespace KineticEnergy.Level
             if (showKillLabel) BuildKillLabel();
         }
 
-        // An under-charged kill attempt bounces off the armour: the enemy's ordinary hit,
-        // aimed away from the body - same shove composition its attack landing uses.
         public override void PunishFailedKill()
         {
             if (player == null) return;
@@ -127,8 +107,7 @@ namespace KineticEnergy.Level
         {
             GameObject go = new GameObject("KillEnergyLabel");
             go.transform.SetParent(transform, false);
-            // The parent's scale would inflate the text - local placement and scale are
-            // divided back out so the label reads the same size over every class.
+
             float bodyScale = Mathf.Max(transform.localScale.y, 0.01f);
             go.transform.localPosition = new Vector3(0f, 0.5f + labelHeight / bodyScale, 0f);
             go.transform.localScale = Vector3.one / bodyScale;
@@ -156,3 +135,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

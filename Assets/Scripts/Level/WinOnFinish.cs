@@ -1,11 +1,9 @@
-using UnityEngine;
+﻿using UnityEngine;
 using KineticEnergy.Player;
 
 namespace KineticEnergy.Level
 {
-    // The self-contained finish (Level1Economy / Level1Challenge): touching it opens the
-    // pause screen as a locked "You win!" - no scene change, no Resume. One-shot per
-    // scene load; identifies the player by component like every trigger here.
+
     public class WinOnFinish : MonoBehaviour
     {
         bool triggered;
@@ -21,3 +19,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

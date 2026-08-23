@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using KineticEnergy.Player;
@@ -7,13 +7,9 @@ namespace KineticEnergy.Level
 {
     public enum ChallengeVariant
     {
-        OverchargeScatter, // A - big launches scatter: charge buys distance but costs precision
+        OverchargeScatter,
     }
 
-    // The challenge playtest harness (QuarryChallenge scene only - a scene object, never a
-    // prefab). Home of the challenge-style variations, starting with the overcharge
-    // scatter moved out of the economy scene; future challenge variants slot into the
-    // enum and cycle with V / D-pad Right and C / D-pad Left like every other harness.
     public class ChallengeVariantController : MonoBehaviour
     {
         [Tooltip("The challenge active at scene start.")]
@@ -114,7 +110,6 @@ namespace KineticEnergy.Level
             hudLabel.color = new Color(1f, 1f, 1f, 0.55f);
         }
 
-        // The orange dot-ring around the predicted landing, showing the live scatter radius.
         void UpdateScatterRing()
         {
             bool show = currentVariant == ChallengeVariant.OverchargeScatter
@@ -166,3 +161,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

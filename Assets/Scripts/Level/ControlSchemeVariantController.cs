@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using KineticEnergy.Player;
@@ -7,18 +7,10 @@ namespace KineticEnergy.Level
 {
     public enum ControlSchemeVariant
     {
-        NewControls, // A - camera follows wide grounded aims, grounded dial, LB/RB energy
-        Classic,     // B - the current default controls, untouched
+        NewControls,
+        Classic,
     }
 
-    // The control-scheme playtest harness (QuarryAim scene): V / D-pad Right and C /
-    // D-pad Left toggle between the NEW control package (variant A) and the classic
-    // controls (variant B). The package, all applied via the controller's public flags:
-    //   - Grounded aim past 60 degrees to either side slowly pans the camera after it.
-    //   - The grounded launch strength is DIALLED like the midair aim (wheel / bumpers)
-    //     instead of charging over held time.
-    //   - Controller energy on the bumpers everywhere: RB adds, LB removes (LB stops
-    //     being charge-cancel while active).
     public class ControlSchemeVariantController : MonoBehaviour
     {
         [Tooltip("The scheme active at scene start. A = the new package, B = classic.")]
@@ -82,12 +74,8 @@ namespace KineticEnergy.Level
             controller.groundedDialControls = newControls;
             controller.bumperEnergyDial = newControls;
 
-            // The aim refinements (stick curve, One-Euro smoothing, ...) belong to the NEW
-            // package - Classic must be byte-identical to every other scene's controls.
             if (refinement != null) refinement.enabled = newControls;
 
-            // The slower mouse orbit camera is variant A's experiment only - Classic (and
-            // by code default, every other scene) keeps the original 0.6.
             if (orbitCamera != null)
             {
                 orbitCamera.mouseOrbitSpeedMultiplier = newControls ? newControlsMouseOrbitMultiplier : 0.6f;
@@ -127,3 +115,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

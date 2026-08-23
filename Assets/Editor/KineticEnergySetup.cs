@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,22 +18,7 @@ using KineticEnergy.Level;
 
 namespace KineticEnergy.EditorSetup
 {
-    // Builds the project's two test levels (and the menu) from scratch, entirely in code:
-    //
-    //   Tools > Kinetic Energy > Setup All          - prefab refresh + all three scenes + build list
-    //   Tools > Kinetic Energy > Setup Quarry       - Level 1, "The Quarry" (the toy test)
-    //   Tools > Kinetic Energy > Setup Gauntlet     - Level 2, "The Gauntlet" (the slowdown A/B test)
-    //   Tools > Kinetic Energy > Setup Main Menu
-    //
-    // Batch-mode entry point:
-    //   Unity.exe -batchmode -nographics -quit -projectPath <project>
-    //     -executeMethod KineticEnergy.EditorSetup.KineticEnergySetup.SetupAll -logFile setup.log
-    //
-    // All level distances are expressed in L and H, measured from the CURRENT launch tuning
-    // by simulating the launch integrator (see MeasureLaunchDistances):
-    //   L = horizontal distance of a max-charge grounded launch at the default 30-degree aim
-    //   H = apex height of a max-charge straight-up launch
-    // Re-running the setup after a tuning change rebuilds the geometry to match.
+
     public static class KineticEnergySetup
     {
         const string QuarryScenePath = "Assets/Scenes/Quarry.unity";
@@ -47,11 +32,6 @@ namespace KineticEnergy.EditorSetup
         const string MaterialFolder = "Assets/Materials";
         const string VolumeProfilePath = "Assets/Settings/SampleSceneProfile.asset";
 
-        // ==================== Player tuning (single source of truth) ====================
-        // The values the last playtest iteration settled on. ApplyPlayerTuning stamps them
-        // onto the Player prefab and every scene instance (the anti-staleness rule this
-        // project follows everywhere), and MeasureLaunchDistances derives L and H from them.
-
         const float MinLaunchForce = 60f;
         const float MaxLaunchForce = 130f;
         const float MaxChargeTime = 1.5f;
@@ -60,12 +40,9 @@ namespace KineticEnergy.EditorSetup
         const float DownLaunchDamping = 0.2f;
         const float Gravity = -30f;
         const float ChargeAccumulationRate = 0.3f;
-        // The grounded aim, forward hold-charge and midair dial accelerate: the rate grows
-        // the longer the input sustains in one direction. (Up/down charges use the pound's
-        // own base+growth ramp above.)
+
         const float ChargeAcceleration = 1f;
-        // Doubled from the original 7 (direct request: "increase air control significantly")
-        // - still below gravity (30), so the nudge steers a fall rather than replacing it.
+
         const float AirControlAcceleration = 14f;
         const float EnergyCostPerFullCharge = 1f;
         const float MinEnergyReserve = 0.05f;
@@ -74,30 +51,26 @@ namespace KineticEnergy.EditorSetup
         const float MidairRefundSpendFactor = 0.3f;
         const float PoundFlightRefundMultiplier = 1f;
         const float PlainFallDamping = 0.2f;
-        // The EnergyEconomy4 ground pound (Final-Project branch): bounce hop, slow-mo
-        // window, boosted whole-flight refund claimed by aiming inside the window, and the
-        // base+growth charge ramp. Values are EnergyEconomy4's scene overrides.
+
         const float GroundPoundBoostMultiplier = 1.5f;
         const float GroundPoundHopHeight = 0.2f;
         const float GroundPoundSlowDuration = 0.5f;
         const float GroundPoundChargeBaseSpeed = 1.5f;
         const float GroundPoundChargeSpeedGrowth = 5f;
         const float ChargeTimeScale = 0.2f;
-        // Flight game speed: 200% base, +1% per 1% of the tank spent on the launch.
+
         const float LaunchFlightTimeScale = 2f;
         const float FlightTimeScaleEnergyBonus = 1f;
-        // Descending adds another ramp: +1% game speed on the first falling frame, growing
-        // in even steps to +50% at the predicted impact.
+
         const float FallSpeedUpStart = 0.01f;
         const float FallSpeedUpEnd = 0.5f;
         const float AimBudgetSeconds = 2f;
-        // Parity rule: a full tank must buy about the same slow-time as the aim budget, or
-        // the A/B test measures generosity instead of architecture. 1 tank / 2s = 0.5/s.
+
         const float TankDrainPerSecond = 1f / AimBudgetSeconds;
         const float DialStickRate = 0.5f;
         const float DialWheelStep = 0.05f;
-        const float ReferenceAimPitchDegrees = 30f; // the default aim pitch, and L's reference angle
-        const float SimulationTimestep = 0.02f;     // matches the project's fixed timestep
+        const float ReferenceAimPitchDegrees = 30f;
+        const float SimulationTimestep = 0.02f;
 
         static void ApplyPlayerTuning(KineticCubeController controller)
         {
@@ -131,7 +104,7 @@ namespace KineticEnergy.EditorSetup
             controller.tankDrainPerSecond = TankDrainPerSecond;
             controller.dialStickRate = DialStickRate;
             controller.dialWheelStep = DialWheelStep;
-            controller.defaultAimPitch = -ReferenceAimPitchDegrees; // negative tilts UP
+            controller.defaultAimPitch = -ReferenceAimPitchDegrees;
             controller.aimDeadzone = 0.15f;
             controller.aimRotationSpeed = 90f;
             controller.minAimPitch = -80f;
@@ -150,8 +123,7 @@ namespace KineticEnergy.EditorSetup
             controller.infiniteEnergy = false;
             controller.slowdownMode = SlowdownMode.Unlimited;
             controller.fallResetY = -30f;
-            // Mouse aiming is the grounded default; gamepad sticks keep their normal roles
-            // regardless (device checked per frame, no binding masks involved).
+
             controller.groundedAimWithMouse = true;
             controller.groundedMouseAimSensitivity = 0.15f;
             controller.wasdCameraTurnMultiplier = 1.5f;
@@ -160,23 +132,16 @@ namespace KineticEnergy.EditorSetup
             controller.groundedAimAction = FindActionReference("Player", "Launch");
             controller.groundedLaunchAction = FindActionReference("Player", "Fire");
             controller.upLaunchAction = FindActionReference("Player", "LaunchUp");
-            // West's button - the action kept its historical asset name.
+
             controller.groundPoundAction = FindActionReference("Player", "SelectGhostPreview");
             controller.cancelChargeAction = FindActionReference("Player", "CancelCharge");
             controller.airAimAction = FindActionReference("Player", "FastPacedAim");
             controller.airLaunchAction = FindActionReference("Player", "FastPacedLaunch");
         }
 
-        // ==================== L / H measurement ====================
-
-        // Simulates the launch integrator the way the project has always validated tuning:
-        // semi-implicit Euler with Unity's 1/(1+damping*dt) velocity decay, at the project's
-        // gravity and fixed timestep. A max-charge launch uses MaxLaunchForce (the cube's
-        // mass is 1, so force = exit speed) and MaxLaunchDamping.
         static void MeasureLaunchDistances(out float unitL, out float unitH)
         {
-            // L: max charge at the reference 30-degree aim, distance when it returns to
-            // launch height.
+
             float angleRad = ReferenceAimPitchDegrees * Mathf.Deg2Rad;
             Vector2 velocity = new Vector2(Mathf.Cos(angleRad), Mathf.Sin(angleRad)) * MaxLaunchForce;
             Vector2 position = Vector2.zero;
@@ -193,7 +158,6 @@ namespace KineticEnergy.EditorSetup
                 }
             }
 
-            // H: max charge straight up, apex height.
             float upVelocity = MaxLaunchForce;
             float height = 0f;
             unitH = 0f;
@@ -212,8 +176,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // ==================== Entry points ====================
-
         [MenuItem("Tools/Kinetic Energy/Setup All")]
         public static void SetupAll()
         {
@@ -227,11 +189,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: SetupAll complete OK");
         }
 
-        // Quarry-only playtest build: the one scene, nothing else - no Gauntlet, no menu;
-        // the game boots straight into the arena. The scene list is passed explicitly, so
-        // EditorBuildSettings and the scenes themselves stay completely untouched. NOTE: the
-        // orange menu pad and the pause menu's Main Menu / level buttons have no destination
-        // in this build - pressing them logs a harmless error and nothing happens.
         [MenuItem("Tools/Kinetic Energy/Build Quarry Only")]
         public static void BuildQuarryOnly()
         {
@@ -250,8 +207,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: Quarry-only build complete OK -> {options.locationPathName} ({report.summary.totalSize / (1024 * 1024)} MB)");
         }
 
-        // Builds exactly what the Build Settings window has ENABLED right now - the scene
-        // list is the user's to manage there; this just executes it under the proper name.
         [MenuItem("Tools/Kinetic Energy/Build From Build Settings")]
         public static void BuildFromBuildSettings()
         {
@@ -279,10 +234,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: build complete OK -> {options.locationPathName} ({report.summary.totalSize / (1024 * 1024)} MB, scenes: {string.Join(", ", scenes)})");
         }
 
-        // Same scene selection as BuildFromBuildSettings, but a WEB (WebGL) build. The
-        // output is a folder (index.html + Build/), servable by any static web host -
-        // opening index.html straight from disk does NOT work in most browsers, it has to
-        // be served (e.g. itch.io upload, or a local server for testing).
         [MenuItem("Tools/Kinetic Energy/Build Web From Build Settings")]
         public static void BuildWebFromBuildSettings()
         {
@@ -298,7 +249,7 @@ namespace KineticEnergy.EditorSetup
             var options = new BuildPlayerOptions
             {
                 scenes = scenes,
-                locationPathName = "Builds/GD3RetakeKineticEnergyWeb", // WebGL target is a folder
+                locationPathName = "Builds/GD3RetakeKineticEnergyWeb",
                 target = BuildTarget.WebGL,
                 options = BuildOptions.None,
             };
@@ -310,20 +261,12 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: web build complete OK -> {options.locationPathName} ({report.summary.totalSize / (1024 * 1024)} MB, scenes: {string.Join(", ", scenes)})");
         }
 
-        // ==================== Aim camera variants (depth-perception playtest) ====================
-
-        // ADDITIVE: creates the three AimCameraPreset assets (existing assets keep their
-        // tuned values), puts the variant controller + logger on the Player prefab, and adds
-        // the pause menu's selector button + hint line (bottom-left corner of PausePanel, so
-        // the existing button column is untouched).
         [MenuItem("Tools/Kinetic Energy/Setup Aim Camera Variants")]
         public static void SetupAimCameraVariants()
         {
             const string presetFolder = "Assets/Settings/AimCameraPresets";
             if (!AssetDatabase.IsValidFolder(presetFolder)) AssetDatabase.CreateFolder("Assets/Settings", "AimCameraPresets");
 
-            // The dolly and standalone-parallax variants are SCRAPPED (direct request) -
-            // their assets go, and their letters are reused by the PiP variants below.
             AssetDatabase.DeleteAsset(presetFolder + "/AimCameraC_OtsDriftDolly.asset");
             AssetDatabase.DeleteAsset(presetFolder + "/AimCameraD_OtsParallax.asset");
 
@@ -333,9 +276,6 @@ namespace KineticEnergy.EditorSetup
                 p.displayName = "Frozen first person";
             });
 
-            // B absorbs the parallax drift (subtle values - the original amplitudes read as
-            // illogical rocking during bullet-time). Placement values the user may have
-            // tuned are preserved; only the drift fields and name are (re)stamped.
             AimCameraPreset b = LoadOrCreatePreset(presetFolder + "/AimCameraB_OtsDrift.asset", p =>
             {
                 p.variant = AimCameraVariant.OtsParallax;
@@ -349,7 +289,6 @@ namespace KineticEnergy.EditorSetup
             b.driftPeriod = 3.5f;
             EditorUtility.SetDirty(b);
 
-            // C = baseline aim + the landing picture-in-picture window.
             AimCameraPreset c = LoadOrCreatePreset(presetFolder + "/AimCameraC_BaselinePip.asset", p =>
             {
                 p.variant = AimCameraVariant.BaselinePip;
@@ -357,7 +296,6 @@ namespace KineticEnergy.EditorSetup
                 p.pipEnabled = true;
             });
 
-            // D = B (OTS + parallax) + the landing picture-in-picture window.
             AimCameraPreset d = LoadOrCreatePreset(presetFolder + "/AimCameraD_OtsParallaxPip.asset", p =>
             {
                 p.variant = AimCameraVariant.OtsParallaxPip;
@@ -370,22 +308,17 @@ namespace KineticEnergy.EditorSetup
                 p.driftPeriod = 3.5f;
             });
 
-            // Direct request: the player should sit a bit closer to the screen in the OTS
-            // variants - stamp the tighter back-distance on every OTS preset.
             b.otsBack = 1.8f;
             d.otsBack = 1.8f;
             EditorUtility.SetDirty(b);
             EditorUtility.SetDirty(d);
 
-            // E = first person + FREE LOOK: WASD / right stick rotates the view without
-            // moving the aim; energy dial on RB/LB (see the preset's UsesFreeLook).
             AimCameraPreset e = LoadOrCreatePreset(presetFolder + "/AimCameraE_FreeLookFp.asset", p =>
             {
                 p.variant = AimCameraVariant.FreeLookFirstPerson;
                 p.displayName = "First person + free look";
             });
 
-            // F = the same free-look concept on the OTS camera.
             AimCameraPreset f = LoadOrCreatePreset(presetFolder + "/AimCameraF_FreeLookOts.asset", p =>
             {
                 p.variant = AimCameraVariant.FreeLookOts;
@@ -397,8 +330,6 @@ namespace KineticEnergy.EditorSetup
                 p.driftPeriod = 3.5f;
             });
 
-            // Concise tester-facing names (direct request) - restamped on every run so a
-            // rename here reaches existing assets too.
             a.displayName = "First person";
             b.displayName = "Behind the player";
             c.displayName = "First person + landing window";
@@ -453,16 +384,13 @@ namespace KineticEnergy.EditorSetup
                 buttonRect.anchoredPosition = new Vector2(24f, 24f);
                 WireButton(button, pauseController.OnCameraVariantClicked);
                 Text buttonLabel = button.GetComponentInChildren<Text>(true);
-                // Long variant names must always FIT: best-fit shrinks the font before the
-                // text can clip the button's edges.
+
                 buttonLabel.resizeTextForBestFit = true;
                 buttonLabel.resizeTextMinSize = 12;
                 buttonLabel.resizeTextMaxSize = 26;
                 pauseController.cameraVariantLabel = buttonLabel;
                 EditorUtility.SetDirty(pauseController);
 
-                // The controller-energy warning gets its OWN box directly above the variant
-                // button (filled/emptied at runtime by PauseController).
                 Text energyNote = CreateText("CameraVariantEnergyNote", pausePanel, "",
                     font, 20, Vector2.zero, new Vector2(640f, 30f));
                 RectTransform energyNoteRect = energyNote.rectTransform;
@@ -494,11 +422,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: aim camera variants setup complete OK");
         }
 
-        // Levels 2 and 3 were copied BEFORE the HUD-prefab replacement pass and never got
-        // meter instances - their Player meter references point at nothing (or at the old
-        // deactivated embedded UI), so the bars never update. This drops the EnergyMeter +
-        // SlowdownMeter prefabs into each scene's pause canvas and wires the Player, same
-        // as every other scene. Additive + wiring only.
         [MenuItem("Tools/Kinetic Energy/Add Hud Meters To Levels 2 And 3")]
         public static void AddHudMetersToLevels2And3()
         {
@@ -513,8 +436,6 @@ namespace KineticEnergy.EditorSetup
                     throw new Exception($"KineticEnergySetup: {scenePath} is missing its Player or PauseSystem/PauseCanvas.");
                 }
 
-                // The PauseSystem prefab's embedded meter UI (if still active here) is
-                // superseded by the standalone prefabs - deactivate, never delete.
                 Transform embeddedUi = pauseCanvas.Find("EnergyMeter");
                 if (embeddedUi != null && !PrefabUtility.IsAnyPrefabInstanceRoot(embeddedUi.gameObject))
                 {
@@ -537,8 +458,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // Wires the top-left ControlsHintLabel into PauseController so pausing hides it
-        // (the "open the pause menu" hint is pointless while the menu is open). Pure wiring.
         [MenuItem("Tools/Kinetic Energy/Wire Controls Hint To Pause")]
         public static void WireControlsHintToPause()
         {
@@ -570,8 +489,6 @@ namespace KineticEnergy.EditorSetup
             return null;
         }
 
-        // ADDITIVE: an Info button in the pause menu's bottom-right corner - reopens the
-        // scene's intro/explainer overlay. PauseController hides it in scenes without one.
         [MenuItem("Tools/Kinetic Energy/Add Info Button To Pause Menu")]
         public static void AddInfoButtonToPauseMenu()
         {
@@ -586,8 +503,6 @@ namespace KineticEnergy.EditorSetup
                     throw new Exception("KineticEnergySetup: PauseSystem.prefab is missing PauseCanvas/PausePanel or PauseController.");
                 }
 
-                // Renamed Info -> BuildInfo (direct request); the old name is cleared too
-                // so re-runs on an older prefab replace it cleanly.
                 DestroyDirectChildIfExists(pausePanel, "InfoButton");
                 DestroyDirectChildIfExists(pausePanel, "BuildInfoButton");
                 Font font = FindBestFont();
@@ -610,9 +525,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: info button added to pause menu OK");
         }
 
-        // ADDITIVE: puts a Resume button at the TOP of the pause menu's button column and
-        // makes it the gamepad's first-selected button. Wired to TogglePause, which resumes
-        // when paused. Nothing existing is moved.
         [MenuItem("Tools/Kinetic Energy/Add Resume Button To Pause Menu")]
         public static void AddResumeButtonToPauseMenu()
         {
@@ -631,7 +543,7 @@ namespace KineticEnergy.EditorSetup
                 Font font = FindBestFont();
                 Color accent = new Color(1f, 0.82f, 0.2f);
                 GameObject resume = CreateButton("ResumeButton", pausePanel, "Resume", font, accent,
-                    new Vector2(0f, 185f), new Vector2(300f, 70f)); // one column step above Restart (95)
+                    new Vector2(0f, 185f), new Vector2(300f, 70f));
                 resume.transform.SetSiblingIndex(0);
                 WireButton(resume, pauseController.TogglePause);
                 pauseController.firstPauseButton = resume;
@@ -644,9 +556,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: resume button added to pause menu OK");
         }
 
-        // The economy-iteration scene (a QuarryNew duplicate): locks the aim camera to
-        // Variant A with all switching UI/hotkeys off, and adds the EconomyVariants harness
-        // object. The scene file must already exist (copied from QuarryNew).
         [MenuItem("Tools/Kinetic Energy/Setup Quarry Economy Scene")]
         public static void SetupQuarryEconomy()
         {
@@ -675,20 +584,12 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: quarry economy scene setup complete OK");
         }
 
-        // The merged economy's meter: a variant of the standalone EnergyMeter prefab
-        // where the bar is 8 normal blocks (same 31.4px block width, dividers 8/9
-        // retired) with a two-block PREMIUM segment welded flush to its right edge -
-        // same block width, 30% taller, own outline/backdrop, and orange/blue fills
-        // that start EMPTY (they only show actual premium energy/charge).
         [MenuItem("Tools/Kinetic Energy/Create Premium Energy Meter Prefab")]
         public static void CreatePremiumEnergyMeterPrefab()
         {
             BuildPremiumMeterVariant(PrefabFolder + "/PremiumEnergyMeter.prefab", 8);
         }
 
-        // Shared builder: `normalBlocks` normal-height blocks, the remaining (10 - n)
-        // blocks as the taller premium segment - 8+2 for the standard variant, 4+6 for
-        // Level1Economy's 40% boundary.
         static void BuildPremiumMeterVariant(string path, int normalBlocks)
         {
             string sourcePath = PrefabFolder + "/EnergyMeter.prefab";
@@ -712,27 +613,21 @@ namespace KineticEnergy.EditorSetup
                 Transform body = root.transform.Find("Body");
                 RectTransform bodyRect = body.GetComponent<RectTransform>();
 
-                // The source layout: inset 3, block width 31.4, ten blocks. The main bar
-                // keeps blocks 1-8 EXACTLY as they are (divider positions untouched);
-                // the freed width becomes the premium segment.
                 const float inset = 3f;
                 const float blockWidth = 31.4f;
-                float oldWidth = bodyRect.sizeDelta.x;                        // 323
-                float newWidth = inset + normalBlocks * blockWidth + inset;   // 8 blocks: 257.2
-                float zoneWidth = oldWidth - newWidth;                        // the premium blocks + border
-                float bodyHeight = bodyRect.sizeDelta.y;                      // 30
-                float zoneHeight = bodyHeight * 1.3f;                         // 30% taller
+                float oldWidth = bodyRect.sizeDelta.x;
+                float newWidth = inset + normalBlocks * blockWidth + inset;
+                float zoneWidth = oldWidth - newWidth;
+                float bodyHeight = bodyRect.sizeDelta.y;
+                float zoneHeight = bodyHeight * 1.3f;
 
-                // Body pivot is right-side: shrinking keeps the right edge, so the shift
-                // left frees exactly the zone's strip while the total footprint stays.
                 bodyRect.sizeDelta = new Vector2(newWidth, bodyHeight);
                 bodyRect.anchoredPosition -= new Vector2(zoneWidth, 0f);
 
                 Transform dividers = body.Find("MeterDividers");
                 if (dividers != null)
                 {
-                    // The main bar keeps its first (normalBlocks - 1) internal lines;
-                    // everything beyond belongs to the zone now.
+
                     for (int i = normalBlocks; i <= 9; i++)
                     {
                         Transform retired = dividers.Find("Divider" + i);
@@ -740,7 +635,6 @@ namespace KineticEnergy.EditorSetup
                     }
                 }
 
-                // Look sampled straight from the source meter's own images.
                 Image outlineImage = body.Find("Outline").GetComponent<Image>();
                 Image backdropImage = body.Find("Backdrop").GetComponent<Image>();
                 Image bonusImage = body.Find("BonusFill").GetComponent<Image>();
@@ -797,14 +691,10 @@ namespace KineticEnergy.EditorSetup
                 image.type = Image.Type.Filled;
                 image.fillMethod = Image.FillMethod.Horizontal;
                 image.fillOrigin = (int)Image.OriginHorizontal.Left;
-                image.fillAmount = 0f; // empty until the harness feeds it real premium energy
+                image.fillAmount = 0f;
             }
         }
 
-        // QuarryEconomy2: a copy of the economy scene running the single MERGED design
-        // (combo refunds + safety recharge + premium top 20%) instead of the five-way
-        // variant harness. The copy is made from QuarryEconomy, so the locked camera and
-        // all hand-tuned scene values carry over.
         [MenuItem("Tools/Kinetic Energy/Setup Quarry Economy 2 Scene")]
         public static void SetupQuarryEconomy2()
         {
@@ -824,7 +714,6 @@ namespace KineticEnergy.EditorSetup
             }
             EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
 
-            // The five-way variant harness belongs to the FIRST economy scene only.
             var oldHarness = UnityEngine.Object.FindAnyObjectByType<EconomyVariantController>(FindObjectsInactive.Include);
             if (oldHarness != null) UnityEngine.Object.DestroyImmediate(oldHarness.gameObject);
 
@@ -833,8 +722,6 @@ namespace KineticEnergy.EditorSetup
                 new GameObject("MergedEconomy").AddComponent<MergedEconomyController>();
             }
 
-            // Swap the standalone meter for the premium 8+2 variant (idempotent), keeping
-            // the old instance's placement and wiring the Player to the replacement.
             CreatePremiumEnergyMeterPrefab();
             KineticCubeController playerController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
             if (playerController != null && playerController.energyMeter != null
@@ -866,13 +753,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: quarry economy 2 (merged) scene setup complete OK");
         }
 
-        // The COMBO meter prefab (Level1Economy/Level1Challenge): a SlowdownMeter variant
-        // whose bar is narrowed so that, with the harness's runtime xN circle anchored
-        // 10px left of the bar, the circle's LEFT edge lines up exactly with the energy
-        // meter's left edge - the bar's right edge stays where it always was.
-        //   energy meter left = (-10 - 323) * 1.7376512 = -578.6 canvas
-        //   bar left = -578.6 + 46 (circle) + 10 (gap) = -522.6; right edge -19
-        //   => width = 503.6 (was 560)
         [MenuItem("Tools/Kinetic Energy/Create Combo Meter Prefab")]
         public static void CreateComboMeterPrefab()
         {
@@ -892,17 +772,13 @@ namespace KineticEnergy.EditorSetup
             try
             {
                 RectTransform bodyRect = root.transform.Find("Body").GetComponent<RectTransform>();
-                bodyRect.sizeDelta = new Vector2(503.6f, bodyRect.sizeDelta.y); // pivot (1,1): right edge stays
+                bodyRect.sizeDelta = new Vector2(503.6f, bodyRect.sizeDelta.y);
                 PrefabUtility.SaveAsPrefabAsset(root, path);
             }
             finally { PrefabUtility.UnloadPrefabContents(root); }
             Debug.Log("KineticEnergySetup: ComboMeter prefab created OK (width 503.6, circle aligns with the energy meter's left edge)");
         }
 
-        // ADDITIVE: a CAMERA SETTINGS sub-screen (title, the two speed sliders, a Back
-        // button) reached from a new pause-menu button - the same panel pattern the
-        // Controls and Scenes screens use. Sliders run 50-150% in 5% steps, draggable
-        // with the mouse or adjustable with the left stick while selected.
         [MenuItem("Tools/Kinetic Energy/Add Camera Settings Screen To Pause Menu")]
         public static void AddCameraSpeedSlidersToPauseMenu()
         {
@@ -918,7 +794,6 @@ namespace KineticEnergy.EditorSetup
                     throw new Exception("KineticEnergySetup: PauseSystem.prefab is missing PauseCanvas/PausePanel or PauseController.");
                 }
 
-                // Clear the earlier inline block and any previous run's screen.
                 DestroyDirectChildIfExists(pausePanel, "CameraSpeedSliders");
                 DestroyDirectChildIfExists(pausePanel, "CameraSettingsButton");
                 DestroyDirectChildIfExists(pauseCanvas, "CameraSettingsPanel");
@@ -926,7 +801,6 @@ namespace KineticEnergy.EditorSetup
                 Font font = FindBestFont();
                 Color accent = new Color(1f, 0.82f, 0.2f);
 
-                // The sub-screen itself - same full-panel backdrop as the other screens.
                 GameObject panel = CreatePanel("CameraSettingsPanel", pauseCanvas, new Color(0.05f, 0.06f, 0.08f, 0.96f));
 
                 Text title = CreateText("CameraSettingsTitle", panel.transform, "CAMERA SETTINGS",
@@ -958,7 +832,6 @@ namespace KineticEnergy.EditorSetup
                 pauseController.cameraSettingsPanel = panel;
                 pauseController.firstCameraSettingsButton = backButton;
 
-                // ...and the way in, on the pause panel itself.
                 GameObject openButton = CreateButton("CameraSettingsButton", pausePanel, "Camera Settings",
                     font, accent, new Vector2(0f, -190f), new Vector2(300f, 70f));
                 WireButton(openButton, pauseController.OnCameraSettingsClicked);
@@ -972,9 +845,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: camera settings screen added to the pause menu OK");
         }
 
-        // Turns Level1Challenge into the five-stage challenge cycle: the four Level 8
-        // challenges plus the shrinking-platforms stage, each finish reloading the scene
-        // onto the next, the LOCKED win screen after the last. Idempotent - safe to re-run.
         [MenuItem("Tools/Kinetic Energy/Setup Level1Challenge Cycle")]
         public static void SetupLevel1ChallengeCycle()
         {
@@ -982,8 +852,6 @@ namespace KineticEnergy.EditorSetup
             CreateDeathWallPrefab();
             EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
 
-            // The finish pads advance the stage sequence now instead of showing the win
-            // screen directly - the controller decides when the run is truly over.
             foreach (WinOnFinish win in UnityEngine.Object.FindObjectsByType<WinOnFinish>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
                 GameObject finishGo = win.gameObject;
@@ -995,9 +863,6 @@ namespace KineticEnergy.EditorSetup
                 EditorUtility.SetDirty(finishGo);
             }
 
-            // The course in run order (ascending x - the course axis), floating walls
-            // included: the sealing stage matches landings against it and the shrinking
-            // stage scales along it.
             string[] courseNames =
             {
                 "StartPlatform", "Platform1", "Platform2", "Platform3", "Platform4",
@@ -1016,9 +881,6 @@ namespace KineticEnergy.EditorSetup
             GameObject respawn = GameObject.Find("RespawnPoint");
             if (respawn == null) throw new Exception("KineticEnergySetup: Level1Challenge has no RespawnPoint.");
 
-            // The chase wall: parked behind the start, sweeping along +x. Tall and wide
-            // enough to cover the course's full y spread (the elevated end pad) and its
-            // z spread (platforms sit from z=-61 to z=+37).
             GameObject oldChase = GameObject.Find("ChaseWall");
             if (oldChase != null) UnityEngine.Object.DestroyImmediate(oldChase);
             GameObject chaseGo = InstantiatePrefab("DeathWall");
@@ -1027,10 +889,9 @@ namespace KineticEnergy.EditorSetup
             chaseGo.transform.localScale = new Vector3(2f, 46f, 140f);
             DeathWall chase = chaseGo.GetComponent<DeathWall>();
             chase.moveSpeed = 4f;
-            // Gains pace as it runs: ~0.25 m/s per second, so the ~550-unit course tightens
-            // from a walk into a real chase. Editable on the ChaseWall instance.
+
             chase.moveAcceleration = 0.25f;
-            chase.maxMoveSpeed = 0f; // uncapped
+            chase.maxMoveSpeed = 0f;
             chase.moveDirection = Vector3.right;
             EditorUtility.SetDirty(chase);
 
@@ -1046,21 +907,15 @@ namespace KineticEnergy.EditorSetup
                 ChallengeStage.ChasingWall,
                 ChallengeStage.ShrinkingPlatforms,
             };
-            stages.lockedWinScreen = true; // the scene's self-contained "You win!" screen
+            stages.lockedWinScreen = true;
             stages.chaseWall = chase;
             stages.sealWallPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/DeathWall.prefab");
             stages.coursePlatforms = course.ToArray();
-            // Wider than Level 8's default - this course wanders in z, so a seal must
-            // still block the whole corridor between two laterally offset platforms.
+
             stages.sealWallSize = new Vector3(1.5f, 40f, 90f);
             stages.respawnPoint = respawn.transform;
             EditorUtility.SetDirty(stages);
 
-            // Stage 1 shows the aim BUDGET on its own bar underneath the combo meter -
-            // previously both systems fought over the one repurposed slowdown meter. The
-            // combo meter stays the economy's (via its explicit comboMeter reference);
-            // the new bar becomes controller.slowdownMeter, which the controller itself
-            // hides outside AimBudget mode - so it only appears in the first variation.
             KineticCubeController playerController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
             MergedEconomyController economy = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
             GameObject comboMeterGo = GameObject.Find("ComboMeter");
@@ -1083,21 +938,17 @@ namespace KineticEnergy.EditorSetup
             budgetRect.anchorMin = comboRect.anchorMin;
             budgetRect.anchorMax = comboRect.anchorMax;
             budgetRect.pivot = comboRect.pivot;
-            // 45 below the combo meter's serialized spot: the economy drops the combo
-            // meter 20px at runtime (comboMeterDropPixels), the body is 20 tall - this
-            // lands the budget bar 5px under the dropped combo meter.
+
             budgetRect.anchoredPosition = comboRect.anchoredPosition + new Vector2(0f, -45f);
             EnergyMeterController budgetMeter = budgetGo.GetComponentInChildren<EnergyMeterController>(true);
             if (budgetMeter != null && budgetMeter.energyFillImage != null)
             {
-                budgetMeter.energyFillImage.color = new Color(0.3f, 0.65f, 1f); // budget blue, not combo orange
+                budgetMeter.energyFillImage.color = new Color(0.3f, 0.65f, 1f);
                 EditorUtility.SetDirty(budgetMeter.energyFillImage);
             }
             playerController.slowdownMeter = budgetMeter;
             EditorUtility.SetDirty(playerController);
 
-            // Lethal shells on the objects you must land on PRECISELY - every face except
-            // the one facing the course gets a 0.5-thick damage slab.
             Material shellMaterial = MakeMaterial("DamageWallMaterial", new Color(0.85f, 0.15f, 0.12f));
             foreach (string shellTarget in new[] { "FloatingWall1", "FloatingWall2", "FloatingWall3", "UpsidePlatform" })
             {
@@ -1106,22 +957,16 @@ namespace KineticEnergy.EditorSetup
                 AddDamageShell(shellGo.transform, respawn.transform, shellMaterial);
             }
 
-            // The explainer, shown at first boot and reopened by the pause menu's BuildInfo
-            // button (both read this one string).
             economy.introText = Level1ChallengeInfoText;
             EditorUtility.SetDirty(economy);
 
-            EnsureSceneInBuildSettings(scenePath); // the cycle reloads itself by name
+            EnsureSceneInBuildSettings(scenePath);
             EditorSceneManager.SaveOpenScenes();
             AssetDatabase.SaveAssets();
             Debug.Log("KineticEnergySetup: Level1Challenge five-stage cycle configured OK ("
                 + course.Count + " course platforms, damage shells + build info updated)");
         }
 
-        // ADDITIVE, SCENE-ONLY: Level1Challenge's challenge-variant picker - a "Variants"
-        // button under Resume opening a screen that lists all five challenges; picking one
-        // restarts the scene on it. Built on the scene's PauseSystem INSTANCE, so no other
-        // scene's pause menu changes.
         [MenuItem("Tools/Kinetic Energy/Add Variants Screen To Level1Challenge")]
         public static void AddVariantsScreenToLevel1Challenge()
         {
@@ -1143,7 +988,6 @@ namespace KineticEnergy.EditorSetup
             Font font = FindBestFont();
             Color accent = new Color(1f, 0.82f, 0.2f);
 
-            // The screen: title, the five challenges, Back.
             GameObject panel = CreatePanel("VariantsPanel", pauseCanvas, new Color(0.05f, 0.06f, 0.08f, 0.96f));
             Text title = CreateText("VariantsTitle", panel.transform, "CHALLENGE VARIANTS",
                 font, 48, new Vector2(0f, 300f), new Vector2(900f, 70f));
@@ -1183,8 +1027,6 @@ namespace KineticEnergy.EditorSetup
             pause.variantsPanel = panel;
             pause.firstVariantsButton = firstVariantButton;
 
-            // The way in, directly under Resume - then the whole column is re-laid so the
-            // eight buttons keep the even rhythm.
             GameObject openButton = CreateButton("VariantsButton", pausePanel, "Variants",
                 font, accent, new Vector2(0f, 140f), new Vector2(300f, 70f));
             WireButton(openButton, pause.OnVariantsClicked);
@@ -1196,8 +1038,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Level1Challenge variants screen added OK (5 variants + back)");
         }
 
-        // Stamps the steeper grounded-aim charge ramp on the two aim-test scenes' player
-        // instances - everywhere else keeps the shared default.
         [MenuItem("Tools/Kinetic Energy/Set Grounded Charge Ramp (Aim Scenes)")]
         public static void SetGroundedChargeRampAimScenes()
         {
@@ -1215,10 +1055,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: grounded charge ramp stamped OK (" + ramp + " in both aim scenes)");
         }
 
-        // Drops every ground enemy straight DOWN onto the surface beneath it - x and z are
-        // untouched, only the resting height is corrected. An enemy left hanging above (or
-        // sunk into) its platform is what made them clip through and hurl themselves at a
-        // platform on spawn.
         [MenuItem("Tools/Kinetic Energy/Snap Ground Enemies To Their Platforms")]
         public static void SnapGroundEnemiesToPlatforms()
         {
@@ -1236,8 +1072,7 @@ namespace KineticEnergy.EditorSetup
                 {
                     Transform body = walker.transform;
                     float bodyRadius = body.localScale.x * 0.5f;
-                    // Probe from well ABOVE, so a body that currently sits inside the deck
-                    // still finds the top face rather than missing it from within.
+
                     Vector3 origin = body.position + Vector3.up * 30f;
                     RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, 200f,
                         Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
@@ -1246,14 +1081,14 @@ namespace KineticEnergy.EditorSetup
                     foreach (RaycastHit hit in hits)
                     {
                         if (hit.collider == null) continue;
-                        if (hit.collider.GetComponentInParent<Enemy>() != null) continue;        // itself or a neighbour
+                        if (hit.collider.GetComponentInParent<Enemy>() != null) continue;
                         if (hit.collider.GetComponentInParent<FlyingEnemy>() != null) continue;
                         if (hit.collider.GetComponentInParent<KineticCubeController>() != null) continue;
-                        if (hit.collider.GetComponentInParent<DamageWalls>() != null) continue;  // never the hazard floor
-                        if (hit.point.y > body.position.y + 1f) continue;                        // ceilings above it
+                        if (hit.collider.GetComponentInParent<DamageWalls>() != null) continue;
+                        if (hit.point.y > body.position.y + 1f) continue;
                         if (hit.point.y > bestY) bestY = hit.point.y;
                     }
-                    if (float.IsNegativeInfinity(bestY)) continue; // nothing below - leave it alone
+                    if (float.IsNegativeInfinity(bestY)) continue;
 
                     Vector3 settled = new Vector3(body.position.x, bestY + bodyRadius, body.position.z);
                     if ((settled - body.position).sqrMagnitude < 0.0001f) continue;
@@ -1268,14 +1103,11 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // Swaps LevelElementsTest2's grounded enemies from stalkers to HUNTERS - the same
-        // aggressive cousin, but punishable AFTER its attack instead of during the windup.
-        // Placement is preserved exactly; nothing else in the scene is touched.
         [MenuItem("Tools/Kinetic Energy/Use Hunter Enemies In LevelElementsTest2")]
         public static void UseHunterEnemiesInLevelElementsTest2()
         {
             const string scenePath = "Assets/Scenes/LevelElementsTest2.unity";
-            CreateHunterEnemyPrefab(); // also stamps the dodge + cooldown window onto an older prefab
+            CreateHunterEnemyPrefab();
             EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
 
             GameObject hunterPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/HunterEnemy.prefab");
@@ -1284,7 +1116,7 @@ namespace KineticEnergy.EditorSetup
             int swapped = 0;
             foreach (Enemy walker in UnityEngine.Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
-                // Only the ground enemies that are NOT already hunters.
+
                 if (walker.killWindow == EnemyKillWindow.WhileCoolingDown) continue;
 
                 GameObject old = walker.gameObject;
@@ -1296,22 +1128,16 @@ namespace KineticEnergy.EditorSetup
                 swapped++;
             }
 
-            // Swapping objects alone does not flag the scene as modified, and SaveOpenScenes
-            // silently writes nothing for a clean scene - the first run reported success and
-            // saved absolutely nothing.
             if (swapped > 0) EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
             EditorSceneManager.SaveOpenScenes();
             AssetDatabase.SaveAssets();
             Debug.Log("KineticEnergySetup: LevelElementsTest2 now uses hunters OK (" + swapped + " swapped)");
         }
 
-        // SURGICAL tuning pass over both element scenes: values already serialized on scene
-        // instances do not follow a code default, so they are written here. Nothing else in
-        // either scene is touched.
         [MenuItem("Tools/Kinetic Energy/Tune Element Scenes")]
         public static void TuneElementScenes()
         {
-            const float laserKnockback = 16.5f; // 25% under the enemy-projectile 22
+            const float laserKnockback = 16.5f;
 
             foreach (string scenePath in new[]
             {
@@ -1333,7 +1159,7 @@ namespace KineticEnergy.EditorSetup
                 MergedEconomyController economy = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
                 if (economy != null)
                 {
-                    // Standing still pays below the baseline even mid-chain.
+
                     economy.regenWhileComboRunning = true;
                     EditorUtility.SetDirty(economy);
                 }
@@ -1345,15 +1171,11 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // Copies the turret section from LevelElementsTest into LevelElementsTest2 at the
-        // SAME placement it has in the source scene, so the two courses stay aligned even
-        // after the source has been moved around by hand. Additive - nothing else is touched.
         [MenuItem("Tools/Kinetic Energy/Restore Turret Section In LevelElementsTest2")]
         public static void RestoreTurretSectionInTest2()
         {
             string[] copyNames = { "TurretRun1", "TurretRun2", "TurretWallLeft", "TurretWallRight" };
 
-            // ---- Read the placement out of the source scene ----
             EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest.unity", OpenSceneMode.Single);
             var placements = new List<(string name, Vector3 pos, Quaternion rot, Vector3 scale)>();
             foreach (string name in copyNames)
@@ -1379,7 +1201,6 @@ namespace KineticEnergy.EditorSetup
             Vector3 cpPos = sourceCheckpoint != null ? sourceCheckpoint.transform.position : spawnPos;
             Vector3 cpScale = sourceCheckpoint != null ? sourceCheckpoint.transform.localScale : Vector3.one;
 
-            // ---- Rebuild it in the variant ----
             EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest2.unity", OpenSceneMode.Single);
             Material platformMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/QuarryPlatformMaterial.mat");
             Material wallMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/ElementsWallMaterial.mat");
@@ -1439,11 +1260,6 @@ namespace KineticEnergy.EditorSetup
                 + turretPlacements.Count + " turrets)");
         }
 
-        // LevelElementsTest2: the same course, harder cast. Flyers become weak-spot flyers
-        // (one extra, with angled side walls), ground enemies become stalkers on a bigger
-        // arena flanked by tilted non-sticky ledges, and the turret section is gone.
-        // Built by COPYING the scene, then editing it - the hand-placed checkpoints, intro
-        // text and section wiring all come across untouched.
         [MenuItem("Tools/Kinetic Energy/Setup LevelElementsTest2")]
         public static void SetupLevelElementsTest2()
         {
@@ -1459,7 +1275,7 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.Refresh();
             EditorSceneManager.OpenScene(targetPath, OpenSceneMode.Single);
 
-            ReplaceLooseRotatingWalls(); // the copy inherits the loose wall too
+            ReplaceLooseRotatingWalls();
 
             Material platformMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/QuarryPlatformMaterial.mat");
             Material wallMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/ElementsWallMaterial.mat");
@@ -1469,7 +1285,6 @@ namespace KineticEnergy.EditorSetup
             Transform tf = course != null ? course.transform : null;
             LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
 
-            // ---- Ground enemies -> STALKERS, on a bigger arena ----
             foreach (string arenaName in new[] { "GroundArena1", "GroundArena2" })
             {
                 GameObject arena = GameObject.Find(arenaName);
@@ -1478,9 +1293,6 @@ namespace KineticEnergy.EditorSetup
                 arena.transform.localScale = new Vector3(size.x * 1.25f, size.y, size.z * 1.25f);
                 EditorUtility.SetDirty(arena);
 
-                // Tilted, NON-STICKY ledges flanking the arena - one on the near side, two
-                // on the far, all above the deck and at different heights, so a stalker
-                // fight has vertical escapes that will not hold you if you cling.
                 float deckY = arena.transform.position.y;
                 float halfZ = arena.transform.localScale.z * 0.5f;
                 SpawnTiltedLedge(tf, arenaName + "LedgeA", arena.transform.position + new Vector3(-4f, deckY + 9f, -halfZ - 7f), new Vector3(0f, 0f, 22f), wallMat);
@@ -1489,7 +1301,6 @@ namespace KineticEnergy.EditorSetup
             }
             ReplaceEnemies("StalkerEnemy", isFlyer: false);
 
-            // ---- Flyers -> WEAK SPOT flyers, plus one more and flanking walls ----
             ReplaceEnemies("WeakSpotFlyer", isFlyer: true);
             GameObject flyStep = GameObject.Find("FlyStep1");
             if (flyStep != null)
@@ -1501,7 +1312,6 @@ namespace KineticEnergy.EditorSetup
                 SpawnTiltedLedge(tf, "FlySideWallC", centre + new Vector3(30f, 3f, -14f), new Vector3(10f, 0f, 16f), wallMat);
             }
 
-            // ---- The turret section goes entirely ----
             foreach (string turretObject in new[]
             {
                 "ElementsTurret1", "ElementsTurret2", "TurretWallLeft", "TurretWallRight",
@@ -1518,7 +1328,7 @@ namespace KineticEnergy.EditorSetup
 
             if (sections != null)
             {
-                // Drop the section whose spawn just went with the turrets.
+
                 var kept = new List<LevelSectionController.Section>();
                 foreach (LevelSectionController.Section section in sections.sections)
                 {
@@ -1536,8 +1346,6 @@ namespace KineticEnergy.EditorSetup
                 + (sections != null ? sections.sections.Length : 0) + " sections, turrets removed)");
         }
 
-        // A tilted slab you can bounce off but never cling to - deliberately plain, so it
-        // carries no StickySurface and lets go after the usual brief crash-cling.
         static void SpawnTiltedLedge(Transform parent, string name, Vector3 position, Vector3 eulerTilt, Material material)
         {
             GameObject ledge = CreateBlock(parent, name, position, new Vector3(12f, 1.5f, 9f), material);
@@ -1545,8 +1353,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(ledge);
         }
 
-        // Swaps every plain Enemy / FlyingEnemy in the scene for a harder prefab variant,
-        // keeping the spot each one guarded.
         static void ReplaceEnemies(string prefabName, bool isFlyer)
         {
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/" + prefabName + ".prefab");
@@ -1557,7 +1363,7 @@ namespace KineticEnergy.EditorSetup
             {
                 foreach (FlyingEnemy flyer in UnityEngine.Object.FindObjectsByType<FlyingEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
                 {
-                    if (flyer is WeakSpotFlyingEnemy) continue; // already the variant
+                    if (flyer is WeakSpotFlyingEnemy) continue;
                     targets.Add(flyer.gameObject);
                 }
             }
@@ -1565,7 +1371,7 @@ namespace KineticEnergy.EditorSetup
             {
                 foreach (Enemy walker in UnityEngine.Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
                 {
-                    if (walker.GetType() != typeof(Enemy)) continue; // leave existing variants alone
+                    if (walker.GetType() != typeof(Enemy)) continue;
                     targets.Add(walker.gameObject);
                 }
             }
@@ -1579,8 +1385,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // The sections screen is built from the section list, so dropping a section means
-        // rebuilding its buttons - otherwise a dead button points at a missing spawn.
         static void RebuildSectionsScreenButtons(LevelSectionController sections)
         {
             PauseController pause = UnityEngine.Object.FindAnyObjectByType<PauseController>(FindObjectsInactive.Include);
@@ -1610,13 +1414,10 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(pause);
         }
 
-        // The weak spot sat dead on top of the sphere, so it was as reachable from the front
-        // as from behind. Tilting it back makes the approach matter: you have to come at the
-        // flyer from above and BEHIND to land on it.
         [MenuItem("Tools/Kinetic Energy/Angle WeakSpotFlyer Weak Spot")]
         public static void AngleWeakSpotFlyerWeakSpot()
         {
-            const float tiltDegrees = 42f;   // from straight up, leaning toward the back (-z)
+            const float tiltDegrees = 42f;
             const float spotDistance = 0.55f;
 
             string path = PrefabFolder + "/WeakSpotFlyer.prefab";
@@ -1626,7 +1427,6 @@ namespace KineticEnergy.EditorSetup
                 Transform spot = root.transform.Find("WeakSpot");
                 if (spot == null) throw new Exception("KineticEnergySetup: WeakSpotFlyer has no WeakSpot child.");
 
-                // Euler(-tilt, 0, 0) leans the local up axis toward -z, i.e. the flyer's back.
                 Quaternion lean = Quaternion.Euler(-tiltDegrees, 0f, 0f);
                 spot.localRotation = lean;
                 spot.localPosition = lean * Vector3.up * spotDistance;
@@ -1639,8 +1439,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: weak spot angled " + tiltDegrees + " degrees toward the back OK");
         }
 
-        // The scene held one hand-built rotating wall and one prefab instance. Swaps the
-        // loose one for the prefab, keeping its placement, spin settings and damage edges.
         [MenuItem("Tools/Kinetic Energy/Replace Loose Rotating Walls With Prefab")]
         public static void ReplaceLooseRotatingWallsWithPrefab()
         {
@@ -1685,7 +1483,6 @@ namespace KineticEnergy.EditorSetup
             return replaced;
         }
 
-        // Re-collects every respawning hazard so newly built shells follow the checkpoint.
         static void RefreshSectionHazards(LevelSectionController sections)
         {
             var hazards = new List<DamageWalls>();
@@ -1697,16 +1494,11 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(sections);
         }
 
-        // SURGICAL: adds the damage edges to LevelElementsTest's turret and rotating walls
-        // and touches NOTHING else. The full setup rebuilds the whole course, which throws
-        // away hand-placed checkpoints and edited text - this is the safe way to add the
-        // shells to a scene that has since been worked on by hand.
         [MenuItem("Tools/Kinetic Energy/Add Damage Edges To LevelElementsTest")]
         public static void AddElementsDamageEdges()
         {
             EditorSceneManager.OpenScene("Assets/Scenes/LevelElementsTest.unity", OpenSceneMode.Single);
 
-            // The existing damage material, loaded - never re-created, never restyled.
             Material damageMat = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/DamageWallMaterial.mat");
             if (damageMat == null) throw new Exception("KineticEnergySetup: DamageWallMaterial is missing.");
 
@@ -1714,15 +1506,13 @@ namespace KineticEnergy.EditorSetup
             Transform fallbackSpawn = sections != null && sections.sections.Length > 0 ? sections.sections[0].spawnPoint : null;
 
             int shelled = 0;
-            // Rotating walls: the RIM only - both broad faces must stay landable, since the
-            // wall turns each of them round to meet you in turn.
+
             foreach (RotatingWall wall in UnityEngine.Object.FindObjectsByType<RotatingWall>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
                 AddEdgeDamageShell(wall.transform, fallbackSpawn, damageMat);
                 shelled++;
             }
 
-            // Turret walls: edges AND the back - only the mounted face stays landable.
             foreach (string wallName in new[] { "TurretWallLeft", "TurretWallRight" })
             {
                 GameObject wallGo = GameObject.Find(wallName);
@@ -1731,8 +1521,6 @@ namespace KineticEnergy.EditorSetup
                 shelled++;
             }
 
-            // The new shells respawn the player, so the section index must know about them
-            // or a death on one would ignore the active checkpoint.
             if (sections != null)
             {
                 var hazards = new List<DamageWalls>(sections.hazards);
@@ -1750,9 +1538,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: damage edges added OK (" + shelled + " walls shelled, nothing else touched)");
         }
 
-        // Diagnostic: opens LevelElementsTest and reports whether a working pause menu is
-        // actually present and wired (object active, panels/buttons assigned, an
-        // EventSystem to drive it). Changes nothing.
         [MenuItem("Tools/Kinetic Energy/Validate LevelElementsTest Pause Menu")]
         public static void ValidateLevelElementsPauseMenu()
         {
@@ -1793,7 +1578,6 @@ namespace KineticEnergy.EditorSetup
             GameObject pauseSystem = GameObject.Find("PauseSystem");
             Debug.Log("PAUSECHECK pauseSystemObject=" + (pauseSystem != null ? "FOUND active=" + pauseSystem.activeInHierarchy : "MISSING"));
 
-            // Section buttons: label -> wired argument -> the section that argument selects.
             LevelSectionController sectionController = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
             PauseController owner = controllers.Length > 0 ? controllers[0] : null;
             if (sectionController == null || owner == null || owner.sectionsPanel == null) return;
@@ -1823,13 +1607,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // ==================== LevelElementsTest ====================
-
-        // Rebuilds LevelElementsTest as a LINEAR element showcase: one march along +x, each
-        // section introducing a single new kind of platform, obstacle or enemy, with height
-        // and lateral variation between them. The challenge-variation machinery the scene
-        // inherited from its Level1Challenge copy is stripped out; the economy stays.
-        // Idempotent - safe to re-run.
         [MenuItem("Tools/Kinetic Energy/Setup LevelElementsTest")]
         public static void SetupLevelElementsTest()
         {
@@ -1846,7 +1623,6 @@ namespace KineticEnergy.EditorSetup
                 throw new Exception("KineticEnergySetup: LevelElementsTest is missing the player, MergedEconomy or PauseController.");
             }
 
-            // ---- Strip the inherited challenge run ----
             foreach (ChallengeStageController stale in UnityEngine.Object.FindObjectsByType<ChallengeStageController>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
                 UnityEngine.Object.DestroyImmediate(stale.gameObject);
@@ -1904,9 +1680,6 @@ namespace KineticEnergy.EditorSetup
             var sections = new List<LevelSectionController.Section>();
             var hazards = new List<DamageWalls>();
 
-            // Every section opens with a plain pad the player is teleported onto, so a jump
-            // into any element starts from solid, safe ground - and a checkpoint slab
-            // hovering over it, so reaching the section on foot claims it as well.
             Transform OpenSection(string label, Vector3 padCentre)
             {
                 GameObject sectionPad = CreateBlock(tf, label + "Pad", padCentre, pad, platformMat);
@@ -1919,7 +1692,7 @@ namespace KineticEnergy.EditorSetup
                 GameObject checkpoint = InstantiatePrefab("Checkpoint");
                 checkpoint.name = label + "Checkpoint";
                 checkpoint.transform.SetParent(tf, false);
-                // Hovers just clear of the deck, thin enough to pass through on landing.
+
                 checkpoint.transform.position = padCentre + new Vector3(0f, pad.y * 0.5f + 0.75f, 0f);
                 checkpoint.transform.localScale = new Vector3(pad.x * 0.9f, 0.5f, pad.z * 0.9f);
                 checkpoint.GetComponent<Checkpoint>().respawnPoint = spawn.transform;
@@ -1928,41 +1701,33 @@ namespace KineticEnergy.EditorSetup
                 return spawn.transform;
             }
 
-            float gap = 0.42f * L;      // a comfortable mid-charge hop
-            // The section pad sits a SHORT lead-in from its own first element, and a full
-            // gap from the previous section's last one. With an even spacing the pad landed
-            // exactly midway between the two, so jumping to a section dropped you next to
-            // the PREVIOUS section's content - it read as arriving one section early.
+            float gap = 0.42f * L;
+
             float lead = gap * 0.5f;
             float x = 0f;
             float e1, e2;
 
-            // ---- 1. Basics: plain platforms, gentle rise, slight weave ----
             OpenSection("1 - Basics", new Vector3(x, -1f, 0f));
             Vector3 playerSpawn = new Vector3(x, 1.5f, 0f);
             e1 = x + lead; e2 = e1 + gap;
             CreateBlock(tf, "BasicsHop1", new Vector3(e1, 1f, 10f), pad, platformMat);
             CreateBlock(tf, "BasicsHop2", new Vector3(e2, 4f, -8f), pad, platformMat);
 
-            // ---- 2. Moving platforms ----
             x = e2 + gap;
             OpenSection("2 - Moving platforms", new Vector3(x, 4f, 0f));
             e1 = x + lead; e2 = e1 + gap;
             SpawnMovingPlatform(tf, "MoverSide", new Vector3(e1, 5f, -14f), new Vector3(0f, 0f, 28f), 7f);
             SpawnMovingPlatform(tf, "MoverLift", new Vector3(e2, 2f, 6f), new Vector3(0f, 14f, 0f), 6f);
 
-            // ---- 3. Rotating walls: sticky faces that keep turning away ----
             x = e2 + gap;
             Transform spinSpawn = OpenSection("3 - Rotating walls", new Vector3(x, 8f, 0f));
             e1 = x + lead; e2 = e1 + gap;
             GameObject spinWall1 = SpawnRotatingWall(tf, "SpinWall1", new Vector3(e1, 10f, -10f), 28f, 0f, wallMat);
             GameObject spinWall2 = SpawnRotatingWall(tf, "SpinWall2", new Vector3(e2, 12f, 8f), -36f, 90f, wallMat);
-            // Rim only - a spinning wall presents BOTH broad faces in turn, so both stay
-            // landable and it is the thin edges that punish a miss.
+
             AddEdgeDamageShell(spinWall1.transform, spinSpawn, damageMat);
             AddEdgeDamageShell(spinWall2.transform, spinSpawn, damageMat);
 
-            // ---- 4. Lasers: timed gates over a straight runway ----
             x = e2 + gap;
             Transform laserSpawn = OpenSection("4 - Lasers", new Vector3(x, 8f, 0f));
             e1 = x + lead; e2 = e1 + gap;
@@ -1971,7 +1736,6 @@ namespace KineticEnergy.EditorSetup
             CreateLaserGate(tf, "ElementsGate1", new Vector3(x + lead * 0.5f, 9f, 0f), 24f, 12f, 1.5f, 1.5f, 0f, laserSpawn);
             CreateLaserGate(tf, "ElementsGate2", new Vector3((e1 + e2) * 0.5f, 9f, 0f), 24f, 12f, 1.2f, 1.4f, 0.7f, laserSpawn);
 
-            // ---- 5. Grounded enemies: wide arenas to fight across ----
             x = e2 + gap;
             OpenSection("5 - Ground enemies", new Vector3(x, 4f, 0f));
             e1 = x + lead; e2 = e1 + gap;
@@ -1981,7 +1745,6 @@ namespace KineticEnergy.EditorSetup
             SpawnEnemy("ElementsEnemy2", new Vector3(e2 - 5f, 4f, -12f), EnemyWanderMode.PlatformSurface, 10f, 2f);
             SpawnEnemy("ElementsEnemy3", new Vector3(e2 + 5f, 4f, -12f), EnemyWanderMode.WithinRadius, 8f, 2f);
 
-            // ---- 6. Flying enemies: shooters over open gaps ----
             x = e2 + gap;
             OpenSection("6 - Flying enemies", new Vector3(x, 6f, 0f));
             e1 = x + lead; e2 = e1 + gap;
@@ -1990,7 +1753,6 @@ namespace KineticEnergy.EditorSetup
             CreateBlock(tf, "FlyStep2", new Vector3(e2, 12f, 10f), pad, platformMat);
             SpawnFlyingEnemy("ElementsFlyer2", new Vector3(e1 + gap * 0.6f, 20f, 6f), 11f, 26f);
 
-            // ---- 7. Turrets: fixed guns covering the final corridor ----
             x = e2 + gap;
             Transform turretSpawn = OpenSection("7 - Turrets", new Vector3(x, 10f, 0f));
             e1 = x + lead; e2 = e1 + gap;
@@ -2000,12 +1762,10 @@ namespace KineticEnergy.EditorSetup
             CreateBlock(tf, "TurretRun2", new Vector3(e2, 8f, 0f), new Vector3(16f, 2f, 16f), platformMat);
             GameObject turretWallRight = CreateBlock(tf, "TurretWallRight", new Vector3(e2, 12f, 16f), new Vector3(20f, 16f, 2f), wallMat);
             SpawnTurret("ElementsTurret2", new Vector3(e2, 13f, 14.8f), new Vector3(90f, 0f, 0f));
-            // Edges AND the back: only the face the turret is mounted on stays landable -
-            // the shell picks that face automatically as the one turned toward the course.
+
             AddDamageShell(turretWallLeft.transform, turretSpawn, damageMat);
             AddDamageShell(turretWallRight.transform, turretSpawn, damageMat);
 
-            // ---- Finish ----
             x = e2 + gap;
             CreateBlock(tf, "FinishPad", new Vector3(x, -1f, 0f), new Vector3(16f, 2f, 16f), platformMat);
             float courseLength = x;
@@ -2018,10 +1778,6 @@ namespace KineticEnergy.EditorSetup
             finishBox.size = new Vector3(6f, 6f, 12f);
             finish.AddComponent<WinOnFinish>();
 
-            // ---- Lasers HURT rather than kill ----
-            // Their beam root's DamageWalls is swapped for the hazard component, so a
-            // mistimed run costs a shove plus a chunk of tank - the same as walking into an
-            // enemy - instead of ending the run. They stop being respawn sources with it.
             foreach (LaserWall gate in course.GetComponentsInChildren<LaserWall>(true))
             {
                 foreach (DamageWalls beamDamage in gate.GetComponentsInChildren<DamageWalls>(true))
@@ -2033,19 +1789,16 @@ namespace KineticEnergy.EditorSetup
                 }
             }
 
-            // ---- Hazard floor, well below the whole run ----
             GameObject damageFloor = CreateBlock(null, "DamageFloor",
                 new Vector3(courseLength * 0.5f, -26f, 0f), new Vector3(courseLength + 120f, 2f, 220f), damageMat);
             DamageWalls floorDamage = damageFloor.AddComponent<DamageWalls>();
             hazards.Add(floorDamage);
-            // Anything else in the course that still respawns (none today - the lasers gave
-            // it up above - but a future hazard is picked up automatically).
+
             foreach (DamageWalls courseHazard in course.GetComponentsInChildren<DamageWalls>(true))
             {
                 hazards.Add(courseHazard);
             }
 
-            // ---- Section index (drives the pause menu's jump screen) ----
             GameObject sectionsGo = GameObject.Find("LevelSections");
             if (sectionsGo != null) UnityEngine.Object.DestroyImmediate(sectionsGo);
             sectionsGo = new GameObject("LevelSections");
@@ -2054,8 +1807,6 @@ namespace KineticEnergy.EditorSetup
             sectionController.hazards = hazards.ToArray();
             EditorUtility.SetDirty(sectionController);
 
-            // Every hazard starts pointed at section 1 (the controller re-points them on
-            // each jump); the player begins there too.
             foreach (DamageWalls hazard in hazards)
             {
                 hazard.respawnPoint = sections[0].spawnPoint;
@@ -2065,15 +1816,8 @@ namespace KineticEnergy.EditorSetup
             player.transform.position = playerSpawn;
             EditorUtility.SetDirty(player);
 
-            // The scene's own rule: a combo window that runs dry in the air drops you.
             economy.dropPlayerWhenWindowExpires = true;
-            // NOTE: introText / introKey are deliberately NOT written here. They are edited
-            // by hand in the scene, and stamping them on every re-run threw that work away.
-            // Standing still below the 40% baseline ALWAYS refills you (while no combo
-            // window is running). The recharge latches on below its trigger and fills to
-            // its ceiling, so trigger == ceiling == the baseline turns it into a plain
-            // "anything under 40% regenerates" rule. Set on every variant's pair so the
-            // rule holds whichever one the scene is on.
+
             economy.safetyTriggerFraction = economy.safetyCeilingFraction;
             economy.dualSafetyTriggerFraction = economy.dualSafetyCeilingFraction;
             economy.totalLossSafetyTriggerFraction = economy.totalLossSafetyCeilingFraction;
@@ -2082,9 +1826,6 @@ namespace KineticEnergy.EditorSetup
             BuildSectionsScreen(pause, sectionController, sections);
         }
 
-        // The pause menu's SECTIONS screen: a button per section that teleports the player
-        // there and hands play straight back. Built on the scene's PauseSystem instance, so
-        // no other scene's menu changes. The inherited Variants screen is removed.
         static void BuildSectionsScreen(PauseController pause, LevelSectionController sectionController, List<LevelSectionController.Section> sections)
         {
             Transform pauseCanvas = pause.transform.parent != null && pause.transform.parent.Find("PausePanel") != null
@@ -2094,7 +1835,6 @@ namespace KineticEnergy.EditorSetup
             Transform pausePanel = pauseCanvas.Find("PausePanel");
             if (pausePanel == null) throw new Exception("KineticEnergySetup: LevelElementsTest's PauseCanvas has no PausePanel.");
 
-            // The challenge-variant screen this scene inherited has no meaning here.
             DestroyDirectChildIfExists(pausePanel, "VariantsButton");
             DestroyDirectChildIfExists(pauseCanvas, "VariantsPanel");
             DestroyDirectChildIfExists(pausePanel, "SectionsButton");
@@ -2121,8 +1861,7 @@ namespace KineticEnergy.EditorSetup
             {
                 GameObject sectionButton = CreateButton("Section_" + (i + 1) + "Button", panel.transform,
                     sections[i].label, font, accent, new Vector2(0f, y), new Vector2(460f, 62f));
-                // Two listeners, in order: jump, then close the menu - the teleport has
-                // already put the player where they asked to be.
+
                 WireSceneButton(sectionButton, sectionController.GoToSection, i.ToString());
                 WireButton(sectionButton, pause.ResumeAfterSectionJump);
                 if (i == 0) firstButton = sectionButton;
@@ -2156,8 +1895,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(mover);
         }
 
-        // A floating wall on a turntable: sticky, so its face holds you and carries you
-        // round once you land on it.
         static GameObject SpawnRotatingWall(Transform parent, string name, Vector3 position, float degreesPerSecond, float startAngle, Material material)
         {
             GameObject wall = CreateBlock(parent, name, position, new Vector3(14f, 12f, 2f), material);
@@ -2186,9 +1923,6 @@ namespace KineticEnergy.EditorSetup
             "Keep landing before the meter empties.\n\n" +
             "Press any button to start.";
 
-        // ORDER-ONLY swap of the sealing and chasing stages in the live scene: the two
-        // sequence entries trade places, the info text renumbers, and the Variants screen
-        // is rebuilt in the new order. No tuning value is touched.
         [MenuItem("Tools/Kinetic Energy/Swap Sealing And Chasing Order (Level1Challenge)")]
         public static void SwapSealingChasingOrder()
         {
@@ -2207,25 +1941,14 @@ namespace KineticEnergy.EditorSetup
             }
             EditorUtility.SetDirty(stages);
 
-            economy.introText = Level1ChallengeInfoText; // renumbered 3/4
+            economy.introText = Level1ChallengeInfoText;
             EditorUtility.SetDirty(economy);
             EditorSceneManager.SaveOpenScenes();
 
-            // The Variants screen rebuild carries the new order/labels (tuning untouched).
             AddVariantsScreenToLevel1Challenge();
             Debug.Log("KineticEnergySetup: sealing/chasing order swapped OK");
         }
 
-        // The checkpoint pad: a blue see-through slab that hovers over a section's platform.
-        // Sized per instance (90% of its platform in x/z, 0.5 tall), so the prefab is a
-        // plain unit cube trigger.
-        // Converts the checkpoint from a pass-through trigger into a physical BUTTON, and
-        // does it by editing the existing prefab IN PLACE. That matters: recreating the
-        // asset gives every object inside it new ids, and each placed checkpoint's
-        // overrides - its name, position, scale and respawn target - are bound to those
-        // ids. Rebuilding the prefab silently reset all fourteen placed checkpoints to
-        // defaults. Keeping the ROOT (and its Checkpoint component) untouched keeps every
-        // override bound; only children are added around it.
         [MenuItem("Tools/Kinetic Energy/Create Checkpoint Prefab")]
         public static void CreateCheckpointPrefab()
         {
@@ -2245,15 +1968,12 @@ namespace KineticEnergy.EditorSetup
             GameObject root = PrefabUtility.LoadPrefabContents(path);
             try
             {
-                // The ROOT becomes the frame: the surround the button is set into. Solid
-                // now - the assembly is landed on rather than passed through.
+
                 Collider rootCollider = root.GetComponent<Collider>();
                 if (rootCollider != null) rootCollider.isTrigger = false;
                 Renderer rootRenderer = root.GetComponent<Renderer>();
                 if (rootRenderer != null) rootRenderer.sharedMaterial = frameMat;
 
-                // Child collisions report through the body on the root, which is how the
-                // component hears the button being struck.
                 Rigidbody body = root.GetComponent<Rigidbody>();
                 if (body == null) body = root.AddComponent<Rigidbody>();
                 body.isKinematic = true;
@@ -2262,7 +1982,6 @@ namespace KineticEnergy.EditorSetup
                 Transform existingButton = root.transform.Find("Button");
                 if (existingButton != null) UnityEngine.Object.DestroyImmediate(existingButton.gameObject);
 
-                // The pressable face, standing proud of the frame so its travel reads.
                 GameObject button = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 button.name = "Button";
                 button.transform.SetParent(root.transform, false);
@@ -2275,9 +1994,7 @@ namespace KineticEnergy.EditorSetup
                 checkpoint.buttonVisual = button.transform;
                 checkpoint.buttonRenderer = button.GetComponent<Renderer>();
                 checkpoint.buttonCollider = button.GetComponent<Collider>();
-                // The button spans local y 0 -> 1.2 and the frame's top face sits at 0.5, so
-                // it stands 0.7 proud. Sinking 0.45 leaves 0.25 still showing: pressed IN,
-                // not swallowed - at 0.9 it dropped below the frame and disappeared.
+
                 checkpoint.pressDepth = 0.45f;
 
                 PrefabUtility.SaveAsPrefabAsset(root, path);
@@ -2288,8 +2005,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Checkpoint button prefab updated in place OK");
         }
 
-        // The floating cube rows above each interactable read as clutter in the world -
-        // switched off on the instances that already have them serialized on.
         [MenuItem("Tools/Kinetic Energy/Clear Requirement Tick Marks")]
         public static void ClearRequirementTickMarks()
         {
@@ -2307,8 +2022,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: requirement tick marks cleared OK (" + cleared + " objects)");
         }
 
-        // Diagnostic: for every tiered enemy, what colour SHOULD it wear when vulnerable,
-        // and is the component that applies it actually able to run?
         [MenuItem("Tools/Kinetic Energy/Validate Enemy Tier Colours")]
         public static void ValidateEnemyTierColours()
         {
@@ -2338,16 +2051,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // SecondLevel: a full six-section course built on LevelElementsTest3's systems
-        // (player, camera, pause menu, meters, economy harness, band palette all inherited
-        // by the copy). Every section runs THREE element beats instead of the element
-        // scenes' two - half again as long - and every section after the first mixes at
-        // least two element types, so nothing is ever taught in isolation twice.
-        //
-        // The difficulty curve is in the PLACEMENT, not just the count: hazards start
-        // beside the route and end across it, enemies start alone on wide decks and end
-        // stacked on narrow ones, and the energy prices climb 20% -> 60% as the tank gets
-        // harder to keep full.
         [MenuItem("Tools/Kinetic Energy/Setup SecondLevel")]
         public static void SetupSecondLevel()
         {
@@ -2372,7 +2075,6 @@ namespace KineticEnergy.EditorSetup
                 throw new Exception("KineticEnergySetup: course materials missing - build an element scene first.");
             }
 
-            // ---- Clear the inherited course, keeping every SYSTEM in the scene ----
             foreach (string stale in new[] { "ElementsCourse", "LevelSections", "DamageFloor" })
             {
                 GameObject go = GameObject.Find(stale);
@@ -2396,8 +2098,6 @@ namespace KineticEnergy.EditorSetup
             var sections = new List<LevelSectionController.Section>();
             var hazards = new List<DamageWalls>();
 
-            // Each section opens on a plain pad with its checkpoint, exactly as the element
-            // course does - a jump to any section starts from solid, safe ground.
             Transform OpenSection(string label, Vector3 padCentre, float checkpointPrice)
             {
                 GameObject sectionPad = CreateBlock(tf, label + "Pad", padCentre, pad, platformMat);
@@ -2425,9 +2125,6 @@ namespace KineticEnergy.EditorSetup
             float x = 0f;
             float e1, e2, e3;
 
-            // ---- 1. FOUNDATIONS - hop, ride, and one lone target -------------------
-            // The gentlest mix in the level: static ground first, then a single mover, then
-            // one small enemy alone on a wide deck with room to circle it.
             Transform s1 = OpenSection("1 - Foundations", new Vector3(x, -1f, 0f), 0.2f);
             Vector3 playerSpawn = new Vector3(x, 1.5f, 0f);
             e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
@@ -2438,9 +2135,6 @@ namespace KineticEnergy.EditorSetup
             f_deck.AddComponent<StickySurface>();
             SpawnBandedSizedEnemy("SL_Small1", new Vector3(e3, 7f, 0f), EnemySizeClass.Small, 9f, palette, pipMaterial);
 
-            // ---- 2. MOMENTUM - two movers and a turning face ------------------------
-            // Movers now travel on DIFFERENT axes, and the rotating wall sits between them,
-            // so the ride has to be left on a schedule rather than waited out.
             x = e3 + gap;
             Transform s2 = OpenSection("2 - Momentum", new Vector3(x, 4f, 0f), 0.2f);
             e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
@@ -2451,9 +2145,6 @@ namespace KineticEnergy.EditorSetup
             CreateBlock(tf, "M_Landing", new Vector3(e3, 9f, 4f), pad, platformMat);
             SpawnBandedSizedEnemy("SL_Medium1", new Vector3(e3, 11f, 4f), EnemySizeClass.Medium, 5f, palette, pipMaterial);
 
-            // ---- 3. CROSSFIRE - timed beams with a gun watching the runway ----------
-            // The first gate is beside the line, the second across it, and the turret covers
-            // the landing between them: the beams set the rhythm, the turret punishes waiting.
             x = e3 + gap;
             Transform s3 = OpenSection("3 - Crossfire", new Vector3(x, 8f, 0f), 0.4f);
             e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
@@ -2466,9 +2157,6 @@ namespace KineticEnergy.EditorSetup
             SpawnBandedTurret("SL_Turret1", new Vector3(e2, 13f, -13.8f), new Vector3(-90f, 0f, 0f), palette, pipMaterial);
             SpawnMovingPlatform(tf, "C_Ferry", new Vector3(e3, 8f, 0f), new Vector3(0f, 0f, 18f), 6f);
 
-            // ---- 4. AERIAL - open air, weak spots, and turning walls ----------------
-            // No continuous floor: the platforms are small and far apart, the flyers own the
-            // space between them, and the tilted ledges will not hold a cling.
             x = e3 + gap;
             Transform s4 = OpenSection("4 - Aerial", new Vector3(x, 8f, 0f), 0.4f);
             e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
@@ -2480,9 +2168,6 @@ namespace KineticEnergy.EditorSetup
             CreateBlock(tf, "A_Step2", new Vector3(e3, 13f, 10f), pad, platformMat);
             SpawnBandedFlyer("SL_Flyer2", new Vector3(e2 + gap * 0.6f, 21f, 6f), 12f, 28f, palette, pipMaterial);
 
-            // ---- 5. SIEGE - held ground, two guns and a mixed pair ------------------
-            // Crossfire from BOTH sides now, with the arena between them holding a small and
-            // a large enemy - the cheap kill and the expensive one in the same fight.
             x = e3 + gap;
             Transform s5 = OpenSection("5 - Siege", new Vector3(x, 6f, 0f), 0.6f);
             e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
@@ -2500,9 +2185,6 @@ namespace KineticEnergy.EditorSetup
             CreateLaserGate(tf, "S_Gate", new Vector3((e2 + e3) * 0.5f, 7f, 0f), 24f, 12f, 1.0f, 1.2f, 0.3f, s5);
             SpawnMovingPlatform(tf, "S_Ferry", new Vector3(e3, 7f, 0f), new Vector3(0f, 9f, 14f), 7f);
 
-            // ---- 6. GAUNTLET - every element at once --------------------------------
-            // The exam: a moving approach under a gun, an air fight over a laser gate, and a
-            // final deck holding the level's most expensive pair behind a turning wall.
             x = e3 + gap;
             Transform s6 = OpenSection("6 - Gauntlet", new Vector3(x, 8f, 0f), 0.6f);
             e1 = x + lead; e2 = e1 + gap; e3 = e2 + gap;
@@ -2521,13 +2203,10 @@ namespace KineticEnergy.EditorSetup
             SpawnBandedSizedEnemy("SL_Medium2", new Vector3(e3 - 7f, 10f, 5f), EnemySizeClass.Medium, 9f, palette, pipMaterial);
             SpawnBandedSizedEnemy("SL_Large2", new Vector3(e3 + 7f, 10f, -5f), EnemySizeClass.Large, 9f, palette, pipMaterial);
 
-            // ---- Finish ----
             x = e3 + gap;
             CreateBlock(tf, "FinishPad", new Vector3(x, 6f, 0f), new Vector3(16f, 2f, 16f), platformMat);
             float courseLength = x;
 
-            // The finish prefab IS the trigger AND its green visual - its scale is the
-            // volume, so no separate collider sizing.
             CreateFinishVolumePrefab();
             GameObject finish = InstantiatePrefab("FinishVolume");
             finish.name = "SecondLevelFinish";
@@ -2536,7 +2215,6 @@ namespace KineticEnergy.EditorSetup
             finish.transform.localScale = new Vector3(6f, 6f, 12f);
             EditorUtility.SetDirty(finish);
 
-            // ---- Lasers HURT rather than kill (same bargain as the element course) ----
             foreach (LaserWall gate in course.GetComponentsInChildren<LaserWall>(true))
             {
                 foreach (DamageWalls beamDamage in gate.GetComponentsInChildren<DamageWalls>(true))
@@ -2548,7 +2226,6 @@ namespace KineticEnergy.EditorSetup
                 }
             }
 
-            // ---- Hazard floor ----
             GameObject damageFloor = CreateBlock(null, "DamageFloor",
                 new Vector3(courseLength * 0.5f, -26f, 0f), new Vector3(courseLength + 120f, 2f, 240f), damageMat);
             DamageWalls floorDamage = damageFloor.AddComponent<DamageWalls>();
@@ -2558,7 +2235,6 @@ namespace KineticEnergy.EditorSetup
                 hazards.Add(courseHazard);
             }
 
-            // ---- Section index (drives the pause menu's jump screen) ----
             GameObject sectionsGo = new GameObject("LevelSections");
             LevelSectionController sectionController = sectionsGo.AddComponent<LevelSectionController>();
             sectionController.sections = sections.ToArray();
@@ -2574,7 +2250,6 @@ namespace KineticEnergy.EditorSetup
             player.transform.position = playerSpawn;
             EditorUtility.SetDirty(player);
 
-            // ---- The bottom-left teaching HUD, retargeted at these six sections ----
             SectionIntroHud hud = UnityEngine.Object.FindAnyObjectByType<SectionIntroHud>(FindObjectsInactive.Include);
             if (hud != null)
             {
@@ -2599,19 +2274,6 @@ namespace KineticEnergy.EditorSetup
                 + courseLength.ToString("F0") + ")");
         }
 
-        // NOTE: checkpoint prices are tuned PER INSTANCE in the Hierarchy, on each
-        // checkpoint's own minActivationEnergyFraction. There is deliberately no setup
-        // method that stamps them any more - one existed to set the opening four to 40%,
-        // and re-running it would silently overwrite hand-tuning. Nothing at runtime writes
-        // the field either, so the inspector value on each instance is the whole authority:
-        // the activation gate, the respawn grant, the pips, the % label, the band colour
-        // and the meter tick all read it live at Start.
-        //
-        // The one method that still writes it is SetupLevelElementsTest3, which rebuilds
-        // that scene from scratch - it necessarily re-authors everything it creates.
-
-        // Diagnostic: what each checkpoint charges, and whether that figure is an INSTANCE
-        // override (which masks any edit made to the prefab).
         [MenuItem("Tools/Kinetic Energy/Validate Checkpoint Prices")]
         public static void ValidateCheckpointPrices()
         {
@@ -2683,8 +2345,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // Requirement percentages are read off the enforcing gate at Start, so these only
-        // need the palette and the build-safe pip material.
         static void AddBandRequirement(GameObject target, EnergyBandPalette palette, Material pipMaterial, Renderer shows)
         {
             EnergyRequirement requirement = target.GetComponent<EnergyRequirement>();
@@ -2734,10 +2394,6 @@ namespace KineticEnergy.EditorSetup
             AddBandRequirement(instance, palette, pipMaterial, instance.GetComponentInChildren<Renderer>());
         }
 
-        // The laser-charging loop: bakes the FIRST 5 SECONDS of the imported mp3 into a
-        // WAV asset and wires it as the charge loop. Trimmed at the asset, not at runtime:
-        // the clip LOOPS, and the source's ~2 trailing silent seconds would have put a
-        // hole in every cycle.
         [MenuItem("Tools/Kinetic Energy/Bake Laser Charging Loop")]
         public static void BakeLaserChargingLoop()
         {
@@ -2748,7 +2404,7 @@ namespace KineticEnergy.EditorSetup
             AudioImporter importer = AssetImporter.GetAtPath(sourcePath) as AudioImporter;
             if (importer == null) throw new Exception("KineticEnergySetup: " + sourcePath + " missing.");
             AudioImporterSampleSettings settings = importer.defaultSampleSettings;
-            settings.loadType = AudioClipLoadType.DecompressOnLoad; // GetData needs raw samples
+            settings.loadType = AudioClipLoadType.DecompressOnLoad;
             importer.defaultSampleSettings = settings;
             importer.SaveAndReimport();
 
@@ -2780,7 +2436,6 @@ namespace KineticEnergy.EditorSetup
                 + "Hz, " + source.channels + "ch, source " + source.length.ToString("F2") + "s)");
         }
 
-        // Minimal 16-bit PCM WAV writer - enough for Unity's importer.
         static void WriteWav(string assetPath, float[] samples, int channels, int frequency)
         {
             using (var stream = new FileStream(assetPath, FileMode.Create))
@@ -2792,7 +2447,7 @@ namespace KineticEnergy.EditorSetup
                 writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
                 writer.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
                 writer.Write(16);
-                writer.Write((short)1); // PCM
+                writer.Write((short)1);
                 writer.Write((short)channels);
                 writer.Write(frequency);
                 writer.Write(frequency * channels * 2);
@@ -2807,31 +2462,26 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // The speed-lines look, matched to the manga reference: MANY needle-thin lines, a
-        // wide clear centre, streaming outward - and far subtler than before.
         [MenuItem("Tools/Kinetic Energy/Tune Trail Speed Lines")]
         public static void TuneTrailSpeedLines()
         {
             Material trail = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/TrailScreenspace.mat");
             if (trail == null) throw new Exception("KineticEnergySetup: TrailScreenspace.mat missing.");
-            trail.SetFloat("_Intensity", 0.25f);      // "much much less pronounced"
-            trail.SetFloat("_LineCount", 90f);        // dense field of needles
-            trail.SetFloat("_LineWidth", 0.045f);     // thin
+            trail.SetFloat("_Intensity", 0.25f);
+            trail.SetFloat("_LineCount", 90f);
+            trail.SetFloat("_LineWidth", 0.045f);
             trail.SetFloat("_Density", 0.55f);
-            trail.SetFloat("_InnerRadius", 1f);       // circular units: hole ~half the screen height - the lines live at the corners and edges only
-            trail.SetFloat("_OuterRadius", 2f);       // travel extent - slivers clear the corners before wrapping
+            trail.SetFloat("_InnerRadius", 1f);
+            trail.SetFloat("_OuterRadius", 2f);
             trail.SetFloat("_TailSoftness", 0.05f);
-            trail.SetFloat("_OutwardTaper", 0.15f);   // near-constant width, needle tips inward as referenced
-            trail.SetFloat("_StreamSpeed", 0.35f);    // slow drift outward - the old 1.2 strobed
-            trail.SetFloat("_StreamLength", 0.7f);    // long comets, soft both ends
+            trail.SetFloat("_OutwardTaper", 0.15f);
+            trail.SetFloat("_StreamSpeed", 0.35f);
+            trail.SetFloat("_StreamLength", 0.7f);
             EditorUtility.SetDirty(trail);
             AssetDatabase.SaveAssets();
             Debug.Log("KineticEnergySetup: trail speed lines tuned OK");
         }
 
-        // The shells get their own OPAQUE material back: sharing the beams' material meant
-        // the beam exemption (transparent surface, no outline) silently applied to the
-        // shells too - and the shells looked right in the outlined, opaque style.
         [MenuItem("Tools/Kinetic Energy/Give Shells Own Material")]
         public static void GiveShellsOwnMaterial()
         {
@@ -2839,7 +2489,7 @@ namespace KineticEnergy.EditorSetup
             if (shellMaterial == null)
             {
                 Material fresh = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-                fresh.color = new Color(0.95f, 0.08f, 0.05f); // the laser red the shells wore
+                fresh.color = new Color(0.95f, 0.08f, 0.05f);
                 fresh.SetFloat("_Smoothness", 0f);
                 shellMaterial = SaveMaterialAsset(fresh, "DamageShellMaterial");
             }
@@ -2870,11 +2520,6 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // The definitive outline exemption: the aim visuals and the laser red become
-        // TRANSPARENT-surface materials (alpha stays 1 - they look identical). Transparent
-        // surfaces never write the depth or normals buffers the edge detect reads, so the
-        // exemption holds regardless of how URP sources its depth texture - the layer mask
-        // alone did not stop opaque depth-writers reaching it through the depth copy.
         [MenuItem("Tools/Kinetic Energy/Exempt Visual Materials From Outline")]
         public static void ExemptVisualMaterialsFromOutline()
         {
@@ -2896,15 +2541,10 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // The NoOutline layer: objects on it are excluded from the depth/normals PREPASS
-        // (the renderer's prepass layer mask), which is the buffer the edge-detect pass
-        // reads - so they render normally but grow no black rim. Applied to the aim
-        // visuals, the debris, the laser BEAMS (columns stay outlined - they are landable
-        // geometry) and, in code, the enemy projectiles.
         [MenuItem("Tools/Kinetic Energy/Setup NoOutline Layer")]
         public static void SetupNoOutlineLayer()
         {
-            // 1. The layer itself, in the first empty user slot.
+
             var tagManager = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset")[0]);
             SerializedProperty layers = tagManager.FindProperty("layers");
             int layerIndex = -1;
@@ -2918,7 +2558,6 @@ namespace KineticEnergy.EditorSetup
             layers.GetArrayElementAtIndex(layerIndex).stringValue = "NoOutline";
             tagManager.ApplyModifiedPropertiesWithoutUndo();
 
-            // 2. Both renderers' prepass masks drop the layer.
             foreach (string rendererPath in new[] { "Assets/Settings/PC_Renderer.asset", "Assets/Settings/Mobile_Renderer.asset" })
             {
                 var data = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.ScriptableRendererData>(rendererPath);
@@ -2930,7 +2569,6 @@ namespace KineticEnergy.EditorSetup
                 EditorUtility.SetDirty(data);
             }
 
-            // 3. The prefab subtrees.
             void SetSubtree(Transform t)
             {
                 foreach (Transform child in t.GetComponentsInChildren<Transform>(true)) child.gameObject.layer = layerIndex;
@@ -2965,10 +2603,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: NoOutline layer is index " + layerIndex);
         }
 
-        // The black outline pass: a fullscreen depth+normals edge detect, added to both
-        // renderer assets as a FullScreenPass feature. Catches every object's silhouette
-        // AND interior creases, current and future alike, without touching a single
-        // material. Idempotent - re-running finds the existing feature and re-points it.
         [MenuItem("Tools/Kinetic Energy/Add Edge Outline Feature")]
         public static void AddEdgeOutlineFeature()
         {
@@ -2996,24 +2630,16 @@ namespace KineticEnergy.EditorSetup
                     data.rendererFeatures.Add(feature);
                 }
                 feature.passMaterial = material;
-                // BEFORE TRANSPARENTS: the depth-exempt visuals (laser beams, aim dots)
-                // draw AFTER the outline, so background silhouette lines can never cut
-                // across them - which is exactly what read as "the beams are transparent".
-                // Post-processing still composites over everything afterwards.
+
                 feature.injectionPoint = UnityEngine.Rendering.Universal.FullScreenPassRendererFeature.InjectionPoint.BeforeRenderingTransparents;
                 feature.requirements = UnityEngine.Rendering.Universal.ScriptableRenderPassInput.Depth
                     | UnityEngine.Rendering.Universal.ScriptableRenderPassInput.Normal;
-                feature.fetchColorBuffer = true; // the shader reads the scene through _BlitTexture
+                feature.fetchColorBuffer = true;
                 EditorUtility.SetDirty(feature);
                 EditorUtility.SetDirty(data);
                 Debug.Log("KineticEnergySetup: edge outline wired into " + rendererPath);
             }
 
-            // The map repair MUST follow any scripted feature add: URP validates
-            // m_RendererFeatures against m_RendererFeatureMap (each feature's local file
-            // id) and silently SKIPS unmapped features - the outline was wired, serialized
-            // and invisible. Editor validation rebuilds the map on inspection; batch mode
-            // never inspects, so it is rebuilt here by hand.
             foreach (string rendererPath in new[] { "Assets/Settings/PC_Renderer.asset", "Assets/Settings/Mobile_Renderer.asset" })
             {
                 var data = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.ScriptableRendererData>(rendererPath);
@@ -3038,7 +2664,6 @@ namespace KineticEnergy.EditorSetup
                     + " (" + features.arraySize + " features)");
             }
 
-            // The pass samples the depth texture - both quality tiers must produce one.
             foreach (string rpPath in new[] { "Assets/Settings/PC_RPAsset.asset", "Assets/Settings/Mobile_RPAsset.asset" })
             {
                 var rp = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset>(rpPath);
@@ -3052,9 +2677,6 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // Normalizes the hurt clip: the source mp3 is mastered QUIET (its peak sits well
-        // under full scale), and no volume slider can push a source past 1 - so the
-        // loudness has to be baked into the asset. Peak-normalized to 0.98 and wired.
         [MenuItem("Tools/Kinetic Energy/Bake Player Hurt Sound")]
         public static void BakePlayerHurtSound()
         {
@@ -3096,10 +2718,6 @@ namespace KineticEnergy.EditorSetup
                 + ", gain x" + gain.ToString("F2") + ")");
         }
 
-        // Audit + repair: every DamageWalls in the scene that is NOT the hazard floor gets
-        // converted to the shove-and-drain LaserHazard. Some shells survived the earlier
-        // name-matched conversion (anything not named 'DamageShell*'), and those still
-        // hard-respawned the player.
         [MenuItem("Tools/Kinetic Energy/Convert All Lethal Shells")]
         public static void ConvertAllLethalShells()
         {
@@ -3111,8 +2729,7 @@ namespace KineticEnergy.EditorSetup
                 foreach (DamageWalls lethal in UnityEngine.Object.FindObjectsByType<DamageWalls>(FindObjectsInactive.Include, FindObjectsSortMode.None))
                 {
                     string n = lethal.gameObject.name;
-                    // The FLOOR is the one intended respawn source; laser gate beams were
-                    // already converted per-scene and carry LaserWall parents if any remain.
+
                     if (n == "DamageFloor") continue;
                     Debug.Log("SHELLFIX converting '" + n + "' at " + lethal.transform.position.ToString("F0") + " in " + scenePath);
                     GameObject go = lethal.gameObject;
@@ -3121,9 +2738,7 @@ namespace KineticEnergy.EditorSetup
                     EditorUtility.SetDirty(go);
                     converted++;
                 }
-                // The section controller's hazards array held references to the components
-                // just destroyed - rebuilt from what actually remains, or the respawn
-                // repointing walks into nulls.
+
                 LevelSectionController sections = UnityEngine.Object.FindAnyObjectByType<LevelSectionController>(FindObjectsInactive.Include);
                 if (sections != null)
                 {
@@ -3137,9 +2752,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // The crash decal: imports the stamp texture, builds its unlit-transparent material
-        // (a real asset, so the shader survives WebGL stripping - the pip lesson), and
-        // wires it onto the Player prefab's Polish in place.
         [MenuItem("Tools/Kinetic Energy/Setup Crash Decal")]
         public static void SetupCrashDecal()
         {
@@ -3148,7 +2760,7 @@ namespace KineticEnergy.EditorSetup
             if (importer == null) throw new Exception("KineticEnergySetup: " + texturePath + " missing.");
             importer.textureType = TextureImporterType.Default;
             importer.alphaIsTransparency = true;
-            importer.mipmapEnabled = true; // a world decal is seen at every distance
+            importer.mipmapEnabled = true;
             importer.SaveAndReimport();
             Texture2D texture = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
 
@@ -3158,8 +2770,8 @@ namespace KineticEnergy.EditorSetup
                 Shader unlit = Shader.Find("Universal Render Pipeline/Unlit");
                 if (unlit == null) throw new Exception("KineticEnergySetup: URP/Unlit shader not found.");
                 Material fresh = new Material(unlit);
-                fresh.SetFloat("_Surface", 1f); // transparent
-                fresh.SetFloat("_Blend", 0f);   // alpha blend
+                fresh.SetFloat("_Surface", 1f);
+                fresh.SetFloat("_Blend", 0f);
                 fresh.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
                 fresh.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
                 fresh.SetInt("_ZWrite", 0);
@@ -3168,7 +2780,7 @@ namespace KineticEnergy.EditorSetup
                 fresh.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
                 material = SaveMaterialAsset(fresh, "CrashDecalMaterial");
             }
-            // The texture is (re)pointed even on an existing material - it IS the decal.
+
             material.SetTexture("_BaseMap", texture);
             EditorUtility.SetDirty(material);
 
@@ -3179,34 +2791,27 @@ namespace KineticEnergy.EditorSetup
                 Polish polish = root.GetComponent<Polish>();
                 if (polish == null) polish = root.AddComponent<Polish>();
                 polish.crashDecalMaterial = material;
-                // The debris systems moved off the controller - re-wired here by child
-                // name, the same objects the old fields pointed at.
+
                 Transform debris = FindDeep(root.transform, "Debris");
                 Transform dust = FindDeep(root.transform, "Dust");
                 if (debris != null) polish.debrisParticles = debris.GetComponent<ParticleSystem>();
                 if (dust != null) polish.dustParticles = dust.GetComponent<ParticleSystem>();
-                // The speed-lines overlay, migrated off the controller.
+
                 Transform trails = FindDeep(root.transform, "Trails");
                 if (trails != null) polish.trailImage = trails.GetComponent<UnityEngine.UI.Image>();
-                // Audio, migrated off the controller - the same source and the same four
-                // clips its old fields referenced (mapped by guid before the fields went).
+
                 polish.playerSounds = root.GetComponentInChildren<AudioSource>(true);
                 polish.flyingSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Whoosh.mp3");
-                // The BAKED laser loop, not the old ChargeLoop.wav - this wiring ran again
-                // after the bake and silently reverted the clip once already.
+
                 polish.chargingLoopSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/LaserChargingLoop.wav");
                 polish.crashSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Thud.wav");
                 polish.energyClickSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/EnergyClick.wav");
                 polish.enemyKillSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/EnemyBreak.mp3");
-                // The NORMALIZED bake, not the quiet source mp3 (the laser-loop lesson:
-                // this wiring re-runs, and must never regress a baked clip).
+
                 AudioClip hurtLoud = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/PlayerHurtLoud.wav");
                 polish.playerHurtSound = hurtLoud != null ? hurtLoud
                     : AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/PlayerHurt.mp3");
 
-                // The world-space ribbon behind the player. TWO children are named
-                // "Trail", so the one actually CARRYING a TrailRenderer is the anchor -
-                // never the name alone.
                 polish.motionTrail = root.GetComponentInChildren<TrailRenderer>(true);
                 PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
                 Debug.Log("KineticEnergySetup: debris wired=" + (polish.debrisParticles != null)
@@ -3217,9 +2822,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: crash decal wired OK");
         }
 
-        // Adds the Polish component (squash and stretch) to the Player prefab, edited in
-        // place so no instance override is lost. The visual reference is wired to the same
-        // child the free-move lean already drives.
         [MenuItem("Tools/Kinetic Energy/Add Polish To Player")]
         public static void AddPolishToPlayer()
         {
@@ -3238,21 +2840,10 @@ namespace KineticEnergy.EditorSetup
             finally { PrefabUtility.UnloadPrefabContents(root); }
         }
 
-        // BUILD FIX: the requirement pips and the % labels rendered solid magenta in a
-        // player build while looking correct in the editor - the signature of a shader
-        // that exists in the editor but is stripped from the build.
-        //
-        // Two causes, both from creating visuals at RUNTIME:
-        //   - GameObject.CreatePrimitive assigns the built-in Default-Material (Standard
-        //     shader). URP cannot render it and nothing references it, so it is stripped.
-        //   - TextMesh draws through the built-in font's material; its shader is only
-        //     included if something forces it in.
-        // Fixed by giving the pips a real project material (a scene reference is never
-        // stripped) and by naming the font shader in Always Included Shaders.
         [MenuItem("Tools/Kinetic Energy/Fix Runtime Visual Materials")]
         public static void FixRuntimeVisualMaterials()
         {
-            // Unlit: the pips ARE their colour - no lighting should shift the band hue.
+
             Material pip = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/EnergyPipMaterial.mat");
             if (pip == null)
             {
@@ -3260,13 +2851,6 @@ namespace KineticEnergy.EditorSetup
                 if (unlit == null) throw new Exception("KineticEnergySetup: URP/Unlit shader not found.");
                 pip = SaveMaterialAsset(new Material(unlit), "EnergyPipMaterial");
             }
-
-            // NOT DONE HERE: forcing the built-in font's shader into Always Included
-            // Shaders. GUI/Text Shader lives in 'unity default resources' and is flagged
-            // HideFlags.DontSave, so listing it makes the player build try to include an
-            // asset that must never be included - the build FAILS outright ("Failed to
-            // write file: .../unity_builtin_extra"), and Unity skips the shader anyway.
-            // TextMesh pulls that material in by itself; it needs no help.
 
             string[] scenes =
             {
@@ -3291,8 +2875,6 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // Diagnostic: what the controls sheet ACTUALLY imported as, versus what the rect
-        // asks the canvas to draw it at.
         [MenuItem("Tools/Kinetic Energy/Validate Controls Image")]
         public static void ValidateControlsImage()
         {
@@ -3324,33 +2906,23 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // Puts the authored controls sheet on the pause menu's Controls screen: the image
-        // replaces the generated body TEXT, which said the same thing in a far less
-        // readable way. Edited IN PLACE on the prefab (recreating it would reset every
-        // placed instance's overrides), and the title and Back button are left untouched.
         [MenuItem("Tools/Kinetic Energy/Add Controls Image")]
         public static void AddControlsImage()
         {
             const string texturePath = "Assets/Textures/ControlsSheet.png";
             TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
             if (importer == null) throw new Exception("KineticEnergySetup: " + texturePath + " missing - copy the controls sheet in first.");
-            // Re-applied every run: these are the settings the sheet NEEDS, and getting
-            // them wrong is invisible in the meta but obvious on screen.
+
             importer.textureType = TextureImporterType.Sprite;
             importer.spriteImportMode = SpriteImportMode.Single;
-            importer.maxTextureSize = 4096;               // never cap the sheet
+            importer.maxTextureSize = 4096;
             importer.npotScale = TextureImporterNPOTScale.None;
-            importer.textureCompression = TextureImporterCompression.Uncompressed; // fine text, no blocks
-            // MIPMAPS ON, trilinear. The panel draws the sheet at 1180x787 UI units from a
-            // 1536x1024 source - it is MINIFIED, not shown at native size. Sampling a
-            // dense text image below its native size with no mips aliases hard: strokes
-            // drop pixels and break up, which reads exactly as "pixelated". Mips give the
-            // GPU a properly filtered smaller version to sample instead. (The first pass
-            // turned them off on the assumption the sheet was drawn 1:1 - it is not.)
+            importer.textureCompression = TextureImporterCompression.Uncompressed;
+
             importer.mipmapEnabled = true;
-            importer.mipmapFilter = TextureImporterMipFilter.KaiserFilter; // sharper mips than box
+            importer.mipmapFilter = TextureImporterMipFilter.KaiserFilter;
             importer.filterMode = FilterMode.Trilinear;
-            importer.anisoLevel = 4;                      // holds up when the panel is scaled down
+            importer.anisoLevel = 4;
             importer.SaveAndReimport();
             Sprite sheet = AssetDatabase.LoadAssetAtPath<Sprite>(texturePath);
             if (sheet == null) throw new Exception("KineticEnergySetup: " + texturePath + " did not import as a Sprite.");
@@ -3362,8 +2934,6 @@ namespace KineticEnergy.EditorSetup
                 Transform panel = FindDeep(root.transform, "ControlsPanel");
                 if (panel == null) throw new Exception("KineticEnergySetup: ControlsPanel not found in PauseSystem.prefab.");
 
-                // The generated body text is what the sheet replaces - switched off rather
-                // than deleted, so PauseController's serialized reference stays intact.
                 Transform body = FindDeep(panel, "ControlsBody");
                 if (body != null) body.gameObject.SetActive(false);
 
@@ -3377,17 +2947,16 @@ namespace KineticEnergy.EditorSetup
                 Image image = imageGo.GetComponent<Image>();
                 if (image == null) image = imageGo.AddComponent<Image>();
                 image.sprite = sheet;
-                image.preserveAspect = true;               // never stretch the sheet
-                image.raycastTarget = false;               // must not eat clicks from Back
+                image.preserveAspect = true;
+                image.raycastTarget = false;
 
-                // Fills the panel with a margin, under the title and above the Back button.
                 RectTransform rect = imageGo.GetComponent<RectTransform>();
                 rect.anchorMin = new Vector2(0.5f, 0.5f);
                 rect.anchorMax = new Vector2(0.5f, 0.5f);
                 rect.pivot = new Vector2(0.5f, 0.5f);
                 rect.anchoredPosition = new Vector2(0f, -10f);
-                rect.sizeDelta = new Vector2(1180f, 787f); // the sheet's 1536x1024 ratio
-                // Behind the title/Back button in draw order, so they stay clickable and on top.
+                rect.sizeDelta = new Vector2(1180f, 787f);
+
                 imageGo.transform.SetAsFirstSibling();
 
                 PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
@@ -3396,8 +2965,6 @@ namespace KineticEnergy.EditorSetup
             finally { PrefabUtility.UnloadPrefabContents(root); }
         }
 
-        // Breadth-first name lookup through an inactive hierarchy (Transform.Find only
-        // walks one level, and these panels are switched off in the prefab).
         static Transform FindDeep(Transform parent, string name)
         {
             foreach (Transform child in parent.GetComponentsInChildren<Transform>(true))
@@ -3407,10 +2974,6 @@ namespace KineticEnergy.EditorSetup
             return null;
         }
 
-        // The bottom-left section explainer: one HUD element per course section, text picked
-        // by the section's label so the Test2/Test3 turret/flyer swap needs no special case.
-        // The first section's text carries the controls primer. All of it hangs off the
-        // component's single showHud checkbox.
         [MenuItem("Tools/Kinetic Energy/Setup Section Intro HUD")]
         public static void SetupSectionIntroHud()
         {
@@ -3455,8 +3018,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // Matched on label keywords, so section NUMBERING (which differs between the
-        // element scenes after the turret/flyer swap) never has to be special-cased.
         static string SectionIntroTextFor(string label, bool isFirst, bool sizedEnemies)
         {
             string lower = (label ?? "").ToLowerInvariant();
@@ -3500,18 +3061,11 @@ namespace KineticEnergy.EditorSetup
                 : body;
         }
 
-        // The one-shot migration to the blackbody band system: creates the band palette
-        // asset, rewires every EnergyRequirement in LevelElementsTest3 to it (the field's
-        // TYPE changed, so the old references died), turns the required pip rows back on,
-        // hands the meter the palette, and makes the DamageWall material a deep UNLIT red -
-        // the emissive/non-emissive split is what separates hazard red from band-1 ember.
         [MenuItem("Tools/Kinetic Energy/Apply Energy Bands")]
         public static void ApplyEnergyBands()
         {
             EnergyBandPalette palette = EnsureBandPalette();
 
-            // DamageWalls: same deep red, but UNLIT - hazards must not join the emissive
-            // heat ramp. Colour is preserved exactly; only the shader changes.
             Material damageMaterial = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/DamageWallMaterial.mat");
             if (damageMaterial != null)
             {
@@ -3532,7 +3086,7 @@ namespace KineticEnergy.EditorSetup
             foreach (EnergyRequirement requirement in UnityEngine.Object.FindObjectsByType<EnergyRequirement>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
                 requirement.palette = palette;
-                requirement.buildTickMarks = true; // redundant encoding is REQUIRED now
+                requirement.buildTickMarks = true;
                 EditorUtility.SetDirty(requirement);
                 rewired++;
             }
@@ -3551,8 +3105,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: energy bands applied OK (" + rewired + " interactables, " + wired + " meter)");
         }
 
-        // Diagnostic: what the player's meter ACTUALLY looks like - which variant, how the
-        // blocks are split, and what span the economy thinks the main bar covers.
         [MenuItem("Tools/Kinetic Energy/Validate Meter Geometry")]
         public static void ValidateMeterGeometry()
         {
@@ -3601,7 +3153,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("METERCHECK economy=" + (economy != null ? economy.name : "NONE"));
         }
 
-        // Diagnostic: reports every energy-tier interactable in LevelElementsTest3.
         [MenuItem("Tools/Kinetic Energy/Validate Energy Tiers")]
         public static void ValidateEnergyTiers()
         {
@@ -3643,10 +3194,6 @@ namespace KineticEnergy.EditorSetup
             return palette;
         }
 
-        // LevelElementsTest3: Test2's course, with the ENERGY-TIER language on every
-        // interactable. Sized hunters replace the plain ones (medium first, then a
-        // small+large pair), flyers cost 40%, turrets 80%, checkpoints 60% - each painted
-        // from the shared tier palette rather than its own colours.
         [MenuItem("Tools/Kinetic Energy/Setup LevelElementsTest3")]
         public static void SetupLevelElementsTest3()
         {
@@ -3655,8 +3202,6 @@ namespace KineticEnergy.EditorSetup
 
             EnergyBandPalette palette = EnsureBandPalette();
 
-            // The sized family must BEHAVE like the hunters it replaces - stamped onto the
-            // prefab (in place, so placed instances elsewhere keep their overrides).
             string sizedPath = PrefabFolder + "/SizedEnemy.prefab";
             GameObject sizedRoot = PrefabUtility.LoadPrefabContents(sizedPath);
             try
@@ -3664,12 +3209,6 @@ namespace KineticEnergy.EditorSetup
                 SizedEnemy sized = sizedRoot.GetComponent<SizedEnemy>();
                 if (sized == null) throw new Exception("KineticEnergySetup: SizedEnemy prefab has no SizedEnemy component.");
 
-                // "Behave exactly like the hunter" is taken literally: every field the Enemy
-                // BASE declares is copied straight off HunterEnemy.prefab, so the sized family
-                // shares the hunter's wind-up, recovery, cooldown, dodge geometry and colour
-                // language rather than an approximation of it. SizedEnemy's OWN fields (size
-                // class, the speed/knockback/scale multipliers, the kill fractions) are
-                // declared on the subclass and so are never touched.
                 Enemy hunter = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabFolder + "/HunterEnemy.prefab")
                     ?.GetComponent<Enemy>();
                 if (hunter == null) throw new Exception("KineticEnergySetup: HunterEnemy prefab missing - cannot mirror its behaviour.");
@@ -3679,8 +3218,7 @@ namespace KineticEnergy.EditorSetup
                 int copied = 0;
                 foreach (var field in baseFields)
                 {
-                    // Object references would point the sized prefab at the hunter's own
-                    // children; only the tuning values travel.
+
                     if (typeof(UnityEngine.Object).IsAssignableFrom(field.FieldType)) continue;
                     object mine = field.GetValue(sized);
                     object theirs = field.GetValue(hunter);
@@ -3706,8 +3244,6 @@ namespace KineticEnergy.EditorSetup
 
             GameObject sizedPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(sizedPath);
 
-            // ---- Ground hunters -> the sized family ----
-            // First encountered (smallest x) = MEDIUM; the grouped pair = SMALL and LARGE.
             var walkers = new List<Enemy>(UnityEngine.Object.FindObjectsByType<Enemy>(FindObjectsInactive.Include, FindObjectsSortMode.None));
             walkers.Sort((a, b) => a.transform.position.x.CompareTo(b.transform.position.x));
             EnemySizeClass[] classes = { EnemySizeClass.Medium, EnemySizeClass.Small, EnemySizeClass.Large };
@@ -3725,7 +3261,6 @@ namespace KineticEnergy.EditorSetup
                 UnityEngine.Object.DestroyImmediate(old.gameObject);
             }
 
-            // ---- Flyers: at least 40% ----
             foreach (WeakSpotFlyingEnemy flyerInstance in UnityEngine.Object.FindObjectsByType<WeakSpotFlyingEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
                 flyerInstance.minKillEnergyFraction = 0.4f;
@@ -3734,7 +3269,6 @@ namespace KineticEnergy.EditorSetup
                 EditorUtility.SetDirty(flyerInstance);
             }
 
-            // ---- Turrets: at least 80% ----
             foreach (TurretEnemy turretInstance in UnityEngine.Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
                 turretInstance.minKillEnergyFraction = 0.8f;
@@ -3742,7 +3276,6 @@ namespace KineticEnergy.EditorSetup
                 EditorUtility.SetDirty(turretInstance);
             }
 
-            // ---- Checkpoints: at least 60% to claim ----
             foreach (Checkpoint checkpointInstance in UnityEngine.Object.FindObjectsByType<Checkpoint>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
                 checkpointInstance.minActivationEnergyFraction = 0.6f;
@@ -3770,13 +3303,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(requirement);
         }
 
-        // The element scenes' finish was a bare, invisible trigger built inline - nothing to
-        // see and nothing to reuse. This makes it a proper prefab with a green see-through
-        // body, and swaps the loose objects for instances at their existing placement.
-        //
-        // Deliberately its OWN prefab rather than a change to FinishTrigger.prefab, which
-        // Levels 3-10 use with FinishLineNextScene - giving that one a visual would alter
-        // every one of them.
         [MenuItem("Tools/Kinetic Energy/Create Finish Volume Prefab")]
         public static void CreateFinishVolumePrefab()
         {
@@ -3791,13 +3317,12 @@ namespace KineticEnergy.EditorSetup
                 UnityEngine.Object.DestroyImmediate(seed);
             }
 
-            // Edited IN PLACE from here on, so any instances keep their overrides bound.
             GameObject root = PrefabUtility.LoadPrefabContents(path);
             try
             {
                 BoxCollider box = root.GetComponent<BoxCollider>();
                 if (box == null) box = root.AddComponent<BoxCollider>();
-                box.isTrigger = true; // flown THROUGH - it must never stop a launch
+                box.isTrigger = true;
 
                 Renderer bodyRenderer = root.GetComponent<Renderer>();
                 if (bodyRenderer != null)
@@ -3815,7 +3340,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: FinishVolume prefab ready OK");
         }
 
-        // Diagnostic: reports the finish volume's real state in both element scenes.
         [MenuItem("Tools/Kinetic Energy/Validate Finish Volumes")]
         public static void ValidateFinishVolumes()
         {
@@ -3862,12 +3386,11 @@ namespace KineticEnergy.EditorSetup
                 int swapped = 0;
                 foreach (WinOnFinish finish in UnityEngine.Object.FindObjectsByType<WinOnFinish>(FindObjectsInactive.Include, FindObjectsSortMode.None))
                 {
-                    if (PrefabUtility.IsPartOfPrefabInstance(finish.gameObject)) continue; // already done
+                    if (PrefabUtility.IsPartOfPrefabInstance(finish.gameObject)) continue;
 
                     Transform old = finish.transform;
                     BoxCollider oldBox = finish.GetComponent<BoxCollider>();
-                    // The cube IS the trigger, so the old collider's box becomes the scale -
-                    // the volume the player passes through stays exactly the same size.
+
                     Vector3 worldSize = oldBox != null
                         ? Vector3.Scale(oldBox.size, old.lossyScale)
                         : old.lossyScale;
@@ -3888,9 +3411,6 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // Rewrites the intro/BuildInfo text in both element scenes. They describe DIFFERENT
-        // casts now - plain enemies in one, hunters and weak-spot flyers in the other - so
-        // each gets its own text rather than a shared one that would be wrong for both.
         [MenuItem("Tools/Kinetic Energy/Update Element Scene Intro Text")]
         public static void UpdateElementSceneIntroText()
         {
@@ -3942,9 +3462,6 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // Hides the pause menu's BuildInfo button. Held OFF until asked otherwise - the
-        // boot explainer it reopens is switched off too, and the section HUD teaches in
-        // place now. Hidden, not deleted, so turning it back on is one flag.
         [MenuItem("Tools/Kinetic Energy/Set BuildInfo Button Hidden")]
         public static void SetBuildInfoButtonHidden()
         {
@@ -3960,8 +3477,6 @@ namespace KineticEnergy.EditorSetup
             }
             finally { PrefabUtility.UnloadPrefabContents(root); }
 
-            // Scene instances can carry their own active-state override, so the scenes that
-            // matter are cleared too rather than trusting the prefab alone.
             foreach (string scenePath in new[]
             {
                 "Assets/Scenes/LevelElementsTest3.unity",
@@ -3987,10 +3502,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // The itch.io build. Everything here is chosen for ONE requirement: it has to load
-        // from a plain static host that sets no special headers.
-        // ItchBuild03: same proven settings as 02 (uncompressed for itch's headerless
-        // hosting, the ItchFullscreen template - now with the fullscreen-only gate).
         [MenuItem("Tools/Kinetic Energy/Build WebGL ItchBuild03")]
         public static void BuildWebGLItch03()
         {
@@ -4043,18 +3554,11 @@ namespace KineticEnergy.EditorSetup
             PlayerSettings.defaultWebScreenWidth = 1280;
             PlayerSettings.defaultWebScreenHeight = 720;
 
-            // COMPRESSION OFF. This is the fix for the blank page: itch.io serves files
-            // straight from static storage and never sets Content-Encoding, so a Brotli
-            // (or gzip) build hands the browser compressed bytes labelled as plain ones and
-            // the loader dies before anything renders - leaving exactly the empty page that
-            // was reported. Uncompressed files need no header agreement at all. The build
-            // gets bigger; itch's limit is far above that and a load that works beats a
-            // smaller one that does not.
             PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
-            PlayerSettings.WebGL.decompressionFallback = false; // nothing left to decompress
-            PlayerSettings.WebGL.dataCaching = true;            // second visit loads from cache
+            PlayerSettings.WebGL.decompressionFallback = false;
+            PlayerSettings.WebGL.dataCaching = true;
             PlayerSettings.runInBackground = false;
-            // Exceptions kept: a silent failure in a web build is undiagnosable otherwise.
+
             PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
 
             string output = "Builds/ItchBuild02";
@@ -4078,12 +3582,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // Builds LevelElementsTest3 for the web, ready to zip and drop on itch.io.
-        //
-        // ONLY that scene goes in: the build list carries ~20 scenes, and a WebGL player
-        // pays for every one of them in download size. The pause menu's Scenes screen
-        // therefore has nothing to jump to in this build - by design, it is a single-level
-        // web cut.
         [MenuItem("Tools/Kinetic Energy/Build WebGL (LevelElementsTest3)")]
         public static void BuildWebGLTest3()
         {
@@ -4093,18 +3591,14 @@ namespace KineticEnergy.EditorSetup
                 throw new Exception("KineticEnergySetup: " + scene + " is missing.");
             }
 
-            // The custom template is what makes the canvas fill the itch iframe and what
-            // holds Escape inside fullscreen - see Assets/WebGLTemplates/ItchFullscreen.
             PlayerSettings.WebGL.template = "PROJECT:ItchFullscreen";
-            // The canvas is sized by CSS, but these are what the loader starts from and
-            // what the aspect is derived from before the first resize.
+
             PlayerSettings.defaultWebScreenWidth = 1280;
             PlayerSettings.defaultWebScreenHeight = 720;
-            // itch serves the compressed files with the right encoding, and Brotli is
-            // roughly a third smaller than gzip on a build this size.
+
             PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Brotli;
-            PlayerSettings.WebGL.decompressionFallback = true; // works even if headers are wrong
-            PlayerSettings.runInBackground = false;            // a paused tab should not keep simulating
+            PlayerSettings.WebGL.decompressionFallback = true;
+            PlayerSettings.runInBackground = false;
 
             string output = "Builds/WebGL_LevelElementsTest3";
             var options = new BuildPlayerOptions
@@ -4127,10 +3621,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // Splits the BASICS section's teaching into three beats, each shown where the player
-        // actually meets it: charging on the start pad, re-aiming once they have landed the
-        // first hop, and the button rules at the first checkpoint they must press. Only
-        // section 1's text and the step list are written - every other section is untouched.
         [MenuItem("Tools/Kinetic Energy/Split Basics HUD Steps")]
         public static void SplitBasicsHudSteps()
         {
@@ -4139,17 +3629,12 @@ namespace KineticEnergy.EditorSetup
             SectionIntroHud hud = UnityEngine.Object.FindAnyObjectByType<SectionIntroHud>(FindObjectsInactive.Include);
             if (hud == null) throw new Exception("KineticEnergySetup: LevelElementsTest3 has no SectionIntroHud.");
 
-            // Beat 1 is the section's own text - it is what shows on the opening pad. Each
-            // beat names ONLY the buttons of the device in the player's hands; the HUD
-            // swaps between the two the moment the input does.
             if (hud.sectionTexts.Length > 0)
             {
                 hud.sectionTexts[0] =
                     "THE BASICS\n" +
                     "Charge a launch by holding Right Mouse and press Left Mouse to fire.";
 
-                // Sized to match sectionTexts, so index 0 lines up and later sections simply
-                // fall back to their shared wording.
                 string[] padTexts = new string[hud.sectionTexts.Length];
                 padTexts[0] =
                     "THE BASICS\n" +
@@ -4158,9 +3643,7 @@ namespace KineticEnergy.EditorSetup
             }
 
             GameObject secondPlatform = GameObject.Find("BasicsHop1");
-            // The first checkpoint the player has to ACTIVATE: section 1's own button is on
-            // the pad they spawn on and is already claimed, so the button lesson belongs at
-            // the next one along.
+
             GameObject firstCheckpoint = GameObject.Find("2 - Moving platformsCheckpoint");
             if (secondPlatform == null || firstCheckpoint == null)
             {
@@ -4175,12 +3658,10 @@ namespace KineticEnergy.EditorSetup
                 new SectionIntroHud.ProximityStep
                 {
                     label = "Basics - re-aim",
-                    // Spans the SECOND and THIRD platforms and the air between them, so the
-                    // re-aim lesson holds for the whole hop rather than blinking out
-                    // mid-flight between the two.
+
                     target = secondPlatform.transform,
                     targetEnd = thirdPlatform.transform,
-                    radius = 14f, // the pads are 12 wide, so this is "on or just above them"
+                    radius = 14f,
                     text =
                         "THE BASICS\n" +
                         "When midair, hold the aim button again to slow time and re-aim. " +
@@ -4196,7 +3677,7 @@ namespace KineticEnergy.EditorSetup
                 {
                     label = "Basics - checkpoints",
                     target = firstCheckpoint.transform,
-                    radius = 22f, // picked up on the approach, before the press
+                    radius = 22f,
                     text =
                         "CHECKPOINTS\n" +
                         "Activate one by crashing using a regular launch down or a ground pound by " +
@@ -4213,9 +3694,6 @@ namespace KineticEnergy.EditorSetup
             };
             EditorUtility.SetDirty(hud);
 
-            // The boot overlay stands down - the bottom-left HUD teaches in place now, and
-            // two explainers competing at the start was one too many. Still reachable from
-            // the pause menu's BuildInfo button.
             MergedEconomyController economy = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
             if (economy != null)
             {
@@ -4223,8 +3701,6 @@ namespace KineticEnergy.EditorSetup
                 EditorUtility.SetDirty(economy);
             }
 
-            // The floating world figures go: the pip rows over every interactable and the
-            // sized enemies' own percentages. The band COLOUR carries the price now.
             int quieted = 0;
             foreach (EnergyRequirement requirement in UnityEngine.Object.FindObjectsByType<EnergyRequirement>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
@@ -4248,9 +3724,6 @@ namespace KineticEnergy.EditorSetup
                 + quieted + " requirement displays quieted");
         }
 
-        // LevelElementsTest3's own intro. It describes a different game from the earlier
-        // element scenes: energy is a PRICE now, every interactable advertises what it
-        // costs on the blackbody band scale, and the enemies' tells changed with it.
         [MenuItem("Tools/Kinetic Energy/Update Test3 Intro Text")]
         public static void UpdateTest3IntroText()
         {
@@ -4325,11 +3798,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: intro text updated in " + scenePath);
         }
 
-        // Swaps the FLYING-ENEMY and TURRET sections along the course: each section's whole
-        // contents (pad, spawn, checkpoint and every element in it) is shifted by the offset
-        // between the two section anchors, so their internal layout - including anything
-        // moved by hand - is carried across intact. The section list is reordered and
-        // renumbered to match, and the Sections screen rebuilt from it.
         [MenuItem("Tools/Kinetic Energy/Swap Flying And Turret Sections")]
         public static void SwapFlyingAndTurretSections()
         {
@@ -4363,7 +3831,6 @@ namespace KineticEnergy.EditorSetup
                     continue;
                 }
 
-                // Measured BEFORE anything moves - the two anchors trade places exactly.
                 Vector3 delta = turretAnchor.transform.position - flyingAnchor.transform.position;
                 MoveNamedObjects(flyingObjects, delta);
                 MoveNamedObjects(turretObjects, -delta);
@@ -4380,8 +3847,7 @@ namespace KineticEnergy.EditorSetup
                     }
                     if (flyingIndex >= 0 && turretIndex >= 0)
                     {
-                        // The list is read in course order, so the entries swap places and
-                        // take the OTHER one's number with them.
+
                         (sections.sections[flyingIndex], sections.sections[turretIndex])
                             = (sections.sections[turretIndex], sections.sections[flyingIndex]);
                         sections.sections[flyingIndex].label = (flyingIndex + 1) + " - Turrets";
@@ -4405,13 +3871,11 @@ namespace KineticEnergy.EditorSetup
             {
                 GameObject go = GameObject.Find(name);
                 if (go == null) continue;
-                go.transform.position += delta; // children (shells, weak spots) ride along
+                go.transform.position += delta;
                 EditorUtility.SetDirty(go);
             }
         }
 
-        // The turret's flash colour is serialized on its prefab from an older build, so a
-        // code default cannot reach it - written here to the ground hunter's warning yellow.
         [MenuItem("Tools/Kinetic Energy/Match Turret Telegraph To Hunter")]
         public static void MatchTurretTelegraphToHunter()
         {
@@ -4431,9 +3895,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: turret telegraph matched to the hunter OK");
         }
 
-        // Tunes the weak-spot flyer's posture and turning. COMPONENT VALUES ONLY - the
-        // model (the body, and the hand-placed weak spot on it) is not touched: the hunch
-        // is a rotation the flyer holds while flying, not a change to how it is built.
         [MenuItem("Tools/Kinetic Energy/Tune WeakSpot Flyer Posture")]
         public static void TuneWeakSpotFlyerPosture()
         {
@@ -4444,21 +3905,16 @@ namespace KineticEnergy.EditorSetup
                 FlyingEnemy flyer = root.GetComponent<FlyingEnemy>();
                 if (flyer == null) throw new Exception("KineticEnergySetup: WeakSpotFlyer has no FlyingEnemy component.");
 
-                // Nose-down, so the back-mounted weak spot rides tilted upward and can be
-                // reached from above.
                 flyer.hunchPitchDegrees = 22f;
-                // 20% off the standard 6 - heavier, slower to bring its aim round.
+
                 flyer.turnSpeed = 4.8f;
-                // A full second sitting still after the shot: the committed, readable beat.
+
                 flyer.postFireHoldSeconds = 1f;
-                // It patrols among the section's floating walls, so it has to steer around
-                // them rather than drifting through.
+
                 flyer.avoidObstacles = true;
                 flyer.obstacleClearance = 3.5f;
                 EditorUtility.SetDirty(flyer);
 
-                // A slower, steadier beacon - this tell never switches off, so a quick
-                // flicker reads as noise rather than as "aim here".
                 if (flyer is WeakSpotFlyingEnemy weakSpotFlyer)
                 {
                     weakSpotFlyer.pulseSpeed = 1.6f;
@@ -4472,15 +3928,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: WeakSpotFlyer posture tuned OK (hunch 22, turn 4.8, hold 1s)");
         }
 
-        // The flying rotated slabs - turret walls, the flyer-section side walls and the
-        // arena ledges - are LANDING TARGETS, so the aim must read them green on every face
-        // rather than only where they happen to point upward. The rule for that already
-        // exists: a StickySurface marks a surface safe "regardless of its value", so one
-        // with sticky OFF makes the preview green while leaving the gameplay exactly as it
-        // was - a brief cling, no permanent hold.
-        //
-        // The same pass gives the side walls and ledges their damage ridges: rim only, so
-        // both broad faces stay landable and it is the thin edges that punish a miss.
         [MenuItem("Tools/Kinetic Energy/Mark Flying Ledges Safe And Ridged")]
         public static void MarkFlyingLedgesSafeAndRidged()
         {
@@ -4508,15 +3955,12 @@ namespace KineticEnergy.EditorSetup
                     bool isLedge = name.Contains("Ledge");
                     if (!isTurretWall && !isSideWall && !isLedge) continue;
 
-                    // Safe to land on, from any angle - without becoming a permanent perch.
                     StickySurface marker = candidate.GetComponent<StickySurface>();
                     if (marker == null) marker = candidate.gameObject.AddComponent<StickySurface>();
                     marker.sticky = false;
                     EditorUtility.SetDirty(marker);
                     marked++;
 
-                    // The turret walls already carry the full shell (edges AND the back, so
-                    // only the mounted face is landable) - leave those exactly as they are.
                     if (isTurretWall) continue;
                     AddEdgeDamageShell(candidate, fallbackSpawn, damageMat);
                     ridged++;
@@ -4530,7 +3974,6 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // Diagnostic: reports every checkpoint's wiring in both element scenes. Changes nothing.
         [MenuItem("Tools/Kinetic Energy/Validate Checkpoints")]
         public static void ValidateCheckpoints()
         {
@@ -4558,19 +4001,8 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // No instance swap is needed: the prefab is edited in place, so every placed
-        // checkpoint inherits the button automatically and keeps its own placement.
-
         const float DamageShellThickness = 0.5f;
 
-        // Wraps a landing object in damage slabs on every face EXCEPT the one the player
-        // arrives at - the face turned toward the course. Deliberately NOT a solid box
-        // around the object: slabs sit just OUTSIDE each covered face, so the approach to
-        // the landing face is completely clear and nothing can clip into a hazard on a
-        // clean landing.
-        //
-        // The slabs are CHILDREN, so the shrinking-platforms variant scales them with
-        // their platform for free.
         static void AddDamageShell(Transform platform, Transform respawnPoint, Material material)
         {
             for (int i = platform.childCount - 1; i >= 0; i--)
@@ -4581,10 +4013,6 @@ namespace KineticEnergy.EditorSetup
                 }
             }
 
-            // Which face stays safe: the one pointing at the course line (its own x, the
-            // platform deck's height, the centre z). For a floating wall that is the side
-            // turned inward; for the upside-down platform it is the underside - which
-            // leaves the outward side (+z / -z respectively, +y for the ceiling) lethal.
             Vector3 courseReference = new Vector3(platform.position.x, -1f, 0f);
             Vector3 toCourseLocal = platform.InverseTransformDirection(courseReference - platform.position);
             int landingAxis = 0;
@@ -4595,7 +4023,6 @@ namespace KineticEnergy.EditorSetup
             float landingSign = Mathf.Sign(toCourseLocal[landingAxis]);
             float outwardSign = -landingSign;
 
-            // Local thickness per axis - the parent's scale turns each into 0.5 world units.
             Vector3 scale = platform.localScale;
             Vector3 t = new Vector3(
                 DamageShellThickness / Mathf.Max(Mathf.Abs(scale.x), 0.0001f),
@@ -4607,7 +4034,7 @@ namespace KineticEnergy.EditorSetup
             {
                 if (axis == landingAxis)
                 {
-                    // The far face - the one you would sail past the object to reach.
+
                     Vector3 position = Vector3.zero;
                     position[axis] = outwardSign * (0.5f + outwardThickness * 0.5f);
                     Vector3 size = Vector3.one;
@@ -4616,9 +4043,6 @@ namespace KineticEnergy.EditorSetup
                     continue;
                 }
 
-                // A side pair. Each spans from the SAFE face's plane to the outer edge of
-                // the far slab, so it never overhangs the landing approach, and is widened
-                // on the remaining axis to close the corners.
                 int otherAxis = 3 - landingAxis - axis;
                 for (int sign = -1; sign <= 1; sign += 2)
                 {
@@ -4635,9 +4059,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // ONLY the narrow rim gets shells - both broad faces stay clear. A rotating wall
-        // turns either face round to meet you, so neither may be lethal; it is the thin
-        // edges that should punish a miss.
         static void AddEdgeDamageShell(Transform platform, Transform respawnPoint, Material material)
         {
             for (int i = platform.childCount - 1; i >= 0; i--)
@@ -4654,7 +4075,6 @@ namespace KineticEnergy.EditorSetup
                 DamageShellThickness / Mathf.Max(Mathf.Abs(scale.y), 0.0001f),
                 DamageShellThickness / Mathf.Max(Mathf.Abs(scale.z), 0.0001f));
 
-            // The THINNEST axis carries the two broad faces - those stay open.
             int openAxis = 0;
             if (Mathf.Abs(scale.y) < Mathf.Abs(scale[openAxis])) openAxis = 1;
             if (Mathf.Abs(scale.z) < Mathf.Abs(scale[openAxis])) openAxis = 2;
@@ -4669,9 +4089,7 @@ namespace KineticEnergy.EditorSetup
                     position[axis] = sign * (0.5f + t[axis] * 0.5f);
                     Vector3 size = Vector3.one;
                     size[axis] = t[axis];
-                    // Flush with the broad faces (never past them, or the shell would
-                    // overhang the landing face), and widened on the third axis to close
-                    // the corners between the two edge pairs.
+
                     size[openAxis] = 1f;
                     size[otherAxis] = 1f + 2f * t[otherAxis];
                     CreateDamageSlab(platform, "DamageShell_Edge" + axis + (sign > 0 ? "P" : "N"),
@@ -4680,7 +4098,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // Ridge tuning, matched to the laser gates so the two hazards teach one lesson.
         static void AddRidgeHazard(GameObject slab)
         {
             DamageWalls lethal = slab.GetComponent<DamageWalls>();
@@ -4695,21 +4112,13 @@ namespace KineticEnergy.EditorSetup
             hazard.upwardBias = 0.35f;
         }
 
-        // One hazard, one look: the ridges and the laser beams now behave identically
-        // (LaserHazard), so they share the beams' material outright - and that shared
-        // material is ORANGE. Also drops the turret price to 40% and re-stamps the band
-        // palette asset, whose serialized colours predate the brightness pull-down.
         [MenuItem("Tools/Kinetic Energy/Retune Hazards And Bands")]
         public static void RetuneHazardsAndBands()
         {
-            // The shells wear the beams' own material, untouched - the laser red IS the
-            // hazard colour, and one behaviour reads as one look. Never recoloured here:
-            // it is hand-tuned, and this method only assigns it.
+
             Material beam = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/LaserBeamMaterial.mat");
             if (beam == null) Debug.LogWarning("KineticEnergySetup: LaserBeamMaterial missing - shells cannot share it.");
 
-            // The band palette asset holds its own copy of the ramp, so the dimmed bands 4
-            // and 5 have to be written to it, not just to the class defaults.
             EnergyBandPalette palette = EnsureBandPalette();
             EnergyBandPalette defaults = ScriptableObject.CreateInstance<EnergyBandPalette>();
             palette.bands = defaults.bands;
@@ -4740,8 +4149,6 @@ namespace KineticEnergy.EditorSetup
                     }
                 }
 
-                // Turrets drop from 80% to 40% - both the gate that decides the kill and
-                // the requirement that advertises it, or the object would lie about itself.
                 int turrets = 0;
                 foreach (TurretEnemy turret in UnityEngine.Object.FindObjectsByType<TurretEnemy>(FindObjectsInactive.Include, FindObjectsSortMode.None))
                 {
@@ -4762,21 +4169,13 @@ namespace KineticEnergy.EditorSetup
             }
             AssetDatabase.SaveAssets();
 
-            // The ridge material this replaces is now unreferenced.
             AssetDatabase.DeleteAsset(MaterialFolder + "/DamageRidgeMaterial.mat");
         }
 
-        // Converts the ridges already standing in a scene: they were built lethal, and the
-        // rim of a platform should cost you a bite of tank rather than the run. Also gives
-        // them their own material - with the hazard shader flattened to Unlit, the floor
-        // and the ridges had nothing but lighting to tell them apart, and unlit surfaces
-        // have no lighting. Separation is now in the colour itself.
         [MenuItem("Tools/Kinetic Energy/Retune Damage Ridges")]
         public static void RetuneDamageRidges()
         {
-            // The ridges wear the LASER's material: one behaviour, one look. Its bright
-            // 0.95,0.08,0.05 also keeps them clear of the damage floor's much deeper
-            // 0.535,0.148,0.133, so the two hazards stay distinguishable.
+
             Material ridgeMaterial = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/LaserBeamMaterial.mat");
 
             string[] scenes =
@@ -4817,19 +4216,13 @@ namespace KineticEnergy.EditorSetup
             slab.transform.localRotation = Quaternion.identity;
             slab.transform.localScale = localScale;
             slab.GetComponent<Renderer>().sharedMaterial = material;
-            // SOLID, not a trigger: the aim preview only mirrors solid geometry, so a
-            // trigger shell would be invisible to the landing prediction and the cursor
-            // would read a hazardous face as a safe green landing.
+
             slab.GetComponent<BoxCollider>().isTrigger = false;
-            // Ridges HURT, they do not kill: the same bargain the laser gates make - a
-            // mistimed run costs a chunk of tank and your position, not the whole attempt.
-            // The damage FLOOR keeps DamageWalls; clipping a platform's rim should not read
-            // the same as falling out of the level.
+
             AddRidgeHazard(slab);
             EditorUtility.SetDirty(slab);
         }
 
-        // Shown at first boot and behind the pause menu's BuildInfo button.
         const string Level1ChallengeInfoText =
             "CHALLENGE RUN - 5 VARIATIONS\n\n" +
             "Reach the finish and the level restarts on the next challenge. Clear all five to win.\n" +
@@ -4865,23 +4258,15 @@ namespace KineticEnergy.EditorSetup
             EditorBuildSettings.scenes = scenes.ToArray();
         }
 
-        // The pause panel's button column, top to bottom, on an even 90px rhythm. The TOP
-        // is anchored (230, clearing the title at 327) rather than the centre, so a scene
-        // that adds a button - Level1Challenge's Variants - grows the stack downward
-        // instead of pushing the first button up into the title.
         const float PauseButtonTopY = 230f;
         const float PauseButtonSpacing = 90f;
 
-        // VariantsButton and SectionsButton are the scene-specific slot right under Resume -
-        // no scene has both, and the layout closes over whichever is absent.
         static readonly string[] PauseButtonOrder =
         {
             "ResumeButton", "VariantsButton", "SectionsButton", "RestartButton", "FeedbackButton",
             "CameraSettingsButton", "ControlsButton", "QuitButton", "MainMenuButton",
         };
 
-        // Only the buttons that EXIST are placed, and the rhythm closes over the gaps -
-        // scenes without the Variants button keep exactly the original seven positions.
         static void LayOutPausePanelButtons(Transform pausePanel)
         {
             int slot = 0;
@@ -4896,8 +4281,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // One labelled slider row: name on the left, bar beneath it, percentage on the
-        // right. Whole-number 10..30 range (5% per step) is configured by the component.
         static void BuildCameraSpeedSlider(Transform parent, string name, string label, bool gamepadSlider, Vector2 anchoredPosition, Font font)
         {
             GameObject row = new GameObject(name + "Row", typeof(RectTransform));
@@ -4917,7 +4300,6 @@ namespace KineticEnergy.EditorSetup
                 new Vector2(190f, 18f), new Vector2(80f, 26f));
             valueLabel.alignment = TextAnchor.MiddleRight;
 
-            // The slider itself: background, fill, handle - the standard Unity layout.
             GameObject sliderGo = new GameObject(name, typeof(RectTransform));
             sliderGo.transform.SetParent(row.transform, false);
             RectTransform sliderRect = sliderGo.GetComponent<RectTransform>();
@@ -4963,7 +4345,7 @@ namespace KineticEnergy.EditorSetup
             slider.handleRect = handleRect;
             slider.targetGraphic = handle.GetComponent<Image>();
             slider.direction = Slider.Direction.LeftToRight;
-            slider.transition = Selectable.Transition.None; // the tint script owns the colours
+            slider.transition = Selectable.Transition.None;
 
             CameraSpeedSlider speedSlider = sliderGo.AddComponent<CameraSpeedSlider>();
             speedSlider.gamepadSlider = gamepadSlider;
@@ -4981,15 +4363,11 @@ namespace KineticEnergy.EditorSetup
             return go;
         }
 
-        // Grows the aim trail's dot POOL to 100 (long arcs were running out of dots and
-        // ending short) and widens the spacing by 20%. The pool is a fixed array of
-        // Transforms on the Player prefab, so both are prefab edits; extra dots are
-        // clones of the existing ones, so they inherit the exact look.
         [MenuItem("Tools/Kinetic Energy/Expand Aim Trail Dots")]
         public static void ExpandAimTrailDots()
         {
             const int wantDots = 100;
-            const float wantSpacing = 1.2f; // was 1.0 - the requested +20%
+            const float wantSpacing = 1.2f;
 
             string playerPath = PrefabFolder + "/Player.prefab";
             GameObject root = PrefabUtility.LoadPrefabContents(playerPath);
@@ -5027,9 +4405,6 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // Level1Aim1.1: the fully-free midair aim camera (cursor framing OFF - the view
-        // follows the raw aim 1:1) plus the grounded 60-65 degree edge-follow with its
-        // hard aim clamp. Additive; nothing else in the scene is touched.
         [MenuItem("Tools/Kinetic Energy/Configure Level1Aim1.1 Camera")]
         public static void ConfigureLevel1Aim11Camera()
         {
@@ -5053,9 +4428,6 @@ namespace KineticEnergy.EditorSetup
             aimPlayer.groundedAimFollowSpeed = 45f;
             EditorUtility.SetDirty(aimPlayer);
 
-            // The blue landing arrow lives in THIS scene only for now - the gate also
-            // keeps its V / D-pad Left toggle from colliding with the variant-cycling
-            // keys in the harness scenes.
             var aimPreview = UnityEngine.Object.FindAnyObjectByType<LandingPreviewController>(FindObjectsInactive.Include);
             if (aimPreview != null)
             {
@@ -5064,9 +4436,6 @@ namespace KineticEnergy.EditorSetup
                 EditorUtility.SetDirty(aimPreview);
             }
 
-            // MOMENTUM stays ON (direct request) - the carry now REDIRECTS the brought
-            // speed along the aim (KineticCubeController), so the reach is uniform in
-            // all 360 degrees while the momentum is kept.
             var aimMerged = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
             if (aimMerged != null)
             {
@@ -5078,10 +4447,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Level1Aim1.1 camera configured OK (framing off, grounded 60-65 follow on)");
         }
 
-        // The two Level-1-derived merged-economy test scenes (Level1Economy and the
-        // user-made Level1Challenge copy): tag hidden, combo meter raised to sit ~5px
-        // under the premium meter's tall blocks. Also restores Level8's challenge tag,
-        // which an earlier pass disabled by mistake. Additive - nothing else touched.
         [MenuItem("Tools/Kinetic Energy/Configure Level1 Test Scene Huds")]
         public static void ConfigureLevel1TestSceneHuds()
         {
@@ -5093,13 +4458,9 @@ namespace KineticEnergy.EditorSetup
                 var merged = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
                 if (merged == null) continue;
                 merged.showHudTag = false;
-                // Slowdown-prefab body top sits at -73; the premium meter's tall blocks
-                // end at ~-77.3 canvas units. 20 = the 10px near-gap placement plus the
-                // requested further 10px down.
+
                 merged.comboMeterDropPixels = 20f;
 
-                // These scenes carry their OWN BuildInfo text (and their own first-boot
-                // key), describing the locked E economy exactly as it currently works.
                 merged.introKey = scenePath.Contains("Challenge") ? "level1challenge" : "level1economy";
                 merged.introText =
                     "HOW THIS LEVEL'S ENERGY WORKS\n\n" +
@@ -5123,9 +4484,6 @@ namespace KineticEnergy.EditorSetup
                     "Press any button to start.";
                 EditorUtility.SetDirty(merged);
 
-                // The SELF-CONTAINED finish: the old next-scene trigger is neutralised
-                // (empty scene name = inert, prefab-instance friendly) and the locked
-                // "You win!" pause takes over.
                 var finishLine = UnityEngine.Object.FindAnyObjectByType<FinishLineNextScene>(FindObjectsInactive.Include);
                 if (finishLine != null)
                 {
@@ -5137,8 +4495,6 @@ namespace KineticEnergy.EditorSetup
                     }
                 }
 
-                // The combo meter is its own PREFAB in these scenes - the narrowed bar
-                // that aligns the xN circle with the energy meter's left edge.
                 KineticCubeController scenePlayer = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
                 if (scenePlayer != null && (scenePlayer.slowdownMeter == null
                     || scenePlayer.slowdownMeter.gameObject.name != "ComboMeter"))
@@ -5167,8 +4523,6 @@ namespace KineticEnergy.EditorSetup
                 SaveOpenScene(scenePath);
             }
 
-            // Level8's tag was disabled on a wrong guess ("Level1Challenge" is its own
-            // scene) - back on.
             EditorSceneManager.OpenScene("Assets/Scenes/Level8.unity", OpenSceneMode.Single);
             var stages = UnityEngine.Object.FindAnyObjectByType<ChallengeStageController>(FindObjectsInactive.Include);
             if (stages != null)
@@ -5181,9 +4535,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Level1 test scene HUDs configured OK (tags off, combo meter raised; Level8 tag restored)");
         }
 
-        // OTS copies of both economy scenes: exact duplicates whose only change is the
-        // aim camera locked to variant D - over-the-shoulder plus the landing
-        // picture-in-picture window when the cursor is off screen.
         [MenuItem("Tools/Kinetic Energy/Setup Economy OTS Scenes")]
         public static void SetupEconomyOtsScenes()
         {
@@ -5219,10 +4570,6 @@ namespace KineticEnergy.EditorSetup
             SaveOpenScene(copyPath);
         }
 
-        // Level1Economy: an EXACT copy of Level 1 running QuarryEconomy2's merged economy
-        // (variants A-E, the X/D-pad-Down auto-max toggle, the 8+2 premium meter, the
-        // intro) with the aim camera LOCKED to QuarryNew's variant D - over-the-shoulder
-        // plus the landing picture-in-picture window when the cursor is off screen.
         [MenuItem("Tools/Kinetic Energy/Setup Level 1 Economy Scene")]
         public static void SetupLevel1Economy()
         {
@@ -5243,8 +4590,6 @@ namespace KineticEnergy.EditorSetup
             KineticCubeController playerController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
             if (playerController == null) throw new Exception("KineticEnergySetup: Level1Economy has no Player.");
 
-            // Camera: the Player prefab carries the variant controller and presets in
-            // every scene - lock it to OTS + landing window, switching off.
             var cameraVariants = UnityEngine.Object.FindAnyObjectByType<AimCameraVariantController>(FindObjectsInactive.Include);
             if (cameraVariants == null)
             {
@@ -5254,9 +4599,6 @@ namespace KineticEnergy.EditorSetup
             cameraVariants.currentVariant = AimCameraVariant.OtsParallaxPip;
             EditorUtility.SetDirty(cameraVariants);
 
-            // The LOCKED E-only momentum test (direct request): variant E, momentum
-            // launches on, nothing switchable, the boost boundary at 40% with a matching
-            // 4+6 meter, and a missed window reverting to 40% instead of zero.
             MergedEconomyController merged = UnityEngine.Object.FindAnyObjectByType<MergedEconomyController>(FindObjectsInactive.Include);
             if (merged == null)
             {
@@ -5267,15 +4609,13 @@ namespace KineticEnergy.EditorSetup
             merged.momentumLaunches = true;
             merged.premiumBoundaryFraction = 0.4f;
             merged.totalLossKeepFraction = 0.4f;
-            merged.showHudTag = false; // locked scene - the tag says nothing useful
+            merged.showHudTag = false;
             EditorUtility.SetDirty(merged);
 
             GameObject pauseSystemGo = GameObject.Find("PauseSystem");
             Transform pauseCanvas = pauseSystemGo != null ? pauseSystemGo.transform.Find("PauseCanvas") : null;
             if (pauseCanvas == null) throw new Exception("KineticEnergySetup: Level1Economy has no PauseSystem/PauseCanvas.");
 
-            // The 4+6 premium meter (boost boundary at 40%) replaces whatever meter the
-            // scene carries; the embedded prefab meter is DEACTIVATED, never destroyed.
             BuildPremiumMeterVariant(PrefabFolder + "/PremiumEnergyMeter4.prefab", 4);
             if (playerController.energyMeter == null
                 || playerController.energyMeter.gameObject.name != "PremiumEnergyMeter4")
@@ -5293,7 +4633,6 @@ namespace KineticEnergy.EditorSetup
                 playerController.energyMeter = premium.GetComponent<EnergyMeterController>();
             }
 
-            // The combo-window meter (the repurposed slowdown bar) - Level 1 predates it.
             if (playerController.slowdownMeter == null)
             {
                 GameObject slowdownMeter = InstantiatePrefab("SlowdownMeter");
@@ -5302,8 +4641,6 @@ namespace KineticEnergy.EditorSetup
             }
             EditorUtility.SetDirty(playerController);
 
-            // The 1-key momentum toggle is RETIRED - momentum is locked ON through the
-            // harness now, so the toggle object leaves the scene.
             var momentumToggle = UnityEngine.Object.FindAnyObjectByType<MomentumLaunchToggle>(FindObjectsInactive.Include);
             if (momentumToggle != null) UnityEngine.Object.DestroyImmediate(momentumToggle.gameObject);
 
@@ -5311,8 +4648,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Level 1 Economy scene setup complete OK (merged economy + OTS/landing-window camera)");
         }
 
-        // ADDITIVE: the first-boot aim-variant explainer overlay for QuarryNew - shown once
-        // per game process, dismissed by any input, frozen game underneath.
         [MenuItem("Tools/Kinetic Energy/Add Aim Intro To QuarryNew")]
         public static void AddAimIntroToQuarryNew()
         {
@@ -5327,8 +4662,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: aim intro added to QuarryNew OK");
         }
 
-        // The challenge scene (a QuarryNew duplicate): camera locked to Variant A with the
-        // switching UI off, plus the ChallengeVariants harness (overcharge scatter first).
         [MenuItem("Tools/Kinetic Energy/Setup Quarry Challenge Scene")]
         public static void SetupQuarryChallenge()
         {
@@ -5347,7 +4680,6 @@ namespace KineticEnergy.EditorSetup
                 EditorUtility.SetDirty(variants);
             }
 
-            // The QuarryNew copy carries the first-boot aim intro - meaningless here.
             var intro = UnityEngine.Object.FindAnyObjectByType<AimIntroScreen>(FindObjectsInactive.Include);
             if (intro != null) UnityEngine.Object.DestroyImmediate(intro.gameObject);
 
@@ -5361,8 +4693,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: quarry challenge scene setup complete OK");
         }
 
-        // Adds the control-scheme A/B harness to QuarryAim and locks its camera variants
-        // (the V/C keys belong to the control toggle there now).
         [MenuItem("Tools/Kinetic Energy/Setup Quarry Aim Controls")]
         public static void SetupQuarryAimControls()
         {
@@ -5387,10 +4717,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: quarry aim controls setup complete OK");
         }
 
-        // The aim-refinement lab scene (a QuarryNew duplicate): the AimRefinementSettings
-        // object activates the refined input pipeline HERE ONLY - every other scene keeps
-        // the exact current aim feel. The scene file must already exist (copied from
-        // QuarryNew).
         [MenuItem("Tools/Kinetic Energy/Setup Quarry Aim Lab Scene")]
         public static void SetupQuarryAimLab()
         {
@@ -5414,7 +4740,7 @@ namespace KineticEnergy.EditorSetup
         static AimCameraPreset LoadOrCreatePreset(string path, Action<AimCameraPreset> initialize)
         {
             AimCameraPreset preset = AssetDatabase.LoadAssetAtPath<AimCameraPreset>(path);
-            if (preset != null) return preset; // existing asset keeps its tuned values
+            if (preset != null) return preset;
             preset = ScriptableObject.CreateInstance<AimCameraPreset>();
             initialize(preset);
             AssetDatabase.CreateAsset(preset, path);
@@ -5432,10 +4758,6 @@ namespace KineticEnergy.EditorSetup
             AssetDatabase.SaveAssets();
         }
 
-        // ==================== Prefab refresh ====================
-
-        // Strips the leftovers of removed systems out of Player.prefab (the facing arrow,
-        // the ghost landing preview) and stamps the current tuning + input wiring onto it.
         [MenuItem("Tools/Kinetic Energy/Refresh Player Prefab")]
         public static void RefreshPlayerPrefab()
         {
@@ -5457,7 +4779,6 @@ namespace KineticEnergy.EditorSetup
                     preview.initialMode = PredictionMode.TrailAndCrosshair;
                     controller.landingPreview = preview;
 
-                    // The dotted line is composed of SPHERES (direct request).
                     Mesh sphereMesh = Resources.GetBuiltinResource<Mesh>("New-Sphere.fbx");
                     if (preview.trailDots != null)
                     {
@@ -5470,10 +4791,6 @@ namespace KineticEnergy.EditorSetup
                 }
                 controller.aimArrow = root.GetComponentInChildren<AimArrowIndicator>(true);
 
-                // The player MODEL is a sphere (direct request) - visual only. Physics keeps
-                // the BoxCollider: the footprint BoxCasts, the crash-stick alignment, and the
-                // prediction clone are all built around it, and the sphere mesh's 1m diameter
-                // sits fully inside the same 1m box.
                 KineticCubeControllerFreeMove freeMove = root.GetComponent<KineticCubeControllerFreeMove>();
                 if (freeMove != null)
                 {
@@ -5497,9 +4814,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Player prefab refresh complete OK");
         }
 
-        // Strips the removed radial scheme menu and the stale preview-mode label out of
-        // PauseSystem.prefab, and clears the legacy scenes-panel buttons (each level adds
-        // its own, current list as instance overrides).
         [MenuItem("Tools/Kinetic Energy/Refresh PauseSystem Prefab")]
         public static void RefreshPauseSystemPrefab()
         {
@@ -5511,8 +4825,6 @@ namespace KineticEnergy.EditorSetup
                 DestroyChildrenMatching(root.transform, "RadialMenu");
                 DestroyChildrenMatching(root.transform, "PreviewModeLabel");
 
-                // The energy meter's orange BONUS bar (the ground pound's still-unclaimed
-                // boost extra), drawn behind the yellow fill so only the extra pokes out.
                 Transform meterUi = root.transform.Find("PauseCanvas/EnergyMeter");
                 Transform meterControllerChild = root.transform.Find("EnergyMeter");
                 EnergyMeterController meterController = meterControllerChild != null ? meterControllerChild.GetComponent<EnergyMeterController>() : null;
@@ -5572,8 +4884,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // ==================== Core rig spawn (shared by both levels) ====================
-
         class CoreRig
         {
             public GameObject player;
@@ -5586,9 +4896,6 @@ namespace KineticEnergy.EditorSetup
             public GameObject scenesPanel;
         }
 
-        // Instantiates the Player / camera rig / pause system prefabs into the open scene
-        // and wires every cross-hierarchy reference (a prefab asset cannot hold a reference
-        // into a different hierarchy, so all of this has to happen on the scene instances).
         static CoreRig SpawnCoreRig(Vector3 playerSpawn, (string label, string sceneName, int variant)[] pauseSceneButtons)
         {
             GameObject player = InstantiatePrefab("Player");
@@ -5620,12 +4927,11 @@ namespace KineticEnergy.EditorSetup
             rig.orbitCamera.minPitch = -75f;
             rig.orbitCamera.maxPitch = 75f;
             rig.orbitCamera.recenterSpeed = 240f;
-            // First person may look near-vertical - the midair aim lines up pounds this way.
+
             rig.orbitCamera.firstPersonMinPitch = -89f;
             rig.orbitCamera.firstPersonMaxPitch = 89f;
             rig.orbitCamera.framingMaxDeviation = 45f;
 
-            // Pause system wiring.
             rig.pauseCanvas = pauseSystem.transform.Find("PauseCanvas");
             rig.pausePanel = rig.pauseCanvas?.Find("PausePanel")?.gameObject;
             rig.scenesPanel = rig.pauseCanvas?.Find("ScenesPanel")?.gameObject;
@@ -5635,21 +4941,14 @@ namespace KineticEnergy.EditorSetup
                 throw new Exception("KineticEnergySetup: PauseSystem prefab is missing expected children.");
             }
 
-            // The top-left ControlsHintLabel is hand-authored in the editor, not wired to
-            // the controller - only the pause menu's Controls panel body is script-filled.
             Text controlsBody = rig.pauseCanvas.Find("ControlsPanel/ControlsBody")?.GetComponent<Text>();
             rig.controller.controlsPanelBody = controlsBody;
 
-            // Older PauseSystem builds embedded a meter controller; the current prefab
-            // uses the standalone EnergyMeter prefab instead, wired by each setup method
-            // AFTER this rig spawns - so a missing embedded meter is expected now.
             Transform meterControllerChild = pauseSystem.transform.Find("EnergyMeter");
             EnergyMeterController meter = meterControllerChild != null ? meterControllerChild.GetComponent<EnergyMeterController>() : null;
             if (meter != null) rig.controller.energyMeter = meter;
             AddMeterDividers(rig.pauseCanvas);
 
-            // Pause menu: a Main Menu button on the pause panel, and the current level list
-            // in the Scenes panel.
             Font font = FindBestFont();
             Color accent = new Color(1f, 0.82f, 0.2f);
             DestroyDirectChildIfExists(rig.pausePanel.transform, "MainMenuButton");
@@ -5704,8 +5003,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(facing);
         }
 
-        // The energy meter's 10 divider cells: 9 white lines, 3px wide like the border,
-        // laid over the fill area, so charge amounts read in clean tenths.
         static void AddMeterDividers(Transform pauseCanvas)
         {
             Transform meter = pauseCanvas.Find("EnergyMeter");
@@ -5720,8 +5017,8 @@ namespace KineticEnergy.EditorSetup
             dividersRt.offsetMin = Vector2.zero;
             dividersRt.offsetMax = Vector2.zero;
 
-            const float inset = 3f;        // the meter's outline thickness
-            const float meterWidth = 320f; // the meter container's fixed width
+            const float inset = 3f;
+            const float meterWidth = 320f;
             float innerWidth = meterWidth - inset * 2f;
             for (int i = 1; i <= 9; i++)
             {
@@ -5737,8 +5034,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // A second, smaller bar under the energy meter showing the remaining aim budget
-        // (Variant A). The controller hides it in every other slowdown mode.
         static void AddSlowdownMeter(CoreRig rig)
         {
             AddSlowdownMeterUi(rig.pauseCanvas, rig.controller);
@@ -5753,7 +5048,7 @@ namespace KineticEnergy.EditorSetup
             rt.anchorMin = new Vector2(1f, 1f);
             rt.anchorMax = new Vector2(1f, 1f);
             rt.pivot = new Vector2(1f, 1f);
-            rt.anchoredPosition = new Vector2(-24f, -66f); // right under the 36px energy meter
+            rt.anchoredPosition = new Vector2(-24f, -66f);
             rt.sizeDelta = new Vector2(320f, 20f);
 
             const float outline = 3f;
@@ -5767,9 +5062,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(controller);
         }
 
-        // Adds the slowdown (aim budget) meter UI to Level 1 and wires it to the Player -
-        // scene ADDITIONS only, nothing existing is moved or re-valued. The controller
-        // keeps it disabled while the scene's slowdown mode isn't AimBudget.
         [MenuItem("Tools/Kinetic Energy/Add Slowdown Meter To Level 1")]
         public static void AddSlowdownMeterToLevel1()
         {
@@ -5786,9 +5078,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: slowdown meter added to Level 1 OK");
         }
 
-        // Adds the SlowdownMeter PREFAB to QuarryNew and wires it to the Player - scene
-        // ADDITION only, nothing existing is moved or re-valued. The controller keeps it
-        // hidden while the scene's slowdown mode isn't AimBudget.
         [MenuItem("Tools/Kinetic Energy/Add Slowdown Meter To QuarryNew")]
         public static void AddSlowdownMeterToQuarryNew()
         {
@@ -5820,7 +5109,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: slowdown meter added to QuarryNew OK");
         }
 
-        // A small always-on HUD label on its own canvas (below the pause canvas's order).
         static Text BuildHudLabel(string rootName, string text, Vector2 anchor, Vector2 anchoredPos, TextAnchor alignment, int fontSize)
         {
             GameObject root = new GameObject(rootName);
@@ -5853,25 +5141,13 @@ namespace KineticEnergy.EditorSetup
             return label;
         }
 
-        // ==================== Level 1 - "The Quarry" ====================
-        // The concentric-design question: is the launch fun without a game around it?
-        // Economy off (infinite energy), no fail state, no finish line. Five zones, each
-        // exercising one property of the launch, inside a sticky boundary cage so
-        // overshooting parks you on the world's ceiling instead of killing you.
-
-        // The level document sizes the quarry in multiples of a MAX-charge launch (L), which
-        // at the current tuning is ~107m - far too sparse in practice. This densifies the
-        // whole quarry uniformly (0.25 = a quarter of the distances everywhere, a bowl about
-        // 80m across). The Gauntlet deliberately has no such knob, since its beat difficulty
-        // depends on gaps being honest fractions of a real max launch.
         const float QuarryScale = 0.25f;
 
         [MenuItem("Tools/Kinetic Energy/Setup Quarry")]
         public static void SetupQuarry()
         {
             MeasureLaunchDistances(out float L, out float H);
-            // The boundary must be sized against the REAL max launch, not the scaled level
-            // units - a scaled-down cage would be jumpable.
+
             float realMaxLaunchHeight = H;
             L *= QuarryScale;
             H *= QuarryScale;
@@ -5879,32 +5155,25 @@ namespace KineticEnergy.EditorSetup
 
             NewEmptyScene(QuarryScenePath);
 
-            float width = 3f * L;       // x
-            float depth = 3f * L;       // z
-            float rimHeight = 2.5f * H; // y of the quarry rim
+            float width = 3f * L;
+            float depth = 3f * L;
+            float rimHeight = 2.5f * H;
 
             Material rockFloor = MakeMaterial("QuarryFloorMaterial", new Color(0.42f, 0.52f, 0.42f));
             Material rockWall = MakeMaterial("QuarryWallMaterial", new Color(0.32f, 0.45f, 0.36f));
-            // ONE material for every platform in the level - direct request.
+
             Material platformMat = MakeMaterial("QuarryPlatformMaterial", new Color(0.30f, 0.62f, 0.40f));
 
-            // --- Terrain container. NOTHING here is sticky by default: stickiness is
-            // strictly opt-in via a StickySurface component on the individual object (see
-            // MakeSticky calls below - only the chimney interior and the cathedral's
-            // hang-spots get one). Add or remove StickySurface on any object to change it. ---
             GameObject terrain = new GameObject("QuarryTerrain");
             Transform tf = terrain.transform;
 
-            // Zone A - the bowl floor: deliberately empty, nothing on it but scale.
             CreateBlock(tf, "QuarryFloor", new Vector3(0f, -1f, 0f), new Vector3(width, 2f, depth), rockFloor);
 
-            // Four vertical rim walls, sunk below the floor so there are no seams.
-            // Non-sticky: their own container, no StickySurface.
             GameObject rimWalls = new GameObject("QuarryRimWalls");
             Transform wallsTf = rimWalls.transform;
             const float wallThickness = 8f;
             float wallHeight = rimHeight + 20f;
-            float wallCenterY = rimHeight - wallHeight * 0.5f; // top flush with the rim, base sunk 20m under the floor
+            float wallCenterY = rimHeight - wallHeight * 0.5f;
             CreateBlock(wallsTf, "WallSouth", new Vector3(0f, wallCenterY, -depth * 0.5f - wallThickness * 0.5f),
                 new Vector3(width + wallThickness * 2f, wallHeight, wallThickness), rockWall);
             CreateBlock(wallsTf, "WallNorth", new Vector3(0f, wallCenterY, depth * 0.5f + wallThickness * 0.5f),
@@ -5914,16 +5183,11 @@ namespace KineticEnergy.EditorSetup
             CreateBlock(wallsTf, "WallEast", new Vector3(width * 0.5f + wallThickness * 0.5f, wallCenterY, 0f),
                 new Vector3(wallThickness, wallHeight, depth + wallThickness * 2f), rockWall);
 
-            // Spawn ledge, mid-height on the south wall, looking in.
             float ledgeY = rimHeight * 0.5f;
             Vector3 spawnLedgeCenter = new Vector3(0f, ledgeY - 1f, -depth * 0.5f + 8f);
             CreateBlock(tf, "SpawnLedge", spawnLedgeCenter, new Vector3(16f, 2f, 16f), platformMat);
             Vector3 playerSpawn = spawnLedgeCenter + new Vector3(0f, 1f + 1f, 0f);
 
-            // Wall platforms: the SAME arrangement on every wall - three full-size green
-            // platforms per wall, spread along its length at staggered heights (each wall's
-            // set is offset a little so opposite walls don't mirror exactly). No wall gets
-            // its own special platform type, and none of the old narrow ledges remain.
             Vector3[] wallInward = { Vector3.forward, Vector3.back, Vector3.right, Vector3.left };
             string[] wallNames = { "South", "North", "West", "East" };
             float[] alongOffsets = { -0.85f * L, 0.05f * L, 0.9f * L };
@@ -5931,8 +5195,8 @@ namespace KineticEnergy.EditorSetup
             for (int wall = 0; wall < 4; wall++)
             {
                 Vector3 inward = wallInward[wall];
-                Vector3 along = new Vector3(inward.z, 0f, inward.x); // horizontal, parallel to the wall
-                Vector3 wallFaceCenter = -inward * (1.5f * L - 5f);  // just proud of the wall's inner face
+                Vector3 along = new Vector3(inward.z, 0f, inward.x);
+                Vector3 wallFaceCenter = -inward * (1.5f * L - 5f);
                 for (int i = 0; i < 3; i++)
                 {
                     float height = baseHeights[(i + wall) % 3] + 0.06f * H * wall;
@@ -5942,54 +5206,40 @@ namespace KineticEnergy.EditorSetup
                 }
             }
 
-            // Free-floating perches: one per side, a little in from the wall platforms, at
-            // staggered heights - the same green as every other platform. (Nothing in this
-            // scene carries StickySurface; assign it by hand wherever a surface should hold.)
             GameObject perches = new GameObject("QuarryPerches");
             Vector3[] perchPositions =
             {
-                new Vector3(1.15f * L, 0.55f * H, -0.6f * L),  // east side
-                new Vector3(-1.15f * L, 0.95f * H, 0.55f * L), // west side
-                new Vector3(0.55f * L, 1.35f * H, 1.15f * L),  // north side
-                new Vector3(-0.55f * L, 1.7f * H, -1.15f * L), // south side
+                new Vector3(1.15f * L, 0.55f * H, -0.6f * L),
+                new Vector3(-1.15f * L, 0.95f * H, 0.55f * L),
+                new Vector3(0.55f * L, 1.35f * H, 1.15f * L),
+                new Vector3(-0.55f * L, 1.7f * H, -1.15f * L),
             };
             for (int i = 0; i < perchPositions.Length; i++)
             {
                 CreateBlock(perches.transform, "Perch" + (i + 1), perchPositions[i], new Vector3(8f, 1f, 8f), platformMat);
             }
 
-            // Boundary cage: the rim continues upward as INVISIBLE wall borders, tall enough
-            // that even a max-charge launch from the rim can't clear them. No ceiling -
-            // gravity is the ceiling. Non-sticky (a boundary is a catch-net, not a perch)
-            // and ignored by the aim preview, so the trail never lands on empty sky.
             GameObject cage = new GameObject("BoundaryCage");
             cage.AddComponent<AimPreviewIgnored>();
             float cageTop = rimHeight + realMaxLaunchHeight + 15f;
             float cageWallHeight = cageTop - rimHeight + 8f;
             float cageCenterY = (rimHeight + cageTop) * 0.5f;
-            // The world's ceiling: solid (nothing gets above it), non-sticky (brief cling,
-            // then you fall back in), and - like the whole cage - invisible to the aim.
+
             CreateInvisibleBox(cage.transform, "CageCeiling", new Vector3(0f, cageTop + 2f, 0f), new Vector3(width + 40f, 4f, depth + 40f));
             CreateInvisibleBox(cage.transform, "CageSouth", new Vector3(0f, cageCenterY, -depth * 0.5f - 6f), new Vector3(width + 40f, cageWallHeight, 4f));
             CreateInvisibleBox(cage.transform, "CageNorth", new Vector3(0f, cageCenterY, depth * 0.5f + 6f), new Vector3(width + 40f, cageWallHeight, 4f));
             CreateInvisibleBox(cage.transform, "CageWest", new Vector3(-width * 0.5f - 6f, cageCenterY, 0f), new Vector3(4f, cageWallHeight, depth + 40f));
             CreateInvisibleBox(cage.transform, "CageEast", new Vector3(width * 0.5f + 6f, cageCenterY, 0f), new Vector3(4f, cageWallHeight, depth + 40f));
 
-            // The rig, with EnergyEconomy1's exact energy balancing (20% start, last-launch
-            // refunds) plus the EnergyEconomy4 ground pound - both are the tuning defaults
-            // ApplyPlayerTuning already stamps. Slow-down is unmetered here; no fail state.
-            // The only exits are the pause menu and the menu pad below.
             CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
             rig.controller.slowdownMode = SlowdownMode.Unlimited;
-            // The cage means nothing can fall out of the world - park the reset far below
-            // the floor so it can never fire.
+
             rig.controller.fallResetY = -200f;
             rig.freeMove.fallResetY = -200f;
             EditorUtility.SetDirty(rig.controller);
             EditorUtility.SetDirty(rig.freeMove);
             PointCameraAt(rig, new Vector3(0f, 0f, 0f));
 
-            // Return-to-menu pad at the entrance (on the spawn ledge, behind the player).
             Material menuPadMat = MakeMaterial("MenuPadMaterial", new Color(0.95f, 0.6f, 0.15f));
             Vector3 padCenter = spawnLedgeCenter + new Vector3(6f, 1f + 0.1f, -5f);
             CreateBlock(tf, "MenuPadBase", padCenter, new Vector3(3f, 0.2f, 3f), menuPadMat);
@@ -6000,26 +5250,24 @@ namespace KineticEnergy.EditorSetup
             menuTriggerBox.size = new Vector3(3f, 3f, 3f);
             menuTrigger.AddComponent<FinishLineNextScene>().nextSceneName = "MainMenu";
 
-            // Eight respawning target spheres with a small session counter - a spine for
-            // free play, not an objective.
             Text counterLabel = BuildHudLabel("TargetCounterHud", "Targets: 0", new Vector2(0.5f, 1f), new Vector2(0f, -24f), TextAnchor.UpperCenter, 30);
             TargetSphereCounter counter = counterLabel.transform.parent.gameObject.AddComponent<TargetSphereCounter>();
             counter.label = counterLabel;
 
             Material sphereMat = MakeMaterial("TargetSphereMaterial", new Color(1f, 0.55f, 0.1f));
-            // Half strung up the CENTRE at rising heights, one out by each wall.
+
             Vector3[] spherePositions =
             {
-                new Vector3(0f, 0.35f * H, 0f),                // centre, low
-                new Vector3(0.12f * L, 0.8f * H, -0.1f * L),   // centre, mid
-                new Vector3(-0.1f * L, 1.3f * H, 0.12f * L),   // centre, high
-                new Vector3(0f, 1.8f * H, 0f),                 // centre, top
-                new Vector3(0f, 0.9f * H, -1.25f * L),         // by the south wall
-                new Vector3(0.2f * L, 1.1f * H, 1.25f * L),    // by the north wall
-                new Vector3(-1.25f * L, 0.6f * H, 0.2f * L),   // by the west wall
-                new Vector3(1.25f * L, 1.5f * H, -0.2f * L),   // by the east wall
+                new Vector3(0f, 0.35f * H, 0f),
+                new Vector3(0.12f * L, 0.8f * H, -0.1f * L),
+                new Vector3(-0.1f * L, 1.3f * H, 0.12f * L),
+                new Vector3(0f, 1.8f * H, 0f),
+                new Vector3(0f, 0.9f * H, -1.25f * L),
+                new Vector3(0.2f * L, 1.1f * H, 1.25f * L),
+                new Vector3(-1.25f * L, 0.6f * H, 0.2f * L),
+                new Vector3(1.25f * L, 1.5f * H, -0.2f * L),
             };
-            // Respawns land anywhere inside the arena interior, never above Y = 64.
+
             Vector3 respawnMin = new Vector3(-width * 0.5f + 10f, 4f, -depth * 0.5f + 10f);
             Vector3 respawnMax = new Vector3(width * 0.5f - 10f, Mathf.Min(TargetSphereMaxY, rimHeight - 4f), depth * 0.5f - 10f);
             GameObject spheres = new GameObject("TargetSpheres");
@@ -6028,20 +5276,12 @@ namespace KineticEnergy.EditorSetup
                 CreateTargetSphere(spheres.transform, "TargetSphere" + (i + 1), spherePositions[i], sphereMat, counter, respawnMin, respawnMax);
             }
 
-            // The whole ask, on screen once: mess around, stop whenever.
             Text hint = BuildHudLabel("QuarryIntroHud", "Mess around. Stop whenever you want.\n(The orange pad by the spawn returns to the menu.)", new Vector2(0.5f, 0.5f), new Vector2(0f, 200f), TextAnchor.MiddleCenter, 34);
             hint.gameObject.AddComponent<TimedMessage>().displayDuration = 6f;
 
             SaveOpenScene(QuarryScenePath);
             Debug.Log("KineticEnergySetup: Quarry setup complete OK");
         }
-
-        // ==================== Level 2 - "The Gauntlet" ====================
-        // Compares two architectures for the slowdown resource under identical conditions:
-        // Variant A (separate aim budget, refills on crash) vs Variant B (bullet time drains
-        // the energy tank). Same scene, one flag - the menu buttons pick the variant. A
-        // linear corridor of five beats; beat 5 is gated by an energy clamp so the final
-        // stretch is always played on a low tank, where the two variants actually diverge.
 
         [MenuItem("Tools/Kinetic Energy/Setup Gauntlet")]
         public static void SetupGauntlet()
@@ -6057,70 +5297,49 @@ namespace KineticEnergy.EditorSetup
             Material panelMat = MakeMaterial("GauntletTimedPanelMaterial", new Color(0.25f, 0.8f, 0.45f));
             Material finishMat = MakeMaterial("GauntletFinishMaterial", new Color(0.2f, 0.9f, 0.95f));
 
-            // Corridor along +x. Platform tops sit near y=0; recovery ledges below; the void
-            // past them ends at the fall reset.
             float corridorHalfWidth = 0.75f * L;
             float recoveryY = -0.35f * H;
             float fallReset = -0.6f * H;
 
-            // NOTHING here is sticky by default - stickiness is strictly opt-in via a
-            // StickySurface component on the individual object. In this level only beat 3's
-            // strip carries one (plus the beat-5 panel's own TimedStickyPanel); every
-            // platform top is flat and walkable, so nothing else needs to hold.
             GameObject terrain = new GameObject("GauntletPlatforms");
             Transform tf = terrain.transform;
 
             var beatRegions = new List<(int beat, Vector3 center, Vector3 size)>();
 
-            // ---- Beat 1 - Baseline: platform, 0.5L gap, platform. One grounded launch. ----
             Vector3 startTop = new Vector3(0.1f * L, 0f, 0f);
             CreateBlock(tf, "Beat1_Start", new Vector3(0.1f * L, -1f, 0f), new Vector3(0.25f * L, 2f, 0.3f * L), platformMat);
             CreateBlock(tf, "Beat1_Landing", new Vector3(0.85f * L, -1f, 0f), new Vector3(0.25f * L, 2f, 0.3f * L), platformMat);
             beatRegions.Add((1, new Vector3(0.1f * L, 4f, 0f), new Vector3(0.25f * L, 10f, 0.3f * L)));
             Vector3 playerSpawn = startTop + new Vector3(-0.05f * L, 1.5f, 0f);
 
-            // ---- Beat 2 - The Fork: one long flight, two valid landings at different
-            // heights. Wide-easy low-left, narrow high-right that skips ahead. ----
             beatRegions.Add((2, new Vector3(0.85f * L, 4f, 0f), new Vector3(0.25f * L, 10f, 0.3f * L)));
             CreateBlock(tf, "Beat2_LowLedge", new Vector3(1.6f * L, -0.15f * H - 1f, -0.35f * L), new Vector3(0.25f * L, 2f, 0.25f * L), platformMat);
             CreateBlock(tf, "Beat2_HighLedge", new Vector3(1.75f * L, 0.12f * H - 1f, 0.45f * L), new Vector3(8f, 2f, 8f), platformMat);
 
-            // ---- Beat 3 - The Correction: a launch toward a mostly non-sticky wall with
-            // one sticky strip. Missing the strip = 0.3s cling, drop to a recovery ledge. ----
             Vector3 beat3Start = new Vector3(2.3f * L, 0f, 0f);
             CreateBlock(tf, "Beat3_Start", new Vector3(2.3f * L, -1f, 0f), new Vector3(0.2f * L, 2f, 0.3f * L), platformMat);
             beatRegions.Add((3, new Vector3(2.3f * L, 4f, 0f), new Vector3(0.2f * L, 10f, 0.3f * L)));
 
-            // The wall: NOT under the sticky container, so its face clings-and-drops.
             GameObject correctionWall = new GameObject("Beat3_Wall");
             float wallX = 2.9f * L;
             float wallHeight = 0.35f * H;
             CreateBlock(correctionWall.transform, "WallFace", new Vector3(wallX, wallHeight * 0.5f - 0.05f * H, 0f), new Vector3(4f, wallHeight, corridorHalfWidth * 2f), wallMat);
-            // The one sticky strip, about a cube-width wide, at three-quarters height.
+
             GameObject strip = CreateBlock(null, "Beat3_StickyStrip",
                 new Vector3(wallX - 2.05f, wallHeight * 0.75f - 0.05f * H, 0f), new Vector3(0.3f, 6f, 1.5f), stripMat);
             strip.AddComponent<StickySurface>().sticky = true;
-            // Recovery ledge at the wall's base, catching the cling-drop.
+
             CreateBlock(tf, "Beat3_Recovery", new Vector3(wallX - 0.06f * L, recoveryY, 0f), new Vector3(0.15f * L, 2f, 0.3f * L), recoveryMat);
-            // Beat 4's start sits past the wall - from the strip, hop over the top.
+
             CreateBlock(tf, "Beat4_Start", new Vector3(3.1f * L, -1f, 0f), new Vector3(0.2f * L, 2f, 0.3f * L), platformMat);
 
-            // ---- Beat 4 - The Splitter (the crux): a crossing too wide for one launch,
-            // demanding TWO separate midair aims. With a 2-second budget, doing both
-            // carefully overruns - one of them has to happen at full speed. ----
             beatRegions.Add((4, new Vector3(3.1f * L, 4f, 0f), new Vector3(0.2f * L, 10f, 0.3f * L)));
             CreateBlock(tf, "Beat4_LandingPad", new Vector3(4.7f * L, -1f, 0f), new Vector3(8f, 2f, 8f), platformMat);
-            // The generous recovery ledge under the whole crossing - failable repeatedly
-            // without a restart. From it, launch back up to the beat 4 start.
+
             CreateBlock(tf, "Beat4_Recovery", new Vector3(3.95f * L, recoveryY, 0f), new Vector3(1.4f * L, 2f, 0.5f * L), recoveryMat);
 
-            // ---- Beat 5 - The Dry Run: the energy clamp guarantees a low tank, then a
-            // small target pad across a gap with a timed sticky panel as the only staging
-            // point. Under Variant A thinking is free and moving is expensive; under
-            // Variant B they compete for the same nearly-empty tank. ----
             beatRegions.Add((5, new Vector3(4.7f * L, 4f, 0f), new Vector3(8f, 10f, 8f)));
-            // The clamp, wrapped around the beat-4 landing pad so every arrival (and every
-            // recovery re-entry) replays the beat on ~25%.
+
             GameObject clamp = new GameObject("Beat5_EnergyClamp");
             clamp.transform.position = new Vector3(4.7f * L, 4f, 0f);
             BoxCollider clampBox = clamp.AddComponent<BoxCollider>();
@@ -6128,19 +5347,17 @@ namespace KineticEnergy.EditorSetup
             clampBox.size = new Vector3(10f, 10f, 10f);
             clamp.AddComponent<EnergyClampTrigger>().clampFraction = 0.25f;
 
-            // The timed sticky panel mid-gap (2-second hold), and the small final pad.
             GameObject panel = CreateBlock(null, "Beat5_TimedPanel", new Vector3(5.0f * L, -0.05f * H, 0f), new Vector3(6f, 1f, 6f), panelMat);
             TimedStickyPanel timedPanel = panel.AddComponent<TimedStickyPanel>();
             timedPanel.holdSeconds = 2f;
             CreateBlock(tf, "Beat5_TargetPad", new Vector3(5.35f * L, -1f, 0f), new Vector3(6f, 2f, 6f), platformMat);
-            // Recovery under the final gap, with enough room to relaunch back to the pad.
+
             CreateBlock(tf, "Beat5_Recovery", new Vector3(5.05f * L, recoveryY, 0f), new Vector3(0.6f * L, 2f, 0.4f * L), recoveryMat);
 
-            // ---- Rig, instrumentation, finish. ----
             CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
-            rig.controller.startingEnergyFraction = 1f; // the corridor is tuned around a full-tank start
-            rig.controller.slowdownMode = SlowdownMode.AimBudget; // Variant A unless the menu picked B
-            rig.controller.maxLaunchesPerFlight = 3; // beat 4 needs a grounded launch plus two midair redirects
+            rig.controller.startingEnergyFraction = 1f;
+            rig.controller.slowdownMode = SlowdownMode.AimBudget;
+            rig.controller.maxLaunchesPerFlight = 3;
             rig.controller.fallResetY = fallReset;
             rig.freeMove.fallResetY = fallReset;
             EditorUtility.SetDirty(rig.controller);
@@ -6169,7 +5386,6 @@ namespace KineticEnergy.EditorSetup
                 region.logger = logger;
             }
 
-            // Finish-line trigger immediately after the target pad, with a visible marker.
             CreateBlock(null, "FinishMarker", new Vector3(5.45f * L, 1.5f, 0f), new Vector3(0.5f, 5f, 6f), finishMat);
             GameObject finish = new GameObject("FinishLine");
             finish.transform.position = new Vector3(5.45f * L, 4f, 0f);
@@ -6185,16 +5401,10 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: Gauntlet setup complete OK (L={L:F1}m, H={H:F1}m, budget={AimBudgetSeconds}s, drain={TankDrainPerSecond}/s)");
         }
 
-        // ==================== Level 1 - platform run into wall hops ====================
-        // A series of platforms whose gaps grow, demanding increasingly more launch energy,
-        // then a few sticky floating walls to hop between, over a red DamageWalls floor that
-        // instantly respawns the player at the start. The Player/camera tuning is COPIED
-        // from the Quarry scene's current instances (the values the user hand-tuned), so
-        // this level plays identically - nothing existing is rebuilt or re-valued.
         [MenuItem("Tools/Kinetic Energy/Setup Level 1")]
         public static void SetupLevel1()
         {
-            // Capture the hand-tuned Player/camera state from the Quarry first.
+
             EditorSceneManager.OpenScene(QuarryScenePath, OpenSceneMode.Single);
             KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
             KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
@@ -6216,7 +5426,6 @@ namespace KineticEnergy.EditorSetup
             GameObject course = new GameObject("Level1Course");
             Transform tf = course.transform;
 
-            // The platform run: gaps grow with every jump, so each one needs more energy.
             Vector3 platformSize = new Vector3(10f, 2f, 10f);
             float[] gapFractions = { 0.15f, 0.25f, 0.35f, 0.5f, 0.65f, 0.8f };
             float x = 0f;
@@ -6228,7 +5437,6 @@ namespace KineticEnergy.EditorSetup
                 CreateBlock(tf, "Platform" + (i + 1), new Vector3(x, -1f, 0f), platformSize, platformMat);
             }
 
-            // The wall hops: a few sticky floating walls to jump between, then the end pad.
             float wallSpacing = 0.3f * L;
             float wallStartX = x + platformSize.x * 0.5f + 0.25f * L;
             for (int i = 0; i < 3; i++)
@@ -6240,8 +5448,6 @@ namespace KineticEnergy.EditorSetup
             float endX = wallStartX + 3f * wallSpacing + 0.2f * L;
             CreateBlock(tf, "EndPlatform", new Vector3(endX, -1f, 0f), platformSize, platformMat);
 
-            // The hazard: a red DamageWalls floor under the whole course - touch it and you
-            // respawn instantly at the start.
             GameObject respawnPoint = new GameObject("RespawnPoint");
             respawnPoint.transform.position = playerSpawn;
             GameObject damageFloor = CreateBlock(null, "DamageFloor",
@@ -6250,7 +5456,6 @@ namespace KineticEnergy.EditorSetup
             damage.respawnPoint = respawnPoint.transform;
             EditorUtility.SetDirty(damage);
 
-            // Finish on the end pad returns to the menu.
             GameObject finish = new GameObject("FinishTrigger");
             finish.transform.position = new Vector3(endX, 2f, 0f);
             BoxCollider finishBox = finish.AddComponent<BoxCollider>();
@@ -6261,8 +5466,6 @@ namespace KineticEnergy.EditorSetup
             CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
             PointCameraAt(rig, new Vector3(platformSize.x + gapFractions[0] * L, 0f, 0f));
 
-            // Stamp the Quarry's hand-tuned values over the fresh instances, keeping this
-            // scene's own object wiring (meter, camera, input references) intact.
             OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
             OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
             OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
@@ -6272,9 +5475,6 @@ namespace KineticEnergy.EditorSetup
                 + string.Join(", ", Array.ConvertAll(gapFractions, g => (g * L).ToString("F0"))) + "m)");
         }
 
-        // Level 1's gradual-drain test: sets ONLY the gradualLaunchDrain wiring flag on the
-        // scene's Player instance - no other value is read or written (the user tunes
-        // everything else in the Inspector).
         [MenuItem("Tools/Kinetic Energy/Enable Gradual Drain In Level 1")]
         public static void EnableGradualDrainInLevel1()
         {
@@ -6287,9 +5487,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: gradual launch drain enabled in Level 1 OK");
         }
 
-        // Level 1's wall-crash launch limit: sets ONLY the wallCrashLaunchAllowance wiring
-        // value (1 launch per non-grounding crash) on the scene's Player instance - no
-        // positions and no other values are touched.
         [MenuItem("Tools/Kinetic Energy/Enable Wall-Crash Launch Limit In Level 1")]
         public static void EnableWallCrashLimitInLevel1()
         {
@@ -6302,14 +5499,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: wall-crash launch limit enabled in Level 1 OK");
         }
 
-        // Turns the reusable pieces into prefab ASSETS (direct request):
-        //  - FinishTrigger, PlayerShadow and SlowdownMeter are converted from Level 1's
-        //    existing instances (SaveAsPrefabAssetAndConnect keeps their positions and
-        //    values; PlayerShadow's cross-hierarchy player reference is re-wired on the
-        //    scene instance afterwards, since a prefab asset cannot hold it).
-        //  - EnergyMeter is built fresh as a standalone prefab (the live meters sit inside
-        //    the PauseSystem prefab and stay untouched) - drop it on any canvas and wire
-        //    the Player's energyMeter field to it.
         [MenuItem("Tools/Kinetic Energy/Make HUD Prefabs From Level 1")]
         public static void MakeHudPrefabsFromLevel1()
         {
@@ -6327,7 +5516,7 @@ namespace KineticEnergy.EditorSetup
                 PlayerShadow shadow = shadowGo.GetComponent<PlayerShadow>();
                 Transform playerRef = shadow != null ? shadow.player : null;
                 PrefabUtility.SaveAsPrefabAssetAndConnect(shadowGo, PrefabFolder + "/PlayerShadow.prefab", InteractionMode.AutomatedAction);
-                // Cross-hierarchy wiring must be restored on the instance after the save.
+
                 if (shadow != null)
                 {
                     shadow.player = playerRef;
@@ -6348,9 +5537,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: HUD prefabs created OK (FinishTrigger, PlayerShadow, SlowdownMeter, EnergyMeter)");
         }
 
-        // A standalone, self-contained energy meter prefab: the full bar stack (outline,
-        // backdrop, orange bonus, yellow energy, blue charge, 10-cell dividers) with the
-        // EnergyMeterController ON the container. Anchored top-right like the live meters.
         static void CreateEnergyMeterPrefab()
         {
             GameObject container = new GameObject("EnergyMeter", typeof(RectTransform));
@@ -6372,7 +5558,6 @@ namespace KineticEnergy.EditorSetup
                 Image chargeFill = CreateFillBar("ChargeFill", container.transform, new Color(0.3f, 0.65f, 1f), outline);
                 chargeFill.gameObject.SetActive(false);
 
-                // The 10-cell dividers, matching the live meters.
                 GameObject dividers = new GameObject("MeterDividers", typeof(RectTransform));
                 dividers.transform.SetParent(container.transform, false);
                 RectTransform dividersRt = dividers.GetComponent<RectTransform>();
@@ -6407,11 +5592,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // Swaps every plain (non-prefab) instance of the HUD pieces for an instance of the
-        // corresponding prefab, carrying position/values over as instance overrides and
-        // re-wiring the Player's references. Objects already connected to the prefabs
-        // (Level 1's) are left alone; the PauseSystem's built-in meter UI is deactivated
-        // per instance and replaced by the standalone EnergyMeter prefab.
         [MenuItem("Tools/Kinetic Energy/Replace HUD Instances With Prefabs")]
         public static void ReplaceHudInstancesWithPrefabs()
         {
@@ -6424,7 +5604,6 @@ namespace KineticEnergy.EditorSetup
                 KineticCubeController controller = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
                 if (controller == null) continue;
 
-                // --- PlayerShadow ---
                 GameObject oldShadow = GameObject.Find("PlayerShadow");
                 if (oldShadow != null && !PrefabUtility.IsPartOfPrefabInstance(oldShadow))
                 {
@@ -6442,8 +5621,6 @@ namespace KineticEnergy.EditorSetup
                     UnityEngine.Object.DestroyImmediate(oldShadow);
                 }
 
-                // --- Energy meter: deactivate the PauseSystem's built-in UI, drop in the
-                // standalone prefab at the same canvas slot, re-wire the Player. ---
                 GameObject pauseSystemGo = GameObject.Find("PauseSystem");
                 Transform pauseCanvas = pauseSystemGo != null ? pauseSystemGo.transform.Find("PauseCanvas") : null;
                 if (pauseCanvas != null)
@@ -6465,7 +5642,6 @@ namespace KineticEnergy.EditorSetup
                         EditorUtility.SetDirty(controller);
                     }
 
-                    // --- Slowdown meter ---
                     Transform oldSlowdown = pauseCanvas.Find("SlowdownMeter");
                     if (oldSlowdown != null && !PrefabUtility.IsPartOfPrefabInstance(oldSlowdown.gameObject))
                     {
@@ -6479,8 +5655,6 @@ namespace KineticEnergy.EditorSetup
                     }
                 }
 
-                // --- Finish triggers of the FinishLineNextScene kind (Level 1's finish, the
-                // Quarry's menu pad) - the Gauntlet's own GauntletFinishLine stays as it is. ---
                 foreach (FinishLineNextScene oldFinish in UnityEngine.Object.FindObjectsByType<FinishLineNextScene>(FindObjectsInactive.Include))
                 {
                     if (PrefabUtility.IsPartOfPrefabInstance(oldFinish.gameObject)) continue;
@@ -6509,11 +5683,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: HUD prefab instance replacement complete OK");
         }
 
-        // Unity never propagates a prefab ROOT's transform to its instances (each placement
-        // owns its root position/size by design), and the meters' whole layout sat on the
-        // root RectTransform - which is why asset edits didn't show up in scenes. This
-        // moves each meter's layout onto an inner "Body" child (prefab-driven, so edits DO
-        // propagate) and zeroes the existing instances' roots once so nothing shifts.
         [MenuItem("Tools/Kinetic Energy/Fix HUD Prefab Layout Propagation")]
         public static void FixHudPrefabLayoutPropagation()
         {
@@ -6554,22 +5723,19 @@ namespace KineticEnergy.EditorSetup
             GameObject root = PrefabUtility.LoadPrefabContents(prefabPath);
             try
             {
-                if (root.transform.Find("Body") != null) return; // already restructured
+                if (root.transform.Find("Body") != null) return;
 
                 RectTransform rootRt = root.GetComponent<RectTransform>();
                 GameObject body = new GameObject("Body", typeof(RectTransform));
                 RectTransform bodyRt = body.GetComponent<RectTransform>();
                 body.transform.SetParent(root.transform, false);
 
-                // The Body inherits the whole layout the root used to carry...
                 bodyRt.anchorMin = rootRt.anchorMin;
                 bodyRt.anchorMax = rootRt.anchorMax;
                 bodyRt.pivot = rootRt.pivot;
                 bodyRt.anchoredPosition = rootRt.anchoredPosition;
                 bodyRt.sizeDelta = rootRt.sizeDelta;
 
-                // ...and every visual moves under it (Body itself stays the last-created
-                // child until the loop empties the root, so ordering is preserved).
                 var toMove = new List<Transform>();
                 foreach (Transform child in root.transform)
                 {
@@ -6580,7 +5746,6 @@ namespace KineticEnergy.EditorSetup
                     child.SetParent(body.transform, false);
                 }
 
-                // The root becomes a pure zero-size anchor point.
                 rootRt.anchoredPosition = Vector2.zero;
                 rootRt.sizeDelta = Vector2.zero;
 
@@ -6592,9 +5757,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // The moving platform as a drag-and-drop prefab: green 8x8 block + MovingPlatform
-        // (public moveOffset, lapSeconds, arrow settings). The lead arrow builds itself at
-        // runtime, so the prefab stays one self-contained piece.
         [MenuItem("Tools/Kinetic Energy/Create MovingPlatform Prefab")]
         public static void CreateMovingPlatformPrefab()
         {
@@ -6616,9 +5778,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: MovingPlatform prefab created OK");
         }
 
-        // Gives the MovingPlatform prefab its own blueish-green (teal) material so movers
-        // read differently from static platforms at a glance - applied on the prefab
-        // asset, so every placed instance updates automatically.
         [MenuItem("Tools/Kinetic Energy/Apply Moving Platform Material")]
         public static void ApplyMovingPlatformMaterial()
         {
@@ -6639,15 +5798,10 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: moving platform material applied OK");
         }
 
-        // ==================== Level 2 - moving platforms ====================
-        // Static platforms interleaved with MovingPlatform prefab instances: a sideways
-        // ferry, an along-the-path shuttle and a vertical lift, over a DamageWalls floor.
-        // Player/camera tuning is copied from the Quarry's current hand-tuned instances,
-        // exactly like Level 1 - nothing existing is rebuilt or re-valued.
         [MenuItem("Tools/Kinetic Energy/Setup Level 2")]
         public static void SetupLevel2()
         {
-            // Capture the hand-tuned Player/camera state from the Quarry first.
+
             EditorSceneManager.OpenScene(QuarryScenePath, OpenSceneMode.Single);
             KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
             KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
@@ -6671,7 +5825,6 @@ namespace KineticEnergy.EditorSetup
             Transform tf = course.transform;
             Vector3 platformSize = new Vector3(10f, 2f, 10f);
 
-            // Static stepping stones...
             CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
             Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
             CreateBlock(tf, "Static1", new Vector3(0.3f * L, -1f, 0f), platformSize, platformMat);
@@ -6679,13 +5832,10 @@ namespace KineticEnergy.EditorSetup
             CreateBlock(tf, "Static3", new Vector3(1.75f * L, -1f, 0.3f * L), platformSize, platformMat);
             CreateBlock(tf, "EndPlatform", new Vector3(2.3f * L, -1f, 0.3f * L), platformSize, platformMat);
 
-            // ...interleaved with movers. The blue lead arrow appears on each while aiming
-            // midair, its tip at the centre's position when the previewed shot lands.
             SpawnMovingPlatform("Mover1_SidewaysFerry", new Vector3(0.62f * L, -1f, 0f), new Vector3(0f, 0f, 0.3f * L), 7f);
             SpawnMovingPlatform("Mover2_PathShuttle", new Vector3(1.25f * L, -1f, 0.3f * L), new Vector3(0.25f * L, 0f, 0f), 5f);
             SpawnMovingPlatform("Mover3_Lift", new Vector3(2.05f * L, -1f, 0.3f * L), new Vector3(0f, 14f, 0f), 6f);
 
-            // The hazard floor: touch it and you respawn at the start instantly.
             GameObject respawnPoint = new GameObject("RespawnPoint");
             respawnPoint.transform.position = playerSpawn;
             GameObject damageFloor = CreateBlock(null, "DamageFloor",
@@ -6694,7 +5844,6 @@ namespace KineticEnergy.EditorSetup
             damage.respawnPoint = respawnPoint.transform;
             EditorUtility.SetDirty(damage);
 
-            // The finish, as the FinishTrigger prefab.
             GameObject finish = InstantiatePrefab("FinishTrigger");
             finish.transform.position = new Vector3(2.3f * L, 2f, 0.3f * L);
             FinishLineNextScene finishComp = finish.GetComponent<FinishLineNextScene>();
@@ -6704,8 +5853,6 @@ namespace KineticEnergy.EditorSetup
             CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
             PointCameraAt(rig, new Vector3(0.3f * L, 0f, 0f));
 
-            // Stamp the Quarry's hand-tuned values over the fresh instances, keeping this
-            // scene's own object wiring intact.
             OverwriteSerializedValuesKeepObjectRefs(rig.controller, controllerJson);
             OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
             OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
@@ -6714,8 +5861,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: Level 2 setup complete OK (L={L:F1}m, 3 movers)");
         }
 
-        // The wandering ground enemy as a drag-and-drop prefab: magenta sphere + Enemy
-        // (wander mode dropdown, radius, edge margin, speed - all public per instance).
         [MenuItem("Tools/Kinetic Energy/Create Enemy Prefab")]
         public static void CreateEnemyPrefab()
         {
@@ -6737,8 +5882,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: Enemy prefab created OK");
         }
 
-        // Updates the Enemy prefab's stored walking speed to the new default (4.5 - 50%
-        // faster) - instances without their own speed override follow automatically.
         [MenuItem("Tools/Kinetic Energy/Update Enemy Prefab Speed")]
         public static void UpdateEnemyPrefabSpeed()
         {
@@ -6758,10 +5901,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: enemy prefab speed updated OK");
         }
 
-        // ==================== Level 3 - enemies ====================
-        // Wandering enemies on an open arena and on platforms - launch through them to
-        // clear the way. Player/camera tuning is copied from LEVEL 1's current instances,
-        // so all three levels share the exact same values.
         [MenuItem("Tools/Kinetic Energy/Setup Level 3")]
         public static void SetupLevel3()
         {
@@ -6788,14 +5927,12 @@ namespace KineticEnergy.EditorSetup
             Transform tf = course.transform;
             Vector3 platformSize = new Vector3(10f, 2f, 10f);
 
-            // Start pad, then an open arena patrolled by radius-mode enemies.
             CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
             Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
             CreateBlock(tf, "Arena", new Vector3(0.5f * L, -1f, 0f), new Vector3(0.45f * L, 2f, 0.45f * L), platformMat);
             SpawnEnemy("ArenaEnemy1", new Vector3(0.42f * L, 1f, -6f), EnemyWanderMode.WithinRadius, 10f, 1.5f);
             SpawnEnemy("ArenaEnemy2", new Vector3(0.58f * L, 1f, 6f), EnemyWanderMode.WithinRadius, 12f, 1.5f);
 
-            // Two platform hops, each patrolled edge-to-edge by a platform-surface enemy.
             CreateBlock(tf, "Hop1", new Vector3(0.95f * L, -1f, 0.1f * L), new Vector3(14f, 2f, 14f), platformMat);
             SpawnEnemy("Hop1Enemy", new Vector3(0.95f * L, 1f, 0.1f * L), EnemyWanderMode.PlatformSurface, 8f, 1.5f);
             CreateBlock(tf, "Hop2", new Vector3(1.35f * L, -1f, -0.05f * L), new Vector3(14f, 2f, 14f), platformMat);
@@ -6803,7 +5940,6 @@ namespace KineticEnergy.EditorSetup
 
             CreateBlock(tf, "EndPlatform", new Vector3(1.7f * L, -1f, 0f), platformSize, platformMat);
 
-            // Hazard floor + respawn + finish, as in the other levels.
             GameObject respawnPoint = new GameObject("RespawnPoint");
             respawnPoint.transform.position = playerSpawn;
             GameObject damageFloor = CreateBlock(null, "DamageFloor",
@@ -6829,10 +5965,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: Level 3 setup complete OK (L={L:F1}m, 4 enemies)");
         }
 
-        // ==================== Level 4 - flying enemies ====================
-
-        // The flying enemy prefab: a magenta sphere with the FlyingEnemy component - every
-        // tunable public on it. Idempotent; an existing prefab keeps its tuned values.
         [MenuItem("Tools/Kinetic Energy/Create Flying Enemy Prefab")]
         public static void CreateFlyingEnemyPrefab()
         {
@@ -6850,9 +5982,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: FlyingEnemy prefab created OK");
         }
 
-        // Swaps a component for a SUBCLASS in place, carrying every serialized value over
-        // (m_Script excluded, so the new type sticks) - the literal "inherits all their
-        // behaviour and values" for the enemy variant prefabs.
         static T SwapForSubclass<T>(Component source) where T : Component
         {
             T replacement = source.gameObject.AddComponent<T>();
@@ -6871,8 +6000,6 @@ namespace KineticEnergy.EditorSetup
             return replacement;
         }
 
-        // The sized ground enemy: one prefab, Small/Medium/Large picked per placed
-        // instance on the SizedEnemy component. Values inherited from Enemy.prefab.
         [MenuItem("Tools/Kinetic Energy/Create Sized Enemy Prefab")]
         public static void CreateSizedEnemyPrefab()
         {
@@ -6896,8 +6023,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: SizedEnemy prefab created OK (size class per instance)");
         }
 
-        // The armoured flyer: FlyingEnemy plus a golden back cube - the only killable
-        // spot. Values inherited from FlyingEnemy.prefab.
         [MenuItem("Tools/Kinetic Energy/Create Weak Spot Flyer Prefab")]
         public static void CreateWeakSpotFlyerPrefab()
         {
@@ -6916,8 +6041,6 @@ namespace KineticEnergy.EditorSetup
 
             WeakSpotFlyingEnemy weak = SwapForSubclass<WeakSpotFlyingEnemy>(instance.GetComponent<FlyingEnemy>());
 
-            // The back cube: parked on top of the sphere, slightly sticking out. Its own
-            // collider is what the crash pipeline must report for a kill.
             Material weakMat = MakeMaterial("WeakSpotMaterial", new Color(1f, 0.85f, 0.2f));
             GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
             cube.name = "WeakSpot";
@@ -6932,8 +6055,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: WeakSpotFlyer prefab created OK (back-cube kill spot)");
         }
 
-        // A SMALL flying-gauntlet: islands over a hazard floor, guarded by projectile-
-        // shooting flyers. Player tuning copied from Level 3 (the previous reference).
         [MenuItem("Tools/Kinetic Energy/Setup Level 4")]
         public static void SetupLevel4()
         {
@@ -6962,8 +6083,6 @@ namespace KineticEnergy.EditorSetup
             Transform tf = course.transform;
             Vector3 platformSize = new Vector3(12f, 2f, 12f);
 
-            // Small island run over the void: every crossing is covered by a flyer's
-            // firing lane, so the route is dodge-or-be-swatted.
             CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
             Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
 
@@ -6997,7 +6116,6 @@ namespace KineticEnergy.EditorSetup
             OverwriteSerializedValuesKeepObjectRefs(rig.freeMove, moveJson);
             OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
 
-            // Standalone HUD meter prefabs, wired like every other level.
             GameObject pauseSystemGo = GameObject.Find("PauseSystem");
             Transform pauseCanvas = pauseSystemGo != null ? pauseSystemGo.transform.Find("PauseCanvas") : null;
             if (pauseCanvas != null)
@@ -7019,8 +6137,6 @@ namespace KineticEnergy.EditorSetup
             SaveOpenScene(level4Path);
             Debug.Log($"KineticEnergySetup: Level 4 setup complete OK (L={L:F1}m, 3 flying enemies)");
         }
-
-        // ==================== Level 9 - sized enemies / Level 10 - weak-spot flyers ====================
 
         static void SpawnSizedEnemy(string name, Vector3 position, EnemySizeClass sizeClass, EnemyWanderMode mode, float radius)
         {
@@ -7045,10 +6161,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(flyer);
         }
 
-        // A stepped run of arenas, one SIZE CLASS per step: the small (20% kill, fast)
-        // greets first, the medium (40%) guards the climb, the large (60%, hard-hitting)
-        // holds the last arena - the billboard percentages teach the escalation. Player
-        // tuning copied from Level 7 (the ground-enemy reference).
         [MenuItem("Tools/Kinetic Energy/Setup Level 9")]
         public static void SetupLevel9()
         {
@@ -7086,8 +6198,6 @@ namespace KineticEnergy.EditorSetup
             CreateBlock(tf, "MediumArena", new Vector3(0.65f * L, 2f, -0.06f * L), new Vector3(18f, 2f, 18f), platformMat);
             SpawnSizedEnemy("MediumEnemy", new Vector3(0.65f * L, 4f, -0.06f * L), EnemySizeClass.Medium, EnemyWanderMode.PlatformSurface, 10f);
 
-            // The final arena pairs the LARGE with a second small - the player has to
-            // budget a 60% launch while a fast 20% pest is on the same floor.
             CreateBlock(tf, "LargeArena", new Vector3(0.95f * L, 5f, 0.03f * L), new Vector3(22f, 2f, 22f), platformMat);
             SpawnSizedEnemy("LargeEnemy", new Vector3(0.95f * L, 7f, 0.03f * L), EnemySizeClass.Large, EnemyWanderMode.PlatformSurface, 11f);
             SpawnSizedEnemy("PestEnemy", new Vector3(0.92f * L, 7f, -0.02f * L), EnemySizeClass.Small, EnemyWanderMode.WithinRadius, 8f);
@@ -7119,10 +6229,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: Level 9 setup complete OK (L={L:F1}m, sized enemies small/medium/large+pest)");
         }
 
-        // A CLIMBING island run: every weak-spot flyer hovers just below the next island,
-        // so the route above them - the back cube is the only kill spot - is always
-        // there, and every crossing passes over a flyer's patrol. Player tuning copied
-        // from Level 4 (the flyer reference).
         [MenuItem("Tools/Kinetic Energy/Setup Level 10")]
         public static void SetupLevel10()
         {
@@ -7190,11 +6296,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: Level 10 setup complete OK (L={L:F1}m, 3 weak-spot flyers)");
         }
 
-        // ==================== Level 7 - hunter enemies ====================
-
-        // The HUNTER prefab: the ground enemy with its variant flags on - attacks airborne
-        // players, launches back to the nearest platform instead of falling, and sees
-        // further. Crimson so it reads as the dangerous cousin.
         [MenuItem("Tools/Kinetic Energy/Create Hunter Enemy Prefab")]
         public static void CreateHunterEnemyPrefab()
         {
@@ -7202,8 +6303,7 @@ namespace KineticEnergy.EditorSetup
             GameObject existing = AssetDatabase.LoadAssetAtPath<GameObject>(path);
             if (existing != null)
             {
-                // Prefab exists - stamp the newer hunter capabilities onto it (dodging),
-                // leaving every user-tuned value alone.
+
                 GameObject root = PrefabUtility.LoadPrefabContents(path);
                 try
                 {
@@ -7238,8 +6338,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: HunterEnemy prefab created OK");
         }
 
-        // Hunter variant B: the STALKER - killable only during its attack TELEGRAPH (it is
-        // committed then and cannot dodge), untouchable the rest of the time.
         [MenuItem("Tools/Kinetic Energy/Create Stalker Enemy Prefab")]
         public static void CreateStalkerEnemyPrefab()
         {
@@ -7263,8 +6361,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: StalkerEnemy prefab created OK");
         }
 
-        // A stepped platform cluster over the void - hunters roam it, punish airborne
-        // crossings, and hop back when baited off edges. Tuning copied from Level 6.
         [MenuItem("Tools/Kinetic Energy/Setup Level 7")]
         public static void SetupLevel7()
         {
@@ -7293,8 +6389,6 @@ namespace KineticEnergy.EditorSetup
             Transform tf = course.transform;
             Vector3 platformSize = new Vector3(12f, 2f, 12f);
 
-            // A stepped cluster: heights vary, so airborne crossings are constant - which
-            // is exactly what hunters punish.
             CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
             Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
 
@@ -7345,11 +6439,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(hunter);
         }
 
-        // ==================== Level 8 - the challenge gauntlet ====================
-
-        // The translucent hazard look - a MakeMaterial with the URP Lit transparent
-        // surface switched on, so the purple walls read as a barrier without hiding the
-        // level behind them.
         static Material MakeTransparentMaterial(string assetName, Color color)
         {
             Material mat = MakeMaterial(assetName, color);
@@ -7384,9 +6473,6 @@ namespace KineticEnergy.EditorSetup
                 return;
             }
 
-            // A unit cube scaled per use: the chase wall stretches its scene instance, the
-            // seal walls get sealWallSize at spawn. Trigger collider - death on touch, no
-            // physical shove - and a kinematic body so the moving variant sweeps properly.
             GameObject temp = GameObject.CreatePrimitive(PrimitiveType.Cube);
             temp.name = "DeathWall";
             temp.GetComponent<Renderer>().sharedMaterial = material;
@@ -7400,16 +6486,11 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: DeathWall prefab created OK");
         }
 
-        // Level 1's challenge twin: the same growing-gap platform run, but played FOUR
-        // times in sequence - limited slowdown, overcharge scatter, the chasing wall, and
-        // the sealing walls - advancing at the end pad. The pause Scenes panel gets a
-        // second column that jumps straight to a stage (always a restart of the level).
         [MenuItem("Tools/Kinetic Energy/Setup Level 8")]
         public static void SetupLevel8()
         {
             const string level8Path = "Assets/Scenes/Level8.unity";
 
-            // Tuning copied from Level 1 - this level should feel identical to play.
             EditorSceneManager.OpenScene(Level1ScenePath, OpenSceneMode.Single);
             KineticCubeController sourceController = UnityEngine.Object.FindAnyObjectByType<KineticCubeController>(FindObjectsInactive.Include);
             KineticCubeControllerFreeMove sourceMove = UnityEngine.Object.FindAnyObjectByType<KineticCubeControllerFreeMove>(FindObjectsInactive.Include);
@@ -7433,7 +6514,6 @@ namespace KineticEnergy.EditorSetup
             Transform tf = course.transform;
             Vector3 platformSize = new Vector3(10f, 2f, 10f);
 
-            // Level 1's run: gaps grow with every jump. The last platform IS the end pad.
             float[] gapFractions = { 0.15f, 0.25f, 0.35f, 0.5f, 0.65f, 0.8f };
             var platforms = new List<Transform>();
             platforms.Add(CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat).transform);
@@ -7455,8 +6535,6 @@ namespace KineticEnergy.EditorSetup
             damage.respawnPoint = respawnPoint.transform;
             EditorUtility.SetDirty(damage);
 
-            // The chase wall: one stretched DeathWall parked behind the start, sweeping
-            // toward the end. Speed and start position are edited on this instance.
             GameObject chaseGo = InstantiatePrefab("DeathWall");
             chaseGo.name = "ChaseWall";
             chaseGo.transform.position = new Vector3(-1.2f * L, 13f, 0f);
@@ -7466,7 +6544,6 @@ namespace KineticEnergy.EditorSetup
             chase.moveDirection = Vector3.right;
             EditorUtility.SetDirty(chase);
 
-            // The end pad advances the stage sequence instead of loading another scene.
             GameObject finish = new GameObject("ChallengeFinish");
             finish.transform.position = new Vector3(endX, 2f, 0f);
             BoxCollider finishBox = finish.AddComponent<BoxCollider>();
@@ -7484,8 +6561,6 @@ namespace KineticEnergy.EditorSetup
 
             CoreRig rig = SpawnCoreRig(playerSpawn, LevelPauseButtons());
 
-            // The challenge column in the Scenes panel: four direct-to-stage buttons next
-            // to the ordinary scene list, wired to the PauseController stage loaders.
             Font font = FindBestFont();
             Color accent = new Color(1f, 0.82f, 0.2f);
             Text columnTitle = CreateText("ChallengeColumnTitle", rig.scenesPanel.transform,
@@ -7514,8 +6589,6 @@ namespace KineticEnergy.EditorSetup
             OverwriteSerializedValuesKeepObjectRefs(rig.orbitCamera, cameraJson);
             WireStandaloneMeters(rig);
 
-            // Level 8 reloads ITSELF by name (stage advance + the pause stage buttons), so
-            // it must sit in Build Settings - appended once, existing entries untouched.
             var buildScenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
             if (!buildScenes.Exists(s => s.path == level8Path))
             {
@@ -7527,14 +6600,11 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: Level 8 setup complete OK (L={L:F1}m, 4 challenge stages)");
         }
 
-        // ==================== Level 5 - turrets / Level 6 - laser walls ====================
-
         [MenuItem("Tools/Kinetic Energy/Create Turret Prefab")]
         public static void CreateTurretPrefab()
         {
             string path = PrefabFolder + "/TurretEnemy.prefab";
-            // Turrets are ENEMIES, so they wear the shared enemy colour (direct request) -
-            // the same EnemyMaterial the ground enemy uses, and the same windup flash.
+
             Material material = MakeMaterial("EnemyMaterial", new Color(0.72f, 0.15f, 0.6f));
 
             GameObject existing = AssetDatabase.LoadAssetAtPath<GameObject>(path);
@@ -7555,7 +6625,7 @@ namespace KineticEnergy.EditorSetup
 
             GameObject temp = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             temp.name = "TurretEnemy";
-            temp.transform.localScale = new Vector3(1.4f, 0.9f, 1.4f); // squat cylinder
+            temp.transform.localScale = new Vector3(1.4f, 0.9f, 1.4f);
             temp.GetComponent<Renderer>().sharedMaterial = material;
             TurretEnemy turret = temp.AddComponent<TurretEnemy>();
             turret.windUpColor = new Color(1f, 0.35f, 0.1f);
@@ -7564,8 +6634,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: TurretEnemy prefab created OK");
         }
 
-        // A walled corridor watched by fixed turrets - two on the flanking walls, one on a
-        // pedestal mid-course. Player tuning copied from Level 4.
         [MenuItem("Tools/Kinetic Energy/Setup Level 5")]
         public static void SetupLevel5()
         {
@@ -7599,7 +6667,6 @@ namespace KineticEnergy.EditorSetup
             CreateBlock(tf, "StartPlatform", new Vector3(0f, -1f, 0f), platformSize, platformMat);
             Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
 
-            // The corridor: hop platforms between two tall flanking walls.
             CreateBlock(tf, "Hop1", new Vector3(0.4f * L, -1f, 0f), new Vector3(14f, 2f, 14f), platformMat);
             CreateBlock(tf, "Hop2", new Vector3(0.8f * L, -1f, 0.06f * L), new Vector3(14f, 2f, 14f), platformMat);
             CreateBlock(tf, "EndPlatform", new Vector3(1.2f * L, -1f, 0f), platformSize, platformMat);
@@ -7608,10 +6675,9 @@ namespace KineticEnergy.EditorSetup
             CreateBlock(tf, "WallLeft", new Vector3(0.6f * L, 8f, -corridorHalfWidth), new Vector3(wallLength, 20f, 2f), wallMat);
             CreateBlock(tf, "WallRight", new Vector3(0.6f * L, 8f, corridorHalfWidth), new Vector3(wallLength, 20f, 2f), wallMat);
 
-            // Wall turrets: cylinder axis pointing INTO the corridor (half-embedded).
             SpawnTurret("WallTurretLeft", new Vector3(0.35f * L, 8f, -corridorHalfWidth + 1.2f), new Vector3(-90f, 0f, 0f));
             SpawnTurret("WallTurretRight", new Vector3(0.85f * L, 9f, corridorHalfWidth - 1.2f), new Vector3(90f, 0f, 0f));
-            // Pedestal turret guarding the middle hop, upright on its column.
+
             CreateBlock(tf, "TurretPedestal", new Vector3(0.6f * L, 1f, -0.05f * L), new Vector3(3f, 6f, 3f), wallMat);
             SpawnTurret("PedestalTurret", new Vector3(0.6f * L, 4.9f, -0.05f * L), Vector3.zero);
 
@@ -7640,8 +6706,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log($"KineticEnergySetup: Level 5 setup complete OK (L={L:F1}m, 3 turrets)");
         }
 
-        // A runway crossed by blinking laser gates - staggered phases, so the route is a
-        // rhythm read. Player tuning copied from Level 5.
         [MenuItem("Tools/Kinetic Energy/Setup Level 6")]
         public static void SetupLevel6()
         {
@@ -7668,7 +6732,6 @@ namespace KineticEnergy.EditorSetup
             GameObject course = new GameObject("Level6Course");
             Transform tf = course.transform;
 
-            // One long runway; gates cross it at intervals with alternating phases.
             float runwayLength = 1.1f * L;
             CreateBlock(tf, "Runway", new Vector3(runwayLength * 0.5f, -1f, 0f), new Vector3(runwayLength + 12f, 2f, 24f), platformMat);
             Vector3 playerSpawn = new Vector3(0f, 1.5f, 0f);
@@ -7711,10 +6774,6 @@ namespace KineticEnergy.EditorSetup
             instance.transform.rotation = Quaternion.Euler(eulerRotation);
         }
 
-        // The laser gate PREFAB: two grey columns (24 apart, 12 high) + a Beams root
-        // (kinematic rigidbody + DamageWalls) that LaserWall fills with red beam cylinders
-        // at runtime from its public fields. The DamageWalls respawn point CANNOT live in
-        // the prefab (cross-hierarchy scene reference) - wired per instance.
         [MenuItem("Tools/Kinetic Energy/Create Laser Gate Prefab")]
         public static void CreateLaserGatePrefab()
         {
@@ -7747,8 +6806,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: LaserGate prefab created OK");
         }
 
-        // Instantiates the LaserGate prefab and wires the per-instance bits: position,
-        // timing overrides, and the scene's respawn point onto the beams' DamageWalls.
         static void CreateLaserGate(Transform parent, string name, Vector3 centre, float width, float columnHeight,
             float onSeconds, float offSeconds, float phaseOffset, Transform respawnPoint)
         {
@@ -7772,7 +6829,6 @@ namespace KineticEnergy.EditorSetup
             }
         }
 
-        // Standalone HUD meter prefabs, wired the way every level does it now.
         static void WireStandaloneMeters(CoreRig rig)
         {
             GameObject pauseSystemGo = GameObject.Find("PauseSystem");
@@ -7816,9 +6872,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(enemy);
         }
 
-        // Copies EVERY serialized value on Level 1's Player/free-move/camera onto Level 2's
-        // instances (keeping Level 2's own object wiring) - the two levels then play with
-        // exactly the same tuning, flags included.
         [MenuItem("Tools/Kinetic Energy/Copy Player Values Level 1 -> Level 2")]
         public static void CopyPlayerValuesLevel1ToLevel2()
         {
@@ -7860,10 +6913,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(mover);
         }
 
-        // Stamps another component's serialized state (as EditorJsonUtility JSON) onto
-        // target, then restores every UnityEngine.Object reference target had before - the
-        // JSON's refs are instance IDs from a scene no longer loaded, while the target's own
-        // wiring must stay this scene's.
         static void OverwriteSerializedValuesKeepObjectRefs(Component target, string sourceJson)
         {
             var savedRefs = new List<(string path, UnityEngine.Object value)>();
@@ -7898,8 +6947,6 @@ namespace KineticEnergy.EditorSetup
                 ("Gauntlet - Variant B", "Gauntlet", 2),
             };
         }
-
-        // ==================== Main menu ====================
 
         [MenuItem("Tools/Kinetic Energy/Setup Main Menu")]
         public static void SetupMainMenu()
@@ -7954,9 +7001,6 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: main menu setup complete OK");
         }
 
-        // ADDITIVE: drops a Feedback button (opens the playtest form URL) into the existing
-        // main menu, next to Quit - nothing existing is moved or re-valued. The playable
-        // scenes get theirs through the PauseSystem prefab's converted Scenes button.
         [MenuItem("Tools/Kinetic Energy/Add Feedback Button To Main Menu")]
         public static void AddFeedbackButtonToMainMenu()
         {
@@ -7974,15 +7018,13 @@ namespace KineticEnergy.EditorSetup
             Font font = FindBestFont();
             Color accent = new Color(1f, 0.82f, 0.2f);
             GameObject feedbackBtn = CreateButton("FeedbackButton", menuPanel.transform, "Feedback", font, accent,
-                new Vector2(340f, -190f), new Vector2(300f, 70f)); // beside Quit, same row
+                new Vector2(340f, -190f), new Vector2(300f, 70f));
             WireButton(feedbackBtn, menu.OnFeedbackClicked);
             EditorUtility.SetDirty(menu);
 
             SaveOpenScene(MainMenuScenePath);
             Debug.Log("KineticEnergySetup: feedback button added to main menu OK");
         }
-
-        // ==================== Scene / geometry helpers ====================
 
         static void NewEmptyScene(string path)
         {
@@ -8023,17 +7065,12 @@ namespace KineticEnergy.EditorSetup
             return go;
         }
 
-        // Stickiness is strictly opt-in, per object - a surface only holds a crash if it
-        // itself carries a StickySurface component, visible in the Inspector.
         static GameObject MakeSticky(GameObject go)
         {
             go.AddComponent<StickySurface>().sticky = true;
             return go;
         }
 
-        // Solid and sticky-taggable but never rendered - the boundary cage. A plain
-        // GameObject with only a BoxCollider: the landing prediction picks it up like any
-        // other static collider, so the trail honestly shows a landing on the world's edge.
         static GameObject CreateInvisibleBox(Transform parent, string name, Vector3 center, Vector3 size)
         {
             GameObject go = new GameObject(name);
@@ -8044,7 +7081,6 @@ namespace KineticEnergy.EditorSetup
             return go;
         }
 
-        // Targets never sit (or respawn) above this height - direct request.
         const float TargetSphereMaxY = 64f;
 
         static void CreateTargetSphere(Transform parent, string name, Vector3 position, Material material, TargetSphereCounter counter, Vector3 respawnMin, Vector3 respawnMax)
@@ -8054,10 +7090,9 @@ namespace KineticEnergy.EditorSetup
             go.transform.SetParent(parent, true);
             position.y = Mathf.Min(position.y, TargetSphereMaxY);
             go.transform.position = position;
-            go.transform.localScale = Vector3.one * 2.25f; // 75% of the original 3m diameter
+            go.transform.localScale = Vector3.one * 2.25f;
             go.GetComponent<Renderer>().sharedMaterial = material;
-            // SOLID on purpose: the player crash-lands on the sphere (normal refund), it
-            // vanishes, and the aim preview treats it as a genuine landing target.
+
             TargetSphere sphere = go.AddComponent<TargetSphere>();
             sphere.counter = counter;
             sphere.respawnAreaMin = respawnMin;
@@ -8065,9 +7100,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(sphere);
         }
 
-        // URP ships with a ~50m max shadow distance - at this project's arena sizes that
-        // leaves most of the level shadowless while nearby blocks are shadowed, which reads
-        // as broken. Raised on every URP quality asset in Assets/Settings.
         static void ConfigureShadowDistance(float distance)
         {
             foreach (string guid in AssetDatabase.FindAssets("t:UniversalRenderPipelineAsset", new[] { "Assets/Settings" }))
@@ -8095,8 +7127,7 @@ namespace KineticEnergy.EditorSetup
             if (light == null) light = lightGo.AddComponent<Light>();
             light.type = LightType.Directional;
             light.intensity = 2f;
-            // Real-time shadows for the world; the player's own renderers have casting off
-            // and use the PlayerShadow drop-disc instead.
+
             light.shadows = LightShadows.Soft;
             EditorUtility.SetDirty(light);
         }
@@ -8113,10 +7144,6 @@ namespace KineticEnergy.EditorSetup
             if (profile != null) volume.sharedProfile = profile;
         }
 
-        // A flat dark disc kept directly under the player by PlayerShadow - the only shadow
-        // the player casts (its renderers don't cast real ones). Instantiates the
-        // PlayerShadow prefab when it exists (and wires the cross-hierarchy player ref);
-        // the from-scratch construction below is the fallback for before the prefab existed.
         static void BuildPlayerShadow(Transform player)
         {
             GameObject existing = GameObject.Find("PlayerShadow");
@@ -8145,8 +7172,6 @@ namespace KineticEnergy.EditorSetup
             UnityEngine.Object.DestroyImmediate(visualGo.GetComponent<Collider>());
             visualGo.transform.localScale = new Vector3(1.6f, 0.02f, 1.6f);
 
-            // UNLIT on purpose - a lit black disc picks up lighting/shadowing and stops
-            // reading as a shadow at all.
             Color shadowColor = new Color(0f, 0f, 0f, 0.5f);
             Material shadowMat = new Material(FindUnlitShader());
             shadowMat.color = shadowColor;
@@ -8162,8 +7187,6 @@ namespace KineticEnergy.EditorSetup
             EditorUtility.SetDirty(shadowScript);
         }
 
-        // ==================== Materials ====================
-
         static Material MakeMaterial(string assetName, Color color)
         {
             Material mat = new Material(FindBestShader());
@@ -8171,8 +7194,6 @@ namespace KineticEnergy.EditorSetup
             return SaveMaterialAsset(mat, assetName);
         }
 
-        // A Material created via `new Material(...)` is a loose object - it must be saved as
-        // a real asset or the renderer's slot serializes as null and renders pink.
         static Material SaveMaterialAsset(Material mat, string name)
         {
             if (!AssetDatabase.IsValidFolder(MaterialFolder))
@@ -8184,11 +7205,7 @@ namespace KineticEnergy.EditorSetup
             Material existing = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (existing != null)
             {
-                // NEVER overwrite a material that already exists. These are hand-tuned in
-                // the editor, and this used to stamp the setup script's own colour and
-                // smoothness back over them on every re-run - silently undoing that work.
-                // A setup method asks for a material by NAME; the asset on disk is the
-                // authority on what it looks like.
+
                 UnityEngine.Object.DestroyImmediate(mat);
                 return existing;
             }
@@ -8243,8 +7260,6 @@ namespace KineticEnergy.EditorSetup
 
             throw new Exception("KineticEnergySetup: no usable shader found.");
         }
-
-        // ==================== UI helpers ====================
 
         static Font FindBestFont()
         {
@@ -8309,8 +7324,6 @@ namespace KineticEnergy.EditorSetup
             rt.anchoredPosition = anchoredPos;
             rt.sizeDelta = size;
 
-            // The accent lives on the base image (normalColor stays white so it shows
-            // undistorted); the ColorBlock states are purely a brighten/dim pulse on top.
             Image image = go.AddComponent<Image>();
             image.color = accentColor;
 
@@ -8329,9 +7342,6 @@ namespace KineticEnergy.EditorSetup
             return go;
         }
 
-        // A plain solid-color fill bar - Image.Type.Filled/Horizontal stretched over the
-        // parent rect (minus inset). Needs a real sprite: a Filled Image with no sprite
-        // silently renders as a full rectangle regardless of fillAmount.
         static Image CreateFillBar(string name, Transform parent, Color color, float inset = 0f)
         {
             GameObject go = new GameObject(name, typeof(RectTransform));
@@ -8357,9 +7367,6 @@ namespace KineticEnergy.EditorSetup
         const string SolidWhiteSpritePath = "Assets/Editor/Generated/UISolidWhite.png";
         static Sprite cachedSolidWhiteSprite;
 
-        // A flat, un-sliced 4x4 white square saved as a real project asset (an in-memory
-        // Sprite.Create result has no asset path and wouldn't survive being referenced from
-        // a saved scene). Generated once and reloaded on every later run.
         static Sprite GetSolidWhiteSprite()
         {
             if (cachedSolidWhiteSprite != null) return cachedSolidWhiteSprite;
@@ -8396,9 +7403,6 @@ namespace KineticEnergy.EditorSetup
             return cachedSolidWhiteSprite;
         }
 
-        // Persistent listeners only: a runtime AddListener from an Editor script is not
-        // serialized and silently vanishes on reload - these are the programmatic
-        // equivalent of wiring onClick in the Inspector by hand.
         static void WireButton(GameObject buttonGo, UnityEngine.Events.UnityAction call)
         {
             Button button = buttonGo.GetComponent<Button>();
@@ -8416,8 +7420,6 @@ namespace KineticEnergy.EditorSetup
             Transform existing = parent.Find(childName);
             if (existing != null) UnityEngine.Object.DestroyImmediate(existing.gameObject);
         }
-
-        // ==================== Asset lookups ====================
 
         static InputActionReference FindActionReference(string mapName, string actionName)
         {
@@ -8438,3 +7440,4 @@ namespace KineticEnergy.EditorSetup
         }
     }
 }
+

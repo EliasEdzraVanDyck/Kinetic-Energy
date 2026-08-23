@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
@@ -7,14 +7,7 @@ using KineticEnergy.Player;
 
 namespace KineticEnergy.UI
 {
-    // The bottom-left section explainer: one line of teaching per course section, shown for
-    // as long as the player is INSIDE that section - not just at its start. Which section
-    // that is comes from the player's position measured against the section spawn points
-    // (sorted by x, the course's long axis), so it tracks walking backwards, launches that
-    // skip a checkpoint, and the pause menu's section jumps alike.
-    //
-    // The whole HUD hangs off ONE checkbox (showHud) - untick it in the inspector and every
-    // section's element is gone in one go.
+
     public class SectionIntroHud : MonoBehaviour
     {
         [Tooltip("Master switch: one checkbox hides every section's HUD element at once.")]
@@ -29,11 +22,6 @@ namespace KineticEnergy.UI
         [Tooltip("Optional per-section controller wording, same indexing as sectionTexts. An empty or missing entry falls back to the keyboard text, so only sections that name buttons need filling in.")]
         [TextArea(2, 8)] public string[] sectionTextsGamepad = new string[0];
 
-        // A beat WITHIN a section: while the player is inside its radius it replaces the
-        // section's own text. Lets one section teach several things in the order the player
-        // actually meets them - charge here, re-aim on the next platform, buttons at the
-        // first button - instead of one wall of text at the section pad. Sections with no
-        // steps behave exactly as before.
         [System.Serializable]
         public class ProximityStep
         {
@@ -62,8 +50,7 @@ namespace KineticEnergy.UI
         Text label;
         GameObject panel;
         string shownText;
-        // Section indices sorted by their spawn's x - the course runs along x, so "which
-        // section am I in" is "the last spawn I have passed".
+
         readonly List<int> orderedByX = new List<int>();
 
         void Start()
@@ -89,8 +76,6 @@ namespace KineticEnergy.UI
             if (panel.activeSelf != visible) panel.SetActive(visible);
             if (!visible) return;
 
-            // The last section spawn the player has passed along x - before the first one,
-            // the first section is still the answer.
             int current = orderedByX[0];
             float x = player.transform.position.x;
             for (int i = 0; i < orderedByX.Count; i++)
@@ -109,9 +94,6 @@ namespace KineticEnergy.UI
                 next = sectionTextsGamepad[current];
             }
 
-            // A step the player is standing in outranks the section text. Nearest wins, so
-            // overlapping radii resolve to whichever beat they are actually at. Compared
-            // FLAT: standing on a platform and hanging above it are the same beat.
             float bestSqr = float.MaxValue;
             foreach (ProximityStep step in proximitySteps)
             {
@@ -125,8 +107,7 @@ namespace KineticEnergy.UI
                 Vector3 closest = a;
                 if (step.targetEnd != null)
                 {
-                    // Nearest point on the A-B stretch: covers both anchors and the whole
-                    // run between them, so one beat can span several platforms.
+
                     Vector3 b = step.targetEnd.position;
                     b.y = 0f;
                     Vector3 span = b - a;
@@ -144,8 +125,6 @@ namespace KineticEnergy.UI
                 next = step.For(usingGamepad);
             }
 
-            // Compared by CONTENT, not by index - a step and a section can hold the same
-            // string, and rebuilding the label every frame would fight the layout fitter.
             if (next == shownText) return;
             shownText = next;
             label.text = next;
@@ -156,10 +135,6 @@ namespace KineticEnergy.UI
 
         bool usingGamepad;
 
-        // Which device the prompts should name. STICKY: it flips only on a deliberate act -
-        // a button, a trigger, a real stick push, a keypress, a click, a mouse move - and
-        // otherwise holds, so an idle controller in one hand and a hand off the keyboard
-        // never makes the text flicker between the two.
         void UpdateActiveDevice()
         {
             Gamepad pad = Gamepad.current;
@@ -184,15 +159,13 @@ namespace KineticEnergy.UI
             if (deskActed) usingGamepad = false;
         }
 
-        // Overlay canvas of its own, so no scene canvas needs surgery: a dark backdrop in
-        // the bottom-left corner whose height follows the text.
         void BuildPanel()
         {
             GameObject canvasGo = new GameObject("SectionIntroCanvas");
             canvasGo.transform.SetParent(transform, false);
             Canvas canvas = canvasGo.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 5; // under the pause menu, over the world
+            canvas.sortingOrder = 5;
             CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920f, 1080f);
@@ -218,10 +191,7 @@ namespace KineticEnergy.UI
             textGo.transform.SetParent(panel.transform, false);
             label = textGo.AddComponent<Text>();
             label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            // A dynamic font's glyphs are rasterized AT this point size, then whatever the
-            // canvas scaler does happens on top - 22 baked a low-resolution bitmap that then
-            // got stretched, reading as blurry. A bigger point size means a sharper source
-            // bitmap to begin with.
+
             label.fontSize = 34;
             label.color = new Color(0.92f, 0.92f, 0.92f);
             label.horizontalOverflow = HorizontalWrapMode.Wrap;
@@ -229,3 +199,4 @@ namespace KineticEnergy.UI
         }
     }
 }
+

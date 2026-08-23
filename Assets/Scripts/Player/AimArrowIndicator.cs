@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace KineticEnergy.Player
 {
@@ -68,3 +68,4 @@ namespace KineticEnergy.Player
         }
     }
 }
+

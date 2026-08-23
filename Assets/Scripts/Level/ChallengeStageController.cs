@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -8,25 +8,18 @@ namespace KineticEnergy.Level
 {
     public enum ChallengeStage
     {
-        LimitedSlowdown,   // 1 - the midair aim slow-down runs on the budget meter
-        OverchargeScatter, // 2 - big launches scatter (charge buys distance, costs precision)
-        ChasingWall,       // 3 - a purple death wall sweeps the level behind the player
-        SealingWalls,      // 4 - every platform-to-platform jump seals the gap behind
-        ShrinkingPlatforms,// 5 - each course platform is a step smaller than the one before
+        LimitedSlowdown,
+        OverchargeScatter,
+        ChasingWall,
+        SealingWalls,
+        ShrinkingPlatforms,
     }
 
-    // Carries the chosen stage across the scene reload (the SlowdownVariantSelection
-    // pattern): set before LoadScene, consumed exactly once by the controller's Start.
     public static class ChallengeStageSelection
     {
         public static ChallengeStage? PendingStage;
     }
 
-    // Level 8's stage director (a scene object, never a prefab). The four challenges run
-    // in SEQUENCE - reaching the end pad reloads the level on the next one - and the pause
-    // menu's Scenes panel carries a second column that jumps straight to a stage (always a
-    // restart from the beginning, like every scene button). No hotkey cycling here on
-    // purpose: the run itself is the switch.
     public class ChallengeStageController : MonoBehaviour
     {
         [Tooltip("Stage played when no pause-menu selection is pending (a fresh boot).")]
@@ -49,7 +42,7 @@ namespace KineticEnergy.Level
         public float slowdownBudgetSeconds = 2f;
 
         [Header("2 - Overcharge scatter")]
-        // Same tuning the QuarryChallenge harness uses for its scatter variant.
+
         [Tooltip("Scatter cone radius (degrees) at full charge.")]
         public float scatterMaxAngle = 14f;
         [Tooltip("Charge fraction where the cone leaves zero. 0 keeps the pure square-root curve (scatter = sqrt(energy%) x maxAngle/10), which is what this scene plays.")]
@@ -95,7 +88,7 @@ namespace KineticEnergy.Level
         Transform scatterRingRoot;
         Transform[] scatterDots;
         readonly List<GameObject> sealWalls = new List<GameObject>();
-        readonly HashSet<int> sealedGaps = new HashSet<int>(); // keyed by the gap's far platform index
+        readonly HashSet<int> sealedGaps = new HashSet<int>();
 
         void Start()
         {
@@ -109,8 +102,7 @@ namespace KineticEnergy.Level
 
             stage = ChallengeStageSelection.PendingStage ?? startingStage;
             ChallengeStageSelection.PendingStage = null;
-            // A stage this scene doesn't play (stale selection from another scene) falls
-            // back to the sequence's opener.
+
             if (stageSequence == null || stageSequence.Length == 0)
             {
                 stageSequence = new[] { startingStage };
@@ -136,7 +128,7 @@ namespace KineticEnergy.Level
 
         void ApplyStage()
         {
-            // Neutral baseline first, then the active stage's one twist on top.
+
             controller.slowdownMode = SlowdownMode.Unlimited;
             controller.launchScatterMaxAngle = 0f;
 
@@ -154,8 +146,7 @@ namespace KineticEnergy.Level
 
             if (chaseWall != null)
             {
-                // Stamped BEFORE the reset - the reset seeds the wall's live speed from
-                // moveSpeed, so the new pace has to be in place first.
+
                 chaseWall.moveSpeed = chaseWallSpeed;
                 chaseWall.moveAcceleration = chaseWallAcceleration;
                 chaseWall.maxMoveSpeed = chaseWallMaxSpeed;
@@ -174,8 +165,6 @@ namespace KineticEnergy.Level
         {
             return stageSequence == null ? -1 : System.Array.IndexOf(stageSequence, lookFor);
         }
-
-        // ---------- Shrinking platforms ----------
 
         void CaptureCourseScales()
         {
@@ -196,9 +185,6 @@ namespace KineticEnergy.Level
             }
         }
 
-        // First platform 100%, last shrinkFinalScalePercent, equal steps between - applied
-        // to each platform's TWO LARGEST axes, so the landing FACE shrinks while the slab
-        // keeps its thickness.
         void ApplyShrinkScales()
         {
             if (coursePlatforms == null || coursePlatforms.Length < 2 || courseOriginalScales == null) return;
@@ -211,10 +197,6 @@ namespace KineticEnergy.Level
             }
         }
 
-        // Shrinks everything EXCEPT the thinnest axis, which each shape uses as its
-        // thickness: an up-facing platform (10, 2, 10) loses landing area on x and z while
-        // staying 2 thick; a floating wall (2, 10, 10) shrinks the y/z face it presents and
-        // keeps its 2 of depth.
         static Vector3 ShrinkTwoLargestAxes(Vector3 size, float factor)
         {
             if (size.x <= size.y && size.x <= size.z) return new Vector3(size.x, size.y * factor, size.z * factor);
@@ -225,18 +207,12 @@ namespace KineticEnergy.Level
         void Update()
         {
             if (controller == null) return;
-            // The ring must keep tracking through the aim's bullet-time freeze (timeScale
-            // hits 0 while aiming, which is exactly when the ring matters).
+
             UpdateScatterRing();
             if (Time.timeScale <= 0f) return;
             TrackPlatformLandings();
         }
 
-        // ---------- Scatter ring ----------
-
-        // The orange dot-ring around the predicted landing, showing how far this shot
-        // could drift at its current charge. Lies flat on the landing FACE, so it reads
-        // correctly on walls and floors alike.
         void UpdateScatterRing()
         {
             bool show = stage == ChallengeStage.OverchargeScatter
@@ -262,8 +238,6 @@ namespace KineticEnergy.Level
             float distance = Vector3.Distance(controller.transform.position, landing);
             float radius = Mathf.Tan(cone * Mathf.Deg2Rad) * distance;
 
-            // Ring axes from the landing face's normal - a flat-XZ ring would cut into a
-            // wall landing edge-on and disappear.
             Vector3 normal = controller.LastPredictedLandingNormal;
             if (normal.sqrMagnitude < 0.0001f) normal = Vector3.up;
             normal.Normalize();
@@ -299,10 +273,6 @@ namespace KineticEnergy.Level
             }
         }
 
-        // Watches which course platform the player stands on. In the sealing stage, a
-        // landing on a NEW platform walls off the gap behind it: a static death wall
-        // midway between the landed platform and its predecessor in course order (the
-        // "2 consecutive platforms") - no way back.
         void TrackPlatformLandings()
         {
             Transform platform = CurrentSupportPlatform();
@@ -315,16 +285,9 @@ namespace KineticEnergy.Level
             int landedIndex = System.Array.IndexOf(coursePlatforms, platform);
             if (landedIndex < 0 || sealedGaps.Contains(landedIndex)) return;
 
-            // Sealed across the gap ACTUALLY crossed (left -> landed), not the course-order
-            // neighbours: floating walls and the upside-down platform are reached out of
-            // order, and a neighbour-based seal would wall off the wrong gap entirely.
             SpawnSealWall(previous.position, platform.position, landedIndex);
         }
 
-        // Whatever the player is currently resting on - standing OR clung to. The old
-        // check was a downward ray while grounded, so it only ever saw platform TOPS: a
-        // floating wall's side or the upside-down platform's underside left the player
-        // stuck (not grounded) with nothing under the ray, and no seal ever spawned.
         Transform CurrentSupportPlatform()
         {
             if (controller.IsGrounded && Physics.Raycast(controller.transform.position, Vector3.down,
@@ -334,8 +297,6 @@ namespace KineticEnergy.Level
                 if (standing != null) return standing;
             }
 
-            // Stuck to a face (wall, ceiling, any angle): the crash that stuck us there
-            // recorded the surface, which covers every landing the ray cannot see.
             if (controller.IsStuck || controller.IsGrounded)
             {
                 Collider crashSurface = controller.LastCrashSurface;
@@ -364,21 +325,17 @@ namespace KineticEnergy.Level
             wall.name = "SealWall_" + gapIndex;
 
             Vector3 gapCentre = (from + to) * 0.5f;
-            // Centre lifted so the wall reaches well above the platform tops and a little
-            // below them - over is a full launch away, under is the damage floor.
+
             wall.transform.position = gapCentre + Vector3.up * (sealWallSize.y * 0.4f);
 
-            // Never turned: the seal always lies ACROSS the x axis - thin in x, wide in z
-            // (sealWallSize) - so it cuts the course's forward direction whatever sideways
-            // offset the two platforms happen to have.
             wall.transform.rotation = Quaternion.identity;
             wall.transform.localScale = sealWallSize;
 
             DeathWall death = wall.GetComponent<DeathWall>();
             if (death != null)
             {
-                death.moveSpeed = 0f;         // a seal never travels...
-                death.moveAcceleration = 0f;  // ...and never picks up the chase's speed
+                death.moveSpeed = 0f;
+                death.moveAcceleration = 0f;
             }
             wall.SetActive(true);
             sealWalls.Add(wall);
@@ -407,8 +364,6 @@ namespace KineticEnergy.Level
             ResetHazards();
         }
 
-        // Any respawn resets the whole threat state - the chase wall returns to its start
-        // and every seal clears, so a retry faces the level as the stage began.
         void ResetHazards()
         {
             if (chaseWall != null) chaseWall.ResetToStart();
@@ -416,7 +371,6 @@ namespace KineticEnergy.Level
             lastPlatform = null;
         }
 
-        // The end pad's trigger lands here: advance and reload, or win after the last stage.
         public void OnFinishReached()
         {
             int index = SequenceIndex(stage);
@@ -428,8 +382,6 @@ namespace KineticEnergy.Level
                 return;
             }
 
-            // The whole sequence cleared - the win screen (the pause menu with the win
-            // label showing). A restart from there begins the sequence fresh.
             ChallengeStageSelection.PendingStage = null;
             var pause = FindAnyObjectByType<KineticEnergy.UI.PauseController>(FindObjectsInactive.Include);
             if (pause == null) return;
@@ -459,7 +411,7 @@ namespace KineticEnergy.Level
 
         void BuildHudTag()
         {
-            if (!showHudTag) return; // label writes are all null-guarded
+            if (!showHudTag) return;
             GameObject root = new GameObject("ChallengeStageTag");
             Canvas canvas = root.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -485,3 +437,4 @@ namespace KineticEnergy.Level
         }
     }
 }
+

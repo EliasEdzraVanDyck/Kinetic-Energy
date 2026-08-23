@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace KineticEnergy.UI
 {
@@ -23,3 +23,4 @@ namespace KineticEnergy.UI
         }
     }
 }
+

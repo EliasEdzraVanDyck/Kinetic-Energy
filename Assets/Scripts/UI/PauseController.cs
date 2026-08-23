@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
@@ -32,8 +32,7 @@ namespace KineticEnergy.UI
         public GameObject firstSectionsButton;
 
         [Header("Corner Hint (wired by setup)")]
-        // The top-left "Open the pause menu ..." label - pointless while the menu is
-        // actually open, so pausing hides it and resuming brings it back.
+
         public GameObject controlsHintLabel;
         [Tooltip("Scene-local hint objects (found by name at Start) that also hide while the menu is open - e.g. QuarryNew's QuarryIntroHud.")]
         public string[] sceneHintObjectNames = { "QuarryIntroHud" };
@@ -41,9 +40,7 @@ namespace KineticEnergy.UI
         readonly List<GameObject> hintObjects = new List<GameObject>();
 
         [Header("Controls Text")]
-        // Content is no longer static - KineticCubeController writes into this directly
-        // (UpdateControlsText) whenever the active control scheme changes, so the panel always
-        // matches whichever scheme is actually active instead of a fixed string baked in here.
+
         public Text controlsBodyText;
 
         [Header("Feedback")]
@@ -51,28 +48,19 @@ namespace KineticEnergy.UI
         public string feedbackFormUrl = "https://forms.gle/c7TVCoLzkktTWJFc7";
 
         [Header("Aim Camera Variant (wired by setup)")]
-        // The pause menu's variant-selector button label - the button cycles A -> B -> C
-        // (blocked while an aim is open, same as the V hotkey), the label names the active
-        // one so testers who never find the hotkey can still switch.
+
         public Text cameraVariantLabel;
-        // Its own text box ABOVE the variant button: the controller-energy warning for the
-        // free-look variants (empty otherwise).
+
         public Text cameraVariantEnergyNote;
-        // The key-hint line - hidden together with the button in scenes where camera
-        // variant switching is locked off (the economy test scene).
+
         public GameObject cameraVariantHint;
 
         [Header("Win")]
-        // Hidden by default, inside PausePanel - The Gauntlet's finish line
-        // (GauntletFinishLine) shows it via ShowWin(). Lives here rather than on its own
-        // component since the win screen IS the pause screen, just with this one extra label.
+
         public Text winLabel;
 
         bool isPaused;
 
-        // Read by systems that must distinguish a genuine pause from other timeScale-0
-        // freezes (the midair aim's bullet time) - e.g. the economy harness's real-time
-        // combo window.
         public bool IsPaused => isPaused;
 
         void OnEnable()
@@ -80,11 +68,7 @@ namespace KineticEnergy.UI
             pauseAction?.action?.Enable();
 
 #if UNITY_WEBGL && !UNITY_EDITOR
-            // WEB ONLY: pause moves from Escape to backquote (the ` / ~ key right under
-            // it). Browsers own Escape - it exits fullscreen no matter what the page
-            // wants - so on the web the pause key must be one the browser leaves alone.
-            // A runtime binding OVERRIDE, not an asset edit: Windows builds and the
-            // editor keep Escape untouched.
+
             if (pauseAction != null && pauseAction.action != null)
             {
                 for (int i = 0; i < pauseAction.action.bindings.Count; i++)
@@ -113,8 +97,6 @@ namespace KineticEnergy.UI
             if (sectionsPanel != null) sectionsPanel.SetActive(false);
             winLabel?.gameObject.SetActive(false);
 
-            // Everything that should vanish while the menu is open: the prefab's wired
-            // corner hint plus any scene-local hint canvases found by name.
             hintObjects.Clear();
             if (controlsHintLabel != null) hintObjects.Add(controlsHintLabel);
             foreach (string hintName in sceneHintObjectNames)
@@ -132,18 +114,12 @@ namespace KineticEnergy.UI
             }
         }
 
-        // The finish line's win state - the ordinary pause screen with the win label showing.
-        // Not one-shot-guarded here; GauntletFinishLine only ever calls it once.
         public void ShowWin()
         {
             winLabel?.gameObject.SetActive(true);
             if (!isPaused) Pause();
         }
 
-        // The LOCKED win (the self-contained Level1 test scenes): the pause screen with
-        // its title reading "You win!" and the Resume button gone - the run is over.
-        // Everything else on the menu (Restart, BuildInfo, Scenes, Quit) works as usual;
-        // a Restart reloads the scene, which restores the title and the button.
         public void ShowWinLocked()
         {
             if (pausePanel != null)
@@ -158,7 +134,7 @@ namespace KineticEnergy.UI
                 if (resume != null) resume.gameObject.SetActive(false);
             }
             if (!isPaused) Pause();
-            // Pause() selected the (now hidden) Resume - hand the gamepad focus to Restart.
+
             if (pausePanel != null)
             {
                 Transform restart = pausePanel.transform.Find("RestartButton");
@@ -169,10 +145,6 @@ namespace KineticEnergy.UI
         [Tooltip("The line under the win title. Slightly smaller than the title, in the same font and colour.")]
         public string winSubtitle = "Thanks for playing!";
 
-        // Built lazily from the TITLE itself - same font, colour and alignment, at a
-        // smaller size - so it needs no scene wiring and matches whatever the title is
-        // styled as in each scene. Sits directly beneath the title, and the title's own
-        // rect is never touched.
         void ShowWinSubtitle(Text titleText)
         {
             RectTransform titleRect = titleText.rectTransform;
@@ -196,8 +168,7 @@ namespace KineticEnergy.UI
                 rect.anchorMax = titleRect.anchorMax;
                 rect.pivot = titleRect.pivot;
                 rect.sizeDelta = titleRect.sizeDelta;
-                // One title-height down, so it reads as a second line rather than a
-                // competing heading.
+
                 rect.anchoredPosition = titleRect.anchoredPosition
                     - new Vector2(0f, titleRect.sizeDelta.y * 0.85f);
                 subtitle.fontSize = Mathf.Max(Mathf.RoundToInt(titleText.fontSize * 0.55f), 10);
@@ -208,12 +179,7 @@ namespace KineticEnergy.UI
 
         void Update()
         {
-            // The direct Start-button read is the Always Mouse escape hatch: that mode masks
-            // every gamepad binding on the shared action asset (KineticCubeController.
-            // ApplyGamepadBlock), but the MENUS must stay controller-usable - including
-            // OPENING this one to turn the mode back off. Same frame as an unmasked action
-            // press it's still a single toggle (one if).
-            // The first-boot intro overlay owns ALL input while it shows.
+
             if (AimIntroScreen.InputBlocked) return;
 
             bool startPressed = Gamepad.current != null && Gamepad.current.startButton.wasPressedThisFrame;
@@ -240,10 +206,7 @@ namespace KineticEnergy.UI
             pausePanel?.SetActive(true);
             SetHintsVisible(false);
             RefreshCameraVariantLabel();
-            // The AimIntroScreen check alone used to decide this - and the economy harness
-            // creates one at runtime in every scene, so the button came back on the first
-            // pause no matter what the prefab said. The flag is the master switch now,
-            // OFF by default (direct request: disabled entirely until further notice).
+
             infoButton?.SetActive(buildInfoButtonEnabled
                 && FindAnyObjectByType<AimIntroScreen>(FindObjectsInactive.Include) != null);
             Select(firstPauseButton);
@@ -260,8 +223,7 @@ namespace KineticEnergy.UI
             if (variantsPanel != null) variantsPanel.SetActive(false);
             if (sectionsPanel != null) sectionsPanel.SetActive(false);
             SetHintsVisible(true);
-            // Un-pausing after winning keeps playing in the finished level, which is fine - but
-            // the win label shouldn't stick around on the NEXT pause after that.
+
             winLabel?.gameObject.SetActive(false);
             Select(null);
         }
@@ -286,15 +248,13 @@ namespace KineticEnergy.UI
             Select(firstPauseButton);
         }
 
-        // Opens the playtest feedback form in the system browser. The game keeps running
-        // paused underneath - testers alt-tab back when done.
         public void OnFeedbackClicked()
         {
             Application.OpenURL(feedbackFormUrl);
         }
 
         [Header("Info Button (wired by setup)")]
-        // Shown only in scenes that carry an intro/explainer screen - reopens it on demand.
+
         public GameObject infoButton;
         [Tooltip("Master switch for the BuildInfo button. OFF keeps it hidden even though the intro overlay exists in the scene - nothing re-activates it while this is unticked.")]
         public bool buildInfoButtonEnabled = false;
@@ -305,8 +265,6 @@ namespace KineticEnergy.UI
             intro?.Open();
         }
 
-        // Cycles the aim-camera variant (A -> B -> C) from the pause menu. The variant
-        // controller itself refuses while an aim window is open.
         public void OnCameraVariantClicked()
         {
             var variants = FindAnyObjectByType<KineticEnergy.Camera.AimCameraVariantController>(FindObjectsInactive.Include);
@@ -320,7 +278,6 @@ namespace KineticEnergy.UI
             var variants = FindAnyObjectByType<KineticEnergy.Camera.AimCameraVariantController>(FindObjectsInactive.Include);
             bool switchingAvailable = variants != null && variants.variantSwitchingEnabled;
 
-            // Camera-locked scenes (the economy test) hide the whole selector block.
             if (cameraVariantLabel != null && cameraVariantLabel.transform.parent != null)
             {
                 cameraVariantLabel.transform.parent.gameObject.SetActive(switchingAvailable);
@@ -342,8 +299,6 @@ namespace KineticEnergy.UI
             }
         }
 
-        // The section list (LevelElementsTest only). Picking one teleports rather than
-        // reloading, so the menu closes itself and hands play straight back.
         public void OnSectionsClicked()
         {
             pausePanel?.SetActive(false);
@@ -358,16 +313,12 @@ namespace KineticEnergy.UI
             Select(firstPauseButton);
         }
 
-        // Wired AFTER the section jump on each section button: the teleport already put
-        // the player where they asked to be, so staying paused would just be in the way.
         public void ResumeAfterSectionJump()
         {
             if (sectionsPanel != null) sectionsPanel.SetActive(false);
             Resume();
         }
 
-        // The challenge-variant list (Level1Challenge only) - picking one restarts the
-        // scene on that variant, so the panel itself just navigates.
         public void OnVariantsClicked()
         {
             pausePanel?.SetActive(false);
@@ -382,8 +333,6 @@ namespace KineticEnergy.UI
             Select(firstPauseButton);
         }
 
-        // The camera-settings sub-screen (the speed sliders), same in/out pattern as the
-        // Controls and Scenes panels.
         public void OnCameraSettingsClicked()
         {
             pausePanel?.SetActive(false);
@@ -412,19 +361,12 @@ namespace KineticEnergy.UI
             Select(firstPauseButton);
         }
 
-        // Called by each per-scene button in ScenesPanel (see KineticEnergySetup.BuildPauseSystem)
-        // with that scene's name baked in as a persistent listener argument - resets timeScale
-        // first for the same reason OnRestartClicked does: this component only ever calls
-        // LoadScene while paused (Time.timeScale == 0f), and leaving it at 0 would freeze the
-        // destination scene's own physics/Update-driven logic the instant it loads.
         public void LoadSceneByName(string sceneName)
         {
             Time.timeScale = 1f;
             SceneManager.LoadScene(sceneName);
         }
 
-        // The Gauntlet's two variants are the same scene under one flag - these bake the
-        // tester's choice into the static selection the scene's run logger consumes on load.
         public void LoadSceneVariantA(string sceneName)
         {
             KineticEnergy.Level.SlowdownVariantSelection.PendingVariantB = false;
@@ -437,9 +379,6 @@ namespace KineticEnergy.UI
             LoadSceneByName(sceneName);
         }
 
-        // Level 8's challenge-stage buttons - the Gauntlet-variant pattern: bake the
-        // choice into the static selection, then (re)load the level, which always means
-        // starting the run over on that stage.
         public void LoadChallengeStage1(string sceneName)
         {
             LoadChallengeStage(sceneName, KineticEnergy.Level.ChallengeStage.LimitedSlowdown);
@@ -472,10 +411,7 @@ namespace KineticEnergy.UI
         }
 
 #if UNITY_WEBGL && !UNITY_EDITOR
-        // The web build's quit: Application.Quit is a no-op in a browser, so the button
-        // hands off to the page (see Assets/Plugins/WebGL/WebTab.jslib), which closes the
-        // tab where the browser permits it and shows a "you can close this tab" notice
-        // where it does not. Windows builds never contain this symbol.
+
         [System.Runtime.InteropServices.DllImport("__Internal")]
         static extern void CloseGameTab();
 #endif
@@ -498,3 +434,4 @@ namespace KineticEnergy.UI
         }
     }
 }
+

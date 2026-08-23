@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.InputSystem;
 using KineticEnergy.Level;
 
@@ -7,16 +7,12 @@ namespace KineticEnergy.Player
     public enum PredictionMode
     {
         None,
-        // The dotted arc alone - the grounded aim's default preview.
+
         Trail,
-        // The dotted arc plus the cross-and-ring reticle on the landing face - forced on by
-        // the midair first-person aim.
+
         TrailAndCrosshair,
     }
 
-    // Drives the launch preview visuals: a chain of dots laid along the ACTUAL simulated
-    // trajectory (see KineticCubeController.PredictLandingPoint) and a cross-and-ring marker
-    // lying flat against whatever face the shot would land on.
     public class LandingPreviewController : MonoBehaviour
     {
         [Header("Visual Groups (wired by setup)")]
@@ -70,7 +66,6 @@ namespace KineticEnergy.Player
         bool isVisible;
         bool hasLanding = true;
 
-        // Anti-jitter state.
         Vector3 cursorVelocity;
         bool cursorWasShown;
         float noLandingTimer;
@@ -80,30 +75,21 @@ namespace KineticEnergy.Player
         Vector3 lastValidNormal = Vector3.up;
         float smoothedArcLength;
 
-        // The landing arrow, built ONCE from the serialized arrowLength - no measuring,
-        // no per-frame sizing. Material cloned blue from the cursor's own.
         GameObject landingArrowRoot;
 
-        // Outcome tint state. Property blocks tint per-RENDERER, so the shared aim
-        // materials (assets) are never mutated.
         bool outcomeSuccess;
         bool outcomeTintApplied;
         MaterialPropertyBlock tintBlock;
         Renderer[] dotRenderers;
         Renderer[] cursorRenderers;
         readonly System.Collections.Generic.List<Renderer> arrowRenderers = new System.Collections.Generic.List<Renderer>();
-        // Steepness boundary between "a face you rest on" and "a side" - the same 0.7
-        // dot-with-up the wall-launch stake uses, so the colours agree with the economy.
+
         const float SteepSurfaceDot = 0.7f;
-        // Guaranteed clearance off the landing face, whatever the serialized lift says.
+
         const float MinSurfaceLift = 0.15f;
 
         float SmoothDt => Mathf.Min(Time.unscaledDeltaTime, 1f / 30f);
 
-        // Noise moves a target millimetres per frame; a deliberate camera sweep moves the
-        // far targets much more. The smoothing time shrinks in proportion, so shimmer is
-        // absorbed while intentional motion tracks essentially raw - the fixed smoothing
-        // made the far dots and cursor visibly break away during turns.
         float AdaptiveTau(float baseTau, float targetDelta)
         {
             return baseTau * Mathf.Clamp01(smoothNoiseReference / Mathf.Max(targetDelta, 0.0001f));
@@ -121,8 +107,7 @@ namespace KineticEnergy.Player
             isVisible = visible;
             if (!visible)
             {
-                // A fresh aim must SNAP its visuals into place, never glide from where
-                // the previous aim left them.
+
                 cursorWasShown = false;
                 noLandingTimer = 0f;
                 smoothedArcLength = 0f;
@@ -139,7 +124,7 @@ namespace KineticEnergy.Player
 
         void Update()
         {
-            // The landing-arrow toggle: V / D-pad Left, in the scenes that carry the arrow.
+
             if (!landingArrowAvailable) return;
             bool togglePressed = (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
                 || (Gamepad.current != null && Gamepad.current.dpad.left.wasPressedThisFrame);
@@ -150,8 +135,6 @@ namespace KineticEnergy.Player
             }
         }
 
-        // Built ONCE from the serialized arrowLength - nothing is measured or recomputed
-        // at runtime. The material is the cursor's own, cloned and tinted blue.
         void EnsureLandingArrow()
         {
             if (landingArrowRoot != null || crosshairGroup == null || arrowLength <= 0.01f) return;
@@ -162,8 +145,6 @@ namespace KineticEnergy.Player
             Material arrowMaterial = new Material(cursorRenderers[0].sharedMaterial);
             arrowMaterial.color = landingArrowColor;
 
-            // Tip at the local ORIGIN, body extending up +Y: a shaft plus two angled
-            // wings forming the point. All thin boxes sharing the blue material.
             landingArrowRoot = new GameObject("LandingArrow");
             landingArrowRoot.transform.SetParent(transform, false);
             AddArrowPart("Shaft", new Vector3(0f, arrowLength * 0.62f, 0f), Quaternion.identity,
@@ -176,7 +157,6 @@ namespace KineticEnergy.Player
                 new Vector3(arrowLength * 0.42f, arrowLength * 0.14f, arrowLength * 0.06f), arrowMaterial);
             landingArrowRoot.SetActive(false);
 
-            // The freshly built parts must catch up with the current outcome tint.
             outcomeTintApplied = false;
             ApplyOutcomeTint();
         }
@@ -195,22 +175,10 @@ namespace KineticEnergy.Player
             arrowRenderers.Add(partRenderer);
         }
 
-        // ---------- Landing outcome (colour) ----------
-
-        // A landing SUCCEEDS unless it respawns you (hazard surfaces, or no landing at
-        // all) or it's the SIDE of an object that won't hold you. StickySurface is the
-        // authority on holding: carrying the component makes EVERY face of that object
-        // safe, whatever its sticky value - the same GetComponentInParent lookup the
-        // controller's own crash-stick uses, so the colours can't disagree with it.
         bool LandingIsSuccessful(Collider landing, Vector3 normal)
         {
             if (landing == null) return false;
-            // An ENEMY is a TARGET, not a surface - valid from any angle and on any face,
-            // the up-facing rule below never applies. But only if the launch being aimed
-            // can actually PAY the kill: under the enemy's minimum spend the hit bounces
-            // off and punishes, which is a failed landing and reads red like one. The
-            // spend judged here is the same figure the crash gates compare (see the
-            // controller's projectedLaunchSpend).
+
             Enemy enemy = landing.GetComponentInParent<Enemy>();
             if (enemy != null) return projectedSpend >= enemy.MinKillEnergyFraction - 0.0001f;
             FlyingEnemy flyer = landing.GetComponentInParent<FlyingEnemy>();
@@ -219,19 +187,13 @@ namespace KineticEnergy.Player
             if (turret != null) return projectedSpend >= turret.minKillEnergyFraction - 0.0001f;
             if (landing.GetComponentInParent<DamageWalls>() != null) return false;
             if (landing.GetComponentInParent<DeathWall>() != null) return false;
-            // Hazard faces judged BEFORE the sticky rule: the rotating walls' damage edges
-            // are children of a StickySurface wall, and the parent lookup painted them as
-            // safe green landings. A shove-and-drain face is a failed landing wherever it
-            // hangs.
+
             if (landing.GetComponent<LaserHazard>() != null) return false;
             if (landing.GetComponentInParent<StickySurface>() != null) return true;
-            // No sticky component: only the up-facing side is a landing - the one where
-            // you end up grounded. Any true side face drops you.
+
             return Vector3.Dot(normal, Vector3.up) >= SteepSurfaceDot;
         }
 
-        // Tints dots + cursor with the outcome colour and the arrow with its darker
-        // sibling - via property blocks, so the shared aim material assets stay untouched.
         void ApplyOutcomeTint()
         {
             if (outcomeTintApplied) return;
@@ -265,14 +227,12 @@ namespace KineticEnergy.Player
             {
                 if (target == null) continue;
                 target.GetPropertyBlock(tintBlock);
-                tintBlock.SetColor("_BaseColor", color); // URP shaders
-                tintBlock.SetColor("_Color", color);     // legacy/unlit fallbacks
+                tintBlock.SetColor("_BaseColor", color);
+                tintBlock.SetColor("_Color", color);
                 target.SetPropertyBlock(tintBlock);
             }
         }
 
-        // Hovers over the landing marker along its surface normal, tip toward the zone,
-        // BILLBOARDED: rotated around the normal so its face always turns to the viewer.
         void UpdateLandingArrow()
         {
             if (!landingArrowAvailable || !landingArrowEnabled)
@@ -301,26 +261,15 @@ namespace KineticEnergy.Player
             landingArrowRoot.transform.SetPositionAndRotation(tip, facing);
         }
 
-        // trajectory/trajectoryCount: the simulated arc the dots follow. didLand: false when
-        // the shot trails off into a bottomless gap - the crosshair marks an actual landing
-        // SPOT, which doesn't exist then, so it hides; the trail still shows the arc, since
-        // "here's the path, and it lands nowhere" is still meaningful. landingNormal orients
-        // the marker flush against the landing face (wall, floor, ceiling alike).
-        // What the aimed launch would spend if fired right now, as a tank fraction - set
-        // by the controller alongside every SetLandingPoint, judged against enemy kill
-        // prices in LandingIsSuccessful.
         float projectedSpend = 1f;
         public void SetProjectedSpend(float spend) => projectedSpend = spend;
 
         public void SetLandingPoint(Vector3 lineStart, Vector3 landingPoint, Vector3[] trajectory, int trajectoryCount, bool didLand, Vector3 landingNormal = default, Collider landingCollider = null, bool aimBlocked = false)
         {
-            // Outcome colour: judged on real landings; a lost landing keeps its colour
-            // through the same grace the cursor gets (single-frame prediction misses must
-            // not flash red), then settles on fail - no landing means a fall reset.
+
             if (aimBlocked)
             {
-                // Fired into the surface you are clinging to - the shot has nowhere to go,
-                // whatever the simulation reports it lands on.
+
                 if (outcomeSuccess)
                 {
                     outcomeSuccess = false;
@@ -344,34 +293,17 @@ namespace KineticEnergy.Player
             }
             ApplyOutcomeTint();
 
-            // GRACE on losing the landing: single-frame prediction misses used to blink
-            // the cursor out (and a moving camera made it pop in late) - the cursor now
-            // holds its last valid spot briefly and only hides if the miss persists.
             if (didLand)
             {
                 noLandingTimer = 0f;
-                // A degenerate normal keeps the LAST valid one instead of snapping to
-                // world-up: the marker lies flat on the surface, so a one-frame flip
-                // turned it edge-on to the camera - invisible for exactly a frame or two.
+
                 if (landingNormal.sqrMagnitude > 0.0001f) lastValidNormal = landingNormal.normalized;
                 Vector3 normal = lastValidNormal;
-                // The marker sits markerGroundOffset below the landing point (the cube's
-                // RESTING CENTRE) plus a lift off the face. With the serialized 0.06 lift
-                // that margin is ~6cm - small enough that ordinary prediction variance
-                // buried the marker inside the surface, which is the other way it
-                // vanished for a frame. A code-side minimum keeps real clearance.
+
                 float lift = Mathf.Max(markerSurfaceLift, MinSurfaceLift);
                 lastCursorPosition = landingPoint + normal * (markerGroundOffset + lift);
                 lastCursorRotation = Quaternion.FromToRotation(Vector3.up, normal);
 
-                // ...and a nudge toward the CAMERA on top of that. The marker is FLAT,
-                // so on anything non-planar - a target sphere, a platform edge or corner
-                // - its outer ring is inside the geometry however the normal lift is
-                // tuned, which is the clipping (direct diagnosis). A view-direction
-                // offset makes it win the depth test at its own pixels whatever the
-                // surface curves like; the distance term also keeps far landings clear
-                // of depth-buffer precision loss. Far too small to shift where the
-                // marker reads on screen.
                 UnityEngine.Camera view = UnityEngine.Camera.main;
                 if (view != null)
                 {
@@ -391,10 +323,6 @@ namespace KineticEnergy.Player
             hasLanding = didLand || (cursorWasShown && noLandingTimer <= cursorHideGraceSeconds);
             ApplyModeVisibility();
 
-            // The cursor follows the prediction through a VERY short smoothing (~3 frames):
-            // under the latency a hand can feel, but enough to absorb the per-frame
-            // prediction wobble that read as heavy cursor jitter. Far jumps (the landing
-            // teleporting to different geometry) and fresh appearances still SNAP.
             if (hasLanding && crosshairGroup != null)
             {
                 float cursorTargetDelta = Vector3.Distance(cursorPrevTarget, lastCursorPosition);
@@ -422,8 +350,6 @@ namespace KineticEnergy.Player
 
             if (trailDots == null || trailDots.Length == 0) return;
 
-            // Real arc length (summed segment distance), not the straight-line chord - a
-            // lofted shot's path is meaningfully longer than the chord between its endpoints.
             float totalLength = 0f;
             if (trajectory != null && trajectoryCount > 1)
             {
@@ -437,20 +363,13 @@ namespace KineticEnergy.Player
                 totalLength = Vector3.Distance(lineStart, landingPoint);
             }
 
-            // The DOT COUNT derives from a time-smoothed arc length: the raw length
-            // wobbles every frame, and count flapping blinked the tail dots on and off.
             smoothedArcLength = smoothedArcLength <= 0f
                 ? totalLength
                 : Mathf.Lerp(smoothedArcLength, totalLength, Mathf.Clamp01(SmoothDt / 0.08f));
-            // FIXED arc-length spacing anchors every dot to the geometry. The old layout
-            // divided the (wobbling) total length evenly among the dots, so every length
-            // breath slid ALL of them along the arc - the whole line shimmered lengthwise.
-            // At a constant interval, a length wobble only ever touches the tail dot.
+
             float dotSpacing = Mathf.Max(maxDotSpacing, 0.01f);
             int neededDots = Mathf.Clamp(Mathf.FloorToInt(smoothedArcLength / dotSpacing), 1, trailDots.Length);
 
-            // A small FIXED buffer keeps the last dot from sitting exactly on the marker,
-            // without growing with trajectory length.
             float endGap = Mathf.Min(0.2f, totalLength * 0.5f);
             float usableLength = Mathf.Max(totalLength - endGap, 0f);
 
@@ -479,10 +398,6 @@ namespace KineticEnergy.Player
             }
         }
 
-        // Places each dot exactly ON the simulated trajectory, evenly spaced by REAL distance
-        // travelled - sampling by array index would be uniform in simulation time instead,
-        // bunching dots where the cube moves slowly (the apex) and spreading them where it
-        // moves fast.
         void PlaceDotsAlongTrajectory(Vector3[] trajectory, int trajectoryCount, float usableLength, int neededDots, float dotSpacing)
         {
             int segmentEnd = 1;
@@ -513,10 +428,6 @@ namespace KineticEnergy.Player
                     ? Mathf.Clamp01((targetLength - segmentStartLength) / segmentLength)
                     : 0f;
 
-                // Placed RAW on the simulated arc, always: per-dot positional smoothing
-                // lagged each dot by a different amount while the aim moved, which BENT
-                // the line off the true path. Dots live exactly on the arc; the visual
-                // calm comes from the fixed spacing and the smoothed count instead.
                 trailDots[d].position = Vector3.Lerp(trajectory[segmentEnd - 1], trajectory[segmentEnd], segmentT);
             }
         }
@@ -528,3 +439,4 @@ namespace KineticEnergy.Player
         }
     }
 }
+

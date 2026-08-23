@@ -1,21 +1,17 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace KineticEnergy.Camera
 {
     public enum AimCameraVariant
     {
-        Baseline,           // A - frozen first person, FOV zoom (current behaviour)
-        OtsParallax,        // B - over-the-shoulder with the subtle drift parallax
-        BaselinePip,        // C - A plus the landing picture-in-picture window
-        OtsParallaxPip,     // D - B plus the landing picture-in-picture window
-        FreeLookFirstPerson,// E - A, but WASD / right stick rotates the VIEW without moving the aim (energy on RB/LB)
-        FreeLookOts,        // F - the same free-look concept on the OTS camera
+        Baseline,
+        OtsParallax,
+        BaselinePip,
+        OtsParallaxPip,
+        FreeLookFirstPerson,
+        FreeLookOts,
     }
 
-    // All tuning for one midair-aim camera variant, kept as an asset so the numbers live
-    // in the Inspector rather than code - tune without a recompile. Three of these (A/B/C)
-    // are referenced by AimCameraVariantController; the depth-perception playtest cycles
-    // between them at runtime.
     [CreateAssetMenu(menuName = "Kinetic Energy/Aim Camera Preset")]
     public class AimCameraPreset : ScriptableObject
     {
@@ -23,14 +19,11 @@ namespace KineticEnergy.Camera
         [Tooltip("Shown on the HUD tag and the pause-menu selector, e.g. \"OTS + parallax\".")]
         public string displayName = "Baseline";
 
-        // Which subsystems this variant runs - derived from the variant so the camera and
-        // the PiP owner don't each hardcode the mapping.
         public bool UsesOverShoulder => variant == AimCameraVariant.OtsParallax
             || variant == AimCameraVariant.OtsParallaxPip
             || variant == AimCameraVariant.FreeLookOts;
         public bool UsesPip => pipEnabled;
-        // E/F: WASD / right stick rotates the view only (aim untouched); the energy dial
-        // moves to RB (add) / LB (remove) because the right stick is busy free-looking.
+
         public bool UsesFreeLook => variant == AimCameraVariant.FreeLookFirstPerson
             || variant == AimCameraVariant.FreeLookOts;
 
@@ -87,3 +80,4 @@ namespace KineticEnergy.Camera
         public float pipFieldOfView = 50f;
     }
 }
+

@@ -1,23 +1,8 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace KineticEnergy.Camera
 {
-    // The aim-refinement LAB (QuarryAim scene only - this lives on a scene object, never
-    // on a prefab). When a scene contains one of these, the camera and the grounded aim
-    // pick it up at load and run the refined input pipeline; every other scene behaves
-    // exactly as before. Everything tunable, split per input device:
-    //
-    //  - Stick conditioning (gamepad): a radial deadzone that RE-SCALES the remaining
-    //    travel (no speed jump at the deadzone edge) plus an exponent response curve -
-    //    the lower half of the stick becomes much finer without losing full-speed sweeps.
-    //  - One-Euro filtering (midair aim, both devices): adaptive smoothing - heavy when
-    //    the aim is nearly still (kills far-cursor tremble), fading to none during fast
-    //    sweeps (no perceptible lag). Mouse and stick get separate cutoff/beta tuning.
-    //  - Grounded-arrow fine aim (mouse): the same magnitude response curve the camera
-    //    aim already has - slow deliberate mouse movement steers the arrow proportionally
-    //    finer.
-    //  - Zoom precision: deliberately UNDER-compensate sensitivity at high aim zoom by a
-    //    fraction - precision matters most exactly then.
+
     public class AimRefinementSettings : MonoBehaviour
     {
         public static AimRefinementSettings Active { get; private set; }
@@ -51,7 +36,6 @@ namespace KineticEnergy.Camera
         void OnEnable() { Active = this; }
         void OnDisable() { if (Active == this) Active = null; }
 
-        // Radial deadzone re-scale + exponent curve, preserving direction.
         public Vector2 ConditionStick(Vector2 stick)
         {
             float magnitude = stick.magnitude;
@@ -62,8 +46,6 @@ namespace KineticEnergy.Camera
         }
     }
 
-    // The standard One-Euro filter (Casiez et al.): an exponential smoother whose cutoff
-    // rises with signal speed - still hands get stability, fast sweeps get responsiveness.
     public class OneEuroFilter
     {
         float previous;
@@ -97,3 +79,4 @@ namespace KineticEnergy.Camera
         }
     }
 }
+

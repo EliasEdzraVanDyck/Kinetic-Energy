@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -7,24 +7,7 @@ using KineticEnergy.Level;
 
 namespace KineticEnergy.Player
 {
-    // The one home for game-feel dressing - effects that read as juice, never as rules.
-    // Nothing here touches physics, energy or input: it deforms the VISUAL child only,
-    // while the collider and every gameplay system keep seeing the undeformed body.
-    //
-    // Current elements:
-    //  - LAUNCH STRETCH: in flight the model elongates along its velocity and thins on
-    //    the other two axes - a teardrop of speed.
-    //  - CRASH SQUASH: on impact it flattens along the arrival direction and bulges on
-    //    the other two, then eases back round.
-    // All values are PERCENTAGES of the authored model (100 = untouched), so the
-    // exaggeration is dialled in the inspector, not in code.
-    //
-    // The model is a sphere, which is what makes the cheap trick safe: the deform aligns
-    // by ROTATING the visual so its local Z faces the effect direction, and on a sphere
-    // that rotation is invisible - only the scale reads.
-    // LateUpdate ordering: the orbit camera writes its pose in its own LateUpdate, and
-    // every camera-space effect here (the shakes) must land AFTER it or be overwritten -
-    // which is exactly what the old in-controller shake got wrong.
+
     [DefaultExecutionOrder(1000)]
     public class Polish : MonoBehaviour
     {
@@ -85,7 +68,7 @@ namespace KineticEnergy.Player
 
         Volume blurVolume;
         float blurWeight;
-        bool isFlying; // computed once per frame by the blur gate, shared by the shakes
+        bool isFlying;
 
         [Header("Outline Fade")]
         [Tooltip("Outline strength WHILE FLYING (1 = full). With the camera trailing a launch the player shrinks to a handful of pixels, and even a thin outset ring dwarfs a ball that small - the whole outline dims for the flight and returns on arrival.")]
@@ -104,8 +87,6 @@ namespace KineticEnergy.Player
             Shader.SetGlobalFloat("_OutlineGlobalFade", outlineFade);
             Shader.SetGlobalFloat("_OutlineFadeWindow", outlineFadeWindow);
 
-            // The player's depth along the camera's view axis - what the shader compares
-            // each edge's near side against.
             UnityEngine.Camera cam = UnityEngine.Camera.main;
             if (cam != null)
             {
@@ -129,7 +110,7 @@ namespace KineticEnergy.Player
         public float flightShakeIntensity = 0.05f;
 
         float crashShakeTimer;
-        float crashShakeWeight = 1f; // the arriving launch's spend, sampled at the crash
+        float crashShakeWeight = 1f;
 
         [Header("Crash Decal")]
         [Tooltip("Stamp an impact mark where a crash lands on WORLD geometry - never on enemies, whose bodies move and die.")]
@@ -151,10 +132,6 @@ namespace KineticEnergy.Player
         [Tooltip("The overlay Image (the Player's 'Trails' child - wired by the setup method).")]
         public Image trailImage;
 
-        // Same gate as the blur and the flight rattle (isFlying: launched, not aiming or
-        // charging, not stuck, not grounded, above the speed floor) - the whole speed
-        // package arrives and leaves as one. Aiming is the deliberate beat; speed dressing
-        // during it undercut the stillness.
         void UpdateScreenspaceTrail()
         {
             if (trailImage == null) return;
@@ -235,10 +212,7 @@ namespace KineticEnergy.Player
         void OnPlayerHurt()
         {
             if (!playerHurtSoundEnabled || playerHurtSound == null) return;
-            // A dedicated, always-2D source. The shared one-shot sources inherit the loop
-            // source's spatial blend - if that is 3D, the distance to the camera's listener
-            // quietly rolls a bass-heavy clip down to almost nothing. Being hurt is a
-            // message to the PLAYER, not a sound in the world; it plays flat, full, always.
+
             if (hurtSource == null)
             {
                 hurtSource = gameObject.AddComponent<AudioSource>();
@@ -246,9 +220,7 @@ namespace KineticEnergy.Player
                 hurtSource.spatialBlend = 0f;
             }
             hurtSource.pitch = 1f;
-            // PlayOneShot caps at 1, so gain past 100% is built by LAYERING: full-volume
-            // copies for each whole unit, the remainder as the last, quieter layer.
-            // Identical in-phase copies sum, so two layers is roughly +6dB.
+
             float remaining = Mathf.Clamp(playerHurtVolume, 0f, 3f);
             while (remaining > 0.01f)
             {
@@ -258,12 +230,12 @@ namespace KineticEnergy.Player
         }
 
         AudioSource crashSource;
-        AudioSource crashSubSource; // the octave-down layer needs its own pitch, hence its own source
-        float chargeLoopStartTime;  // the swell's clock
-        int lastChargeBand = -1;    // which 20% band the charge sat in last frame (-1 = not charging)
-        float airborneSeconds;      // continuous air time - the grounded-edge thud's genuineness gate
-        float loopSourcePitch = 1f;  // the source's authored pitch/volume, restored whenever
-        float loopSourceVolume = 1f; // a non-launch clip takes the source back
+        AudioSource crashSubSource;
+        float chargeLoopStartTime;
+        int lastChargeBand = -1;
+        float airborneSeconds;
+        float loopSourcePitch = 1f;
+        float loopSourceVolume = 1f;
         bool audioWasGrounded;
         float nextCrashSoundTime;
 
@@ -271,11 +243,6 @@ namespace KineticEnergy.Player
         {
             if (playerSounds == null) return;
 
-            // The launch is scored like the crash: the same spend, the same three effects.
-            // The whoosh's pitch slides from a light swish down to a deep roar, its volume
-            // climbs, a cannon-shot boom joins above half spend - and a GENUINELY full tank
-            // lands one more boom two octaves down, the overcharge tell. A 100% launch
-            // should sound like the biggest thing the game does.
             float spend = Mathf.Clamp01(controller.LastLaunchEnergySpent);
             float weight = Mathf.Pow(spend, Mathf.Max(crashSoundContrast, 0.01f));
 
@@ -295,9 +262,7 @@ namespace KineticEnergy.Player
                     * Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(launchBoomStartSpend, 1f, spend));
                 if (boom > 0.02f)
                 {
-                    // One octave below the original range (1.1..0.8 halved) - the boom is
-                    // all chest now, in every case, and no longer shares a register with
-                    // the landing thud.
+
                     crashSource.pitch = Mathf.Lerp(0.55f, 0.4f, weight);
                     crashSource.PlayOneShot(crashSound, boom);
                 }
@@ -312,20 +277,15 @@ namespace KineticEnergy.Player
         void PlayCrashSound()
         {
             if (!crashSoundEnabled || crashSound == null || crashSource == null) return;
-            // Landing and CrashRegistered can both report the same impact - one thud each.
+
             if (Time.unscaledTime < nextCrashSoundTime) return;
             nextCrashSoundTime = Time.unscaledTime + 0.1f;
 
             if (playerSounds != null && playerSounds.isPlaying && playerSounds.clip == flyingSound)
             {
-                playerSounds.Stop(); // the flight is over; its whoosh must not ring under the thud
+                playerSounds.Stop();
             }
 
-            // The impact is SCORED by what the launch spent - the same figure the shake and
-            // rumble read, so ears, hands and eyes agree about every crash. Three effects
-            // carry it: pitch slides from a light tap down to the heavy thud, volume climbs
-            // with it, and past ~35% spend the same sample comes in again an OCTAVE DOWN -
-            // the chest layer that makes a committed slam sound like one.
             float spend = Mathf.Clamp01(controller.ArrivalEnergySpent);
             float weight = Mathf.Pow(spend, Mathf.Max(crashSoundContrast, 0.01f));
             crashSource.pitch = Mathf.Lerp(crashLightPitch, crashPitch, weight);
@@ -340,8 +300,6 @@ namespace KineticEnergy.Player
             }
         }
 
-        // The charge chirp-then-loop machine (verbatim from the controller), the pause
-        // silence, and the grounded cleanup of leftover charge audio.
         void UpdateAudio()
         {
             if (playerSounds == null) return;
@@ -352,26 +310,17 @@ namespace KineticEnergy.Player
                 return;
             }
 
-            // A landing that arrives without RegisterCrash (walking off a ledge onto
-            // ground) still thuds - the grounded EDGE is the impact. But only after a
-            // GENUINE stretch of air: the ground probe flickers when skimming ledges and
-            // riding descending platforms, and every one of those edges was a phantom
-            // midair thud.
             bool grounded = controller.IsGrounded;
             if (grounded && !audioWasGrounded && airborneSeconds > 0.25f) PlayCrashSound();
             airborneSeconds = grounded ? 0f : airborneSeconds + Time.deltaTime;
             audioWasGrounded = grounded;
 
-            // The loop runs the WHOLE time an aim is open - grounded aim, midair aim, the
-            // hold-charges - regardless of the dial, the buttons or the tank. No intro
-            // chirp any more: the loop alone is the charge's voice, and its swell (quiet
-            // in, full after the ramp) is the build-up the chirp used to fake.
             if (controller.IsAimingOrCharging && chargeLoopSoundEnabled && chargingLoopSound != null)
             {
                 if (playerSounds.clip != chargingLoopSound || !playerSounds.isPlaying)
                 {
                     playerSounds.Stop();
-                    // At the source's own pitch - the launch's spend-warp belongs to the whoosh.
+
                     playerSounds.pitch = loopSourcePitch;
                     playerSounds.clip = chargingLoopSound;
                     playerSounds.loop = true;
@@ -384,11 +333,6 @@ namespace KineticEnergy.Player
                 playerSounds.volume = loopSourceVolume * chargeLoopMaxVolume
                     * Mathf.Lerp(chargeLoopStartVolume, 1f, swell);
 
-                // The band tick: every 20% boundary the charge crosses - the moment the
-                // meter's gradient changes colour - clicks, 20% louder than the loop is
-                // humming RIGHT NOW, so it pokes above the swell wherever it happens.
-                // Both directions: dialling energy back down re-crosses the boundary and
-                // the colour changes again.
                 int band = Mathf.Clamp(Mathf.FloorToInt(controller.ProjectedLaunchSpend / 0.2f), 0, 5);
                 if (lastChargeBand >= 0 && band != lastChargeBand
                     && energyClickEnabled && energyClickSound != null && crashSource != null)
@@ -401,10 +345,10 @@ namespace KineticEnergy.Player
             }
             else
             {
-                lastChargeBand = -1; // a fresh aim never clicks for the band it OPENS in
+                lastChargeBand = -1;
                 if (playerSounds.isPlaying && playerSounds.clip == chargingLoopSound)
                 {
-                    playerSounds.Stop(); // the aim closed - however it closed
+                    playerSounds.Stop();
                 }
             }
         }
@@ -419,12 +363,6 @@ namespace KineticEnergy.Player
 
         bool motionTrailHidden;
 
-        // The ribbon marks MOVEMENT THE PLAYER OWNS. It stands down while aiming (the
-        // deliberate beat), while stuck to any surface (a rotating wall's carry is the
-        // wall's motion, not the player's), and while riding a moving platform (same
-        // reason - the ribbon just traced the platform's path). Cleared on every
-        // transition: re-enabling draws a segment from the LAST recorded point, which
-        // after a ride or teleport is a line from somewhere else entirely.
         void UpdateMotionTrail()
         {
             if (motionTrail == null) return;
@@ -437,9 +375,6 @@ namespace KineticEnergy.Player
             motionTrail.Clear();
         }
 
-        // The authored curve went 0.5 -> 0.23 -> 0 with the zero placed two-thirds along,
-        // which left the ribbon's visible end as a blunt cut rather than a point. Rebuilt
-        // at boot as a single clean taper: full width at the emitter, zero at the far tip.
         void ApplyTrailShape()
         {
             if (motionTrail == null) return;
@@ -468,10 +403,6 @@ namespace KineticEnergy.Player
         [Tooltip("Local height the debris emitter sits at, relative to the player's centre (0 = dead centre). The authored child floats at 0.5, which read as chunks spawning ABOVE the player.")]
         public float debrisEmitterHeight = 0f;
 
-        // The authored system was a narrow 12-degree gravityless cone: chunks rose in a
-        // straight line (height untunable except via speed, which also killed the spread)
-        // and always UP, even off a wall. These three take ownership of the ballistics -
-        // ARCS, whose shape each field controls independently:
         [Tooltip("Launch speed of the chunks. With gravity on, more speed = higher AND further.")]
         public float debrisSpeed = 5f;
         [Tooltip("Gravity on the chunks (standard-gravity multiples). THE height dial: higher gravity = flatter, lower arcs that fall out sooner. 0 returns to the old straight-line climb.")]
@@ -479,23 +410,16 @@ namespace KineticEnergy.Player
         [Tooltip("Cone half-angle in degrees - the SPREAD dial. The authored 12 was a tight fountain; 40 throws chunks visibly outward.")]
         public float debrisConeAngle = 40f;
 
-        // The multipliers are applied ONCE at boot, on top of whatever the systems were
-        // authored with - so the inspector on the particle systems stays the authority for
-        // the base look, and these fields say how the crash variant differs from it.
         void ApplyDebrisTuning()
         {
             if (debrisParticles == null) return;
 
-            // Height only - the horizontal placement (and with it the emission radius the
-            // shape module spreads over) stays exactly as authored.
             Vector3 emitterLocal = debrisParticles.transform.localPosition;
             emitterLocal.y = debrisEmitterHeight;
             debrisParticles.transform.localPosition = emitterLocal;
 
             ParticleSystem.MainModule main = debrisParticles.main;
 
-            // Ballistics owned outright (see the field comments). Speed spans a range so
-            // the chunks don't march in lockstep; the shape's radius is left as authored.
             main.startSpeed = new ParticleSystem.MinMaxCurve(debrisSpeed * 0.55f, debrisSpeed);
             main.gravityModifier = debrisGravity;
             ParticleSystem.ShapeModule shape = debrisParticles.shape;
@@ -530,10 +454,6 @@ namespace KineticEnergy.Player
             }
         }
 
-        // Rides a surface WITHOUT being its child: position through the surface's own
-        // matrix (points transform correctly under any scale), rotation as a rigid delta.
-        // Parenting was the alternative, and under the floor's extreme non-uniform scale
-        // it smeared the rotated decal quad into a screen-wide sheet.
         public class DecalFollower : MonoBehaviour
         {
             Transform target;
@@ -557,8 +477,6 @@ namespace KineticEnergy.Player
             }
         }
 
-        // Hitting something that HURTS is not an impact worth celebrating with debris -
-        // the hit's own feedback (knockback, energy loss, the hazard's colour) carries it.
         bool CrashSurfaceDealsDamage()
         {
             Collider surface = controller.LastCrashSurface;
@@ -571,8 +489,6 @@ namespace KineticEnergy.Player
                 || surface.GetComponentInParent<DeathWall>() != null;
         }
 
-        // Called by the controller's respawn reset, so a fresh spawn never opens on a
-        // half-finished burst from the death that caused it.
         public void ResetCrashParticles()
         {
             if (debrisParticles != null) { debrisParticles.Stop(); debrisParticles.Clear(); }
@@ -598,7 +514,6 @@ namespace KineticEnergy.Player
             ApplyDebrisTuning();
             ApplyTrailShape();
 
-            // The crash's own source: heavy pitch on this one never touches the loops.
             if (playerSounds != null)
             {
                 loopSourcePitch = playerSounds.pitch;
@@ -611,28 +526,22 @@ namespace KineticEnergy.Player
             crashSubSource.playOnAwake = false;
             crashSubSource.spatialBlend = crashSource.spatialBlend;
 
-            // The blur rides its own runtime-built global Volume, so the scene's shared
-            // profile asset is never written to. Weight 0 = the override does not exist;
-            // easing the weight is the whole fade machinery.
             if (speedBlur)
             {
                 GameObject volumeGo = new GameObject("SpeedBlurVolume");
                 volumeGo.transform.SetParent(transform, false);
                 blurVolume = volumeGo.AddComponent<Volume>();
                 blurVolume.isGlobal = true;
-                blurVolume.priority = 50f; // over the scene's authored volume
+                blurVolume.priority = 50f;
                 blurVolume.weight = 0f;
                 VolumeProfile profile = ScriptableObject.CreateInstance<VolumeProfile>();
 #if !UNITY_WEBGL || UNITY_EDITOR
-                // Motion blur rides motion vectors - an extra buffer WebGL2 handles badly
-                // and integrated GPUs pay dearly for. On the web the vignette carries the
-                // speed feel alone; everywhere else the blur joins it.
+
                 MotionBlur blur = profile.Add<MotionBlur>(true);
                 blur.intensity.Override(Mathf.Clamp01(blurIntensity));
                 blur.quality.Override(MotionBlurQuality.Medium);
 #endif
-                // The vignette rides the SAME volume weight, so the two arrive and leave
-                // as one effect: edges darken and pull in while the flight is fast.
+
                 if (speedVignette > 0.001f)
                 {
                     Vignette vignette = profile.Add<Vignette>(true);
@@ -657,33 +566,25 @@ namespace KineticEnergy.Player
 
         void OnCrash(Vector3 position)
         {
-            // The arrival direction, read before physics wiped it - the squash flattens
-            // along how the body actually came in, wall and floor hits alike.
+
             Vector3 approach = controller.PreCollisionVelocity;
             crashAxis = approach.sqrMagnitude > 0.01f ? approach.normalized : Vector3.down;
             crashTimer = Mathf.Max(crashRecoverSeconds, 0.01f);
             if (crashShake)
             {
                 crashShakeTimer = Mathf.Max(crashShakeDuration, 0.01f);
-                // The kick measures what the arriving launch PAID - the same figure the
-                // rumble and the gates read - so a full-tank slam rocks the screen and a
-                // cheap hop barely nudges it.
+
                 crashShakeWeight = Mathf.Lerp(crashShakeFloorFraction, 1f,
                     Mathf.Clamp01(controller.ArrivalEnergySpent));
             }
 
             SpawnCrashDecal();
-            // No thud for crashes INTO damage-dealers: bouncing off an enemy midair was
-            // playing the landing sound in the middle of the air. The hit's own feedback
-            // (knockback, energy loss) carries those - same rule as the debris.
+
             if (!CrashSurfaceDealsDamage()) PlayCrashSound();
 
             if (crashDebris && !CrashSurfaceDealsDamage())
             {
-                // The burst sprays OFF the face that was hit: the emitter's cone is aimed
-                // along the crash normal, so a wall crash throws chunks away from the wall
-                // instead of the old always-upward fountain, and a floor crash keeps the
-                // familiar upward spray.
+
                 Vector3 sprayNormal = controller.StuckSurfaceNormal.sqrMagnitude > 0.0001f
                     ? controller.StuckSurfaceNormal.normalized
                     : Vector3.up;
@@ -697,56 +598,39 @@ namespace KineticEnergy.Player
 
             if (crashRumble && GamepadIsActiveInput())
             {
-                // Scaled by what the arriving launch actually SPENT - the same figure the
-                // checkpoint and kill gates read. The contrast power bends the curve so
-                // cheap crashes sit near the floor and expensive ones stand clearly apart
-                // (a linear map felt like no difference at all - motors compress), and the
-                // DURATION scales with it too, which is the difference a pad conveys best.
+
                 float spend = Mathf.Clamp01(controller.ArrivalEnergySpent);
                 float weight = Mathf.Lerp(rumbleFloorFraction, 1f,
                     Mathf.Pow(spend, Mathf.Max(rumbleContrast, 0.01f)));
                 Gamepad.current.SetMotorSpeeds(rumbleLowMotor * weight, rumbleHighMotor * weight);
-                // A third to full, by weight: the wider spread is what makes the top end
-                // land - a heavy slam holds the motors three times as long as a cheap tap.
+
                 rumbleTimer = Mathf.Max(rumbleSeconds * Mathf.Lerp(0.33f, 1f, weight), 0.02f);
             }
         }
 
-        // The impact mark: flush against the face the crash landed on, spun randomly
-        // around its normal, sized by what the launch spent. Parented to the surface, so
-        // a mark on a moving platform rides it instead of hanging where the platform was.
         void SpawnCrashDecal()
         {
             if (!crashDecals || crashDecalMaterial == null) return;
             Collider surface = controller.LastCrashSurface;
             if (surface == null) return;
-            // Same rule as the debris and the thud: no mark on enemies OR damage surfaces.
-            // Deaths on the hazard floor were stamping the splat at the death spot - a
-            // permanent dark smudge on the dark red, sitting at whichever place the level
-            // kills most (reported as "always at the end of the level").
+
             if (CrashSurfaceDealsDamage()) return;
 
             Vector3 normal = controller.StuckSurfaceNormal.sqrMagnitude > 0.0001f
                 ? controller.StuckSurfaceNormal.normalized
                 : Vector3.up;
-            // The exact point ON the face, not the player's centre: the closest point the
-            // hit collider offers, nudged out along the normal so the quad never z-fights.
+
             Vector3 point = surface.ClosestPoint(transform.position) + normal * 0.03f;
 
             GameObject decal = GameObject.CreatePrimitive(PrimitiveType.Quad);
             decal.name = "CrashDecal";
-            Destroy(decal.GetComponent<Collider>()); // a mark is not geometry
-            // A Unity quad FACES -Z, so looking along the reversed normal lays it flat on
-            // the surface; the random spin is around the normal itself - the "y rotation"
-            // of a mark that lives in the surface's plane.
+            Destroy(decal.GetComponent<Collider>());
+
             decal.transform.SetPositionAndRotation(point,
                 Quaternion.AngleAxis(Random.Range(0f, 360f), normal) * Quaternion.LookRotation(-normal));
             float size = Mathf.Lerp(decalMinSize, decalMaxSize, Mathf.Clamp01(controller.ArrivalEnergySpent));
             decal.transform.localScale = new Vector3(size, size, 1f);
-            // NEVER parented: SetParent under a non-uniformly scaled surface cannot
-            // preserve a rotated child's world size - on the huge stretched floor the
-            // 2-unit splat smeared into a giant black sheet. A follower component tracks
-            // moving surfaces by matrix instead, which distorts nothing.
+
             DecalFollower follower = decal.AddComponent<DecalFollower>();
             follower.Bind(surface.transform);
 
@@ -762,9 +646,6 @@ namespace KineticEnergy.Player
             }
         }
 
-        // "Current input" by recency: the pad only counts while it was touched more
-        // recently than the keyboard and the mouse - the same judgment a player makes
-        // about which device they are on, without any scheme bookkeeping.
         static bool GamepadIsActiveInput()
         {
             Gamepad pad = Gamepad.current;
@@ -775,8 +656,6 @@ namespace KineticEnergy.Player
             return true;
         }
 
-        // Live only while the launch is genuinely FLYING: not aiming, not charging, not
-        // stuck to a surface, not standing - and still moving fast enough to deserve it.
         void UpdateSpeedBlur()
         {
             if (controller == null || body == null) return;
@@ -791,11 +670,6 @@ namespace KineticEnergy.Player
             blurVolume.weight = blurWeight;
         }
 
-        // Applied AFTER the orbit camera has written this frame's pose (the execution
-        // order attribute guarantees it), as a one-frame offset in the CAMERA's own right
-        // and up - both axes always, never just vertical. Nothing is accumulated and
-        // nothing needs restoring: the orbit rewrites the pose from scratch next frame,
-        // so each frame's shake is a fresh sample on top of a clean base.
         void ApplyScreenShake()
         {
             if (controller == null) return;
@@ -812,8 +686,6 @@ namespace KineticEnergy.Player
                 shake += Random.insideUnitCircle * (crashShakeIntensity * crashShakeWeight * strength);
             }
 
-            // The flight rattle runs the whole launch - through the air, not at the press -
-            // and stands down with the same gate as the blur, so aiming is always steady.
             if (flightShake && isFlying)
             {
                 shake += Random.insideUnitCircle * flightShakeIntensity;
@@ -825,8 +697,6 @@ namespace KineticEnergy.Player
             }
         }
 
-        // The buzz must END no matter what the game is doing - motors hold their last
-        // speed forever otherwise. Unscaled, so pauses and bullet-time can't stretch it.
         void StopRumbleWhenDone()
         {
             if (rumbleTimer <= 0f) return;
@@ -843,14 +713,11 @@ namespace KineticEnergy.Player
                 controller.EnemyKilled -= OnEnemyKilled;
                 controller.PlayerHurt -= OnPlayerHurt;
             }
-            // A respawn, scene change or quit mid-buzz must not leave the motors running.
+
             rumbleTimer = 0f;
             if (Gamepad.current != null) Gamepad.current.ResetHaptics();
         }
 
-        // LateUpdate, so it lands after the free-move lean has written the visual's pose
-        // for the frame - while a deform is active this rotation wins, and on a sphere
-        // that costs nothing.
         void LateUpdate()
         {
             StopRumbleWhenDone();
@@ -863,11 +730,6 @@ namespace KineticEnergy.Player
 
             if (visual == null || controller == null) return;
 
-            // Any midair aim or charge - the forward re-aim, the up-charge, the pound
-            // wind-up - returns the body to its authored shape: the player is lining up a
-            // shot, and a leftover teardrop would be shape noise about a flight that no
-            // longer exists. Gradual, but on its own quicker ease than the ordinary one -
-            // the un-deform should read as settling to attention, not as a pop.
             if (controller.IsAimingOrCharging && !controller.IsGrounded)
             {
                 crashTimer = 0f;
@@ -883,7 +745,7 @@ namespace KineticEnergy.Player
             if (crashTimer > 0f)
             {
                 crashTimer -= Time.unscaledDeltaTime;
-                // Strongest at the instant of impact, round again by the end of the timer.
+
                 float strength = Mathf.Clamp01(crashTimer / Mathf.Max(crashRecoverSeconds, 0.01f));
                 float shortAxis = Mathf.Lerp(1f, crashShortAxisPercent * 0.01f, strength);
                 float longAxis = Mathf.Lerp(1f, crashLongAxisPercent * 0.01f, strength);
@@ -906,10 +768,9 @@ namespace KineticEnergy.Player
                     Mathf.Abs(Vector3.Dot(orientAxis, Vector3.up)) > 0.99f ? Vector3.forward : Vector3.up);
             }
 
-            // One ease for every state change - into the stretch, between poses, and back
-            // to round - so the deform never pops. Unscaled, to keep its snap in slow-mo.
             visual.localScale = Vector3.Lerp(visual.localScale, targetScale,
                 1f - Mathf.Exp(-easeSpeed * Time.unscaledDeltaTime));
         }
     }
 }
+
