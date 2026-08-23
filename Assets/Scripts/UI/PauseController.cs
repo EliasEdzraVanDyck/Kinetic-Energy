@@ -78,6 +78,24 @@ namespace KineticEnergy.UI
         void OnEnable()
         {
             pauseAction?.action?.Enable();
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+            // WEB ONLY: pause moves from Escape to backquote (the ` / ~ key right under
+            // it). Browsers own Escape - it exits fullscreen no matter what the page
+            // wants - so on the web the pause key must be one the browser leaves alone.
+            // A runtime binding OVERRIDE, not an asset edit: Windows builds and the
+            // editor keep Escape untouched.
+            if (pauseAction != null && pauseAction.action != null)
+            {
+                for (int i = 0; i < pauseAction.action.bindings.Count; i++)
+                {
+                    if (pauseAction.action.bindings[i].path.ToLowerInvariant().Contains("escape"))
+                    {
+                        pauseAction.action.ApplyBindingOverride(i, "<Keyboard>/backquote");
+                    }
+                }
+            }
+#endif
         }
 
         void OnDisable()
@@ -453,10 +471,21 @@ namespace KineticEnergy.UI
             LoadSceneByName(sceneName);
         }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // The web build's quit: Application.Quit is a no-op in a browser, so the button
+        // hands off to the page (see Assets/Plugins/WebGL/WebTab.jslib), which closes the
+        // tab where the browser permits it and shows a "you can close this tab" notice
+        // where it does not. Windows builds never contain this symbol.
+        [System.Runtime.InteropServices.DllImport("__Internal")]
+        static extern void CloseGameTab();
+#endif
+
         public void OnQuitClicked()
         {
 #if UNITY_EDITOR
             EditorApplication.isPlaying = false;
+#elif UNITY_WEBGL
+            CloseGameTab();
 #else
             Application.Quit();
 #endif

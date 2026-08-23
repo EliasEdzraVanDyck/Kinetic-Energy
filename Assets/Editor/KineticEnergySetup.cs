@@ -3989,6 +3989,47 @@ namespace KineticEnergy.EditorSetup
 
         // The itch.io build. Everything here is chosen for ONE requirement: it has to load
         // from a plain static host that sets no special headers.
+        // ItchBuild03: same proven settings as 02 (uncompressed for itch's headerless
+        // hosting, the ItchFullscreen template - now with the fullscreen-only gate).
+        [MenuItem("Tools/Kinetic Energy/Build WebGL ItchBuild03")]
+        public static void BuildWebGLItch03()
+        {
+            const string scene = "Assets/Scenes/LevelElementsTest3.unity";
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scene) == null)
+            {
+                throw new Exception("KineticEnergySetup: " + scene + " is missing.");
+            }
+
+            PlayerSettings.WebGL.template = "PROJECT:ItchFullscreen";
+            PlayerSettings.defaultWebScreenWidth = 1280;
+            PlayerSettings.defaultWebScreenHeight = 720;
+            PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
+            PlayerSettings.WebGL.decompressionFallback = false;
+            PlayerSettings.WebGL.dataCaching = true;
+            PlayerSettings.runInBackground = false;
+            PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
+
+            string output = "Builds/ItchBuild03";
+            var options = new BuildPlayerOptions
+            {
+                scenes = new[] { scene },
+                locationPathName = output,
+                target = BuildTarget.WebGL,
+                options = BuildOptions.None,
+            };
+
+            UnityEditor.Build.Reporting.BuildReport report = BuildPipeline.BuildPlayer(options);
+            UnityEditor.Build.Reporting.BuildSummary summary = report.summary;
+            Debug.Log("WEBBUILD result=" + summary.result
+                + " errors=" + summary.totalErrors
+                + " sizeMB=" + (summary.totalSize / (1024f * 1024f)).ToString("F1")
+                + " output=" + output);
+            if (summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
+            {
+                throw new Exception("KineticEnergySetup: ItchBuild03 did not succeed.");
+            }
+        }
+
         [MenuItem("Tools/Kinetic Energy/Build WebGL ItchBuild02")]
         public static void BuildWebGLItch02()
         {

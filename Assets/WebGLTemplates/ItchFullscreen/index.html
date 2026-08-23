@@ -17,11 +17,22 @@
         </div>
       </div>
       <div id="unity-warning"> </div>
-      <div id="unity-fullscreen-button">Fullscreen</div>
+      <!-- The FULLSCREEN GATE: the game is only playable fullscreen (the fullscreen
+           shader passes render wrong at embed size), so outside fullscreen this overlay
+           blocks all input and offers the one way in. -->
+      <div id="fullscreen-gate" style="position:absolute;inset:0;display:none;z-index:10;
+           background:rgba(0,0,0,0.82);color:#fff;font-family:system-ui,sans-serif;
+           display:flex;align-items:center;justify-content:center;flex-direction:column;
+           cursor:pointer;text-align:center;">
+        <div style="font-size:28px;margin-bottom:10px;">Click to play fullscreen</div>
+        <div style="font-size:14px;opacity:0.7;">This game runs in fullscreen only.</div>
+      </div>
     </div>
     <script>
       var canvas = document.querySelector("#unity-canvas");
-      var fullscreenButton = document.querySelector("#unity-fullscreen-button");
+      var fullscreenGate = document.querySelector("#fullscreen-gate");
+      var gameInstance = null;
+      fullscreenGate.style.display = "none"; // hidden until the game has loaded
 
       function unityShowBanner(msg, type) {
         var warningBanner = document.querySelector("#unity-warning");
@@ -64,36 +75,27 @@
         showBanner: unityShowBanner,
       };
 
-      // ESCAPE STAYS IN THE GAME.
-      // A browser reserves Escape to leave fullscreen, so on itch the pause key was
-      // quitting fullscreen instead of opening the menu. The Keyboard Lock API hands
-      // Escape to the page instead - it is only permitted while actually fullscreen
-      // and on a secure origin (itch.io is HTTPS), so it is requested on entering and
-      // released on leaving. Where it is unsupported the call simply fails and the old
-      // behaviour remains, which is why nothing here depends on it succeeding.
-      function lockEscapeKey() {
-        if (navigator.keyboard && navigator.keyboard.lock) {
-          navigator.keyboard.lock(["Escape"]).catch(function () { /* unsupported - ignore */ });
-        }
-      }
-
-      function releaseEscapeKey() {
-        if (navigator.keyboard && navigator.keyboard.unlock) {
-          navigator.keyboard.unlock();
-        }
-      }
+      // Escape is the BROWSER's key now: it exits fullscreen, and the gate catches the
+      // player on the way out. The game's pause key on the web is backquote (` / ~, set
+      // by a WebGL-only binding override in PauseController), so the old Keyboard Lock
+      // dance over Escape is gone with nothing to replace it.
 
       document.addEventListener("fullscreenchange", function () {
         if (document.fullscreenElement) {
-          lockEscapeKey();
-          fullscreenButton.style.display = "none";
+          fullscreenGate.style.display = "none";
+          // Fullscreen swaps the focused element in some browsers; without this the
+          // canvas stops receiving keys and the game looks frozen.
+          canvas.focus();
         } else {
-          releaseEscapeKey();
-          fullscreenButton.style.display = "";
+          // Out of fullscreen = out of play: the gate returns, input stops reaching
+          // the game (blur), and the only path forward is back through the gate.
+          fullscreenGate.style.display = "flex";
+          canvas.blur();
         }
-        // Fullscreen swaps the focused element in some browsers; without this the
-        // canvas stops receiving keys and the game looks frozen.
-        canvas.focus();
+      });
+
+      fullscreenGate.addEventListener("click", function () {
+        if (gameInstance) gameInstance.SetFullscreen(1);
       });
 
       // Keys only reach Unity while the canvas holds focus. In an itch iframe the page
@@ -110,13 +112,9 @@
           document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
         }).then((unityInstance) => {
           document.querySelector("#unity-loading-bar").style.display = "none";
-          canvas.focus();
-
-          fullscreenButton.onclick = () => {
-            unityInstance.SetFullscreen(1);
-            // SetFullscreen resolves asynchronously; the fullscreenchange handler above
-            // is what actually locks Escape once the browser has switched over.
-          };
+          gameInstance = unityInstance;
+          // Loaded but not yet fullscreen: the gate is the front door.
+          fullscreenGate.style.display = "flex";
         }).catch((message) => {
           // Shown ON the page, not in an alert: a failed load used to leave nothing but
           // the page background, which says nothing about what went wrong.

@@ -623,9 +623,14 @@ namespace KineticEnergy.Player
                 blurVolume.priority = 50f; // over the scene's authored volume
                 blurVolume.weight = 0f;
                 VolumeProfile profile = ScriptableObject.CreateInstance<VolumeProfile>();
+#if !UNITY_WEBGL || UNITY_EDITOR
+                // Motion blur rides motion vectors - an extra buffer WebGL2 handles badly
+                // and integrated GPUs pay dearly for. On the web the vignette carries the
+                // speed feel alone; everywhere else the blur joins it.
                 MotionBlur blur = profile.Add<MotionBlur>(true);
                 blur.intensity.Override(Mathf.Clamp01(blurIntensity));
                 blur.quality.Override(MotionBlurQuality.Medium);
+#endif
                 // The vignette rides the SAME volume weight, so the two arrive and leave
                 // as one effect: edges darken and pull in while the flight is fast.
                 if (speedVignette > 0.001f)
