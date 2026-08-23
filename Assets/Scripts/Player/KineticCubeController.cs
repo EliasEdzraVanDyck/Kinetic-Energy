@@ -2511,6 +2511,27 @@ namespace KineticEnergy.Player
         void OnCollisionStay(Collision collision)
         {
             DispatchHazardContact(collision);
+
+            // A launch fired while ALREADY touching an enemy has no Enter edge to ride:
+            // perched on a staggered flyer's weak spot, the pound never separated from the
+            // collider, so the kill branch (which lives in OnCollisionEnter) only ran when
+            // the stun wobble happened to break contact for a frame - the follow-up kill
+            // "didn't always work". A persistent contact during an active launch re-enters
+            // the full handler; the enemy branch consumes the launch on first handling
+            // (hasLaunched goes false), so this cannot double-fire.
+            //
+            // ONLY for a launch moving INTO the contact. Without the direction gate this
+            // also caught launches DEPARTING the perch - an up-launch off the weak spot
+            // was consumed by the branch on its first tick, still overlapping, before it
+            // had moved at all (direct report: could not launch upward off the spot).
+            if (hasLaunched && !isStuck && collision.contactCount > 0
+                && Vector3.Dot(velocityBeforePhysicsStep, collision.GetContact(0).normal) < -0.5f
+                && (collision.collider.GetComponentInParent<Enemy>() != null
+                    || collision.collider.GetComponentInParent<FlyingEnemy>() != null
+                    || collision.collider.GetComponentInParent<TurretEnemy>() != null))
+            {
+                OnCollisionEnter(collision);
+            }
         }
 
         void RegisterCrash(Vector3 contactNormal, float crashSpeed, Collider surface)
