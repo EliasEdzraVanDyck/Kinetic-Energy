@@ -113,6 +113,20 @@ Shader "Custom/URP/EdgeOutline"
                 float stepMag = max(abs(dA + dB - 2.0 * centre), abs(dC + dD - 2.0 * centre));
                 float stepEdge = stepMag * _DepthAbsSensitivity * farMask;
 
+                // GRAZING suppression. Eye depth across a plane is NOT linear in screen
+                // space - it is a reciprocal curve whose second difference grows with
+                // distance CUBED. Untreated, that painted the whole far floor black from
+                // a camera-fixed distance outward (the "smudge at the end of the level"
+                // that retreated as you advanced). Viewed face-on, a plane is depth-flat
+                // and the turret disc's step survives untouched; the mask only kills the
+                // term where the surface is seen edge-on, which is exactly where the
+                // false positives live.
+                float rawCentre = SampleSceneDepth(uv);
+                float3 worldPos = ComputeWorldSpacePosition(uv, rawCentre, UNITY_MATRIX_I_VP);
+                float3 viewDir = normalize(_WorldSpaceCameraPos - worldPos);
+                float facing = saturate(dot(SampleSceneNormals(uv), viewDir));
+                stepEdge *= smoothstep(0.15, 0.4, facing);
+
                 float edge = smoothstep(_Threshold, _Threshold * 2.0,
                     max(max(depthEdge, normalEdge), stepEdge));
 
@@ -121,7 +135,6 @@ Shader "Custom/URP/EdgeOutline"
                 // horizon edge (the damage floor's far rim - the smudge at the end of the
                 // level). An edge against the sky adds nothing: the silhouette against a
                 // bright sky is already the strongest contrast in the frame.
-                float rawCentre = SampleSceneDepth(uv);
                 #if UNITY_REVERSED_Z
                 float skyMask = step(0.000001, rawCentre);
                 #else

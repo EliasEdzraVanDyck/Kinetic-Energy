@@ -530,6 +530,33 @@ namespace KineticEnergy.Player
             }
         }
 
+        // Rides a surface WITHOUT being its child: position through the surface's own
+        // matrix (points transform correctly under any scale), rotation as a rigid delta.
+        // Parenting was the alternative, and under the floor's extreme non-uniform scale
+        // it smeared the rotated decal quad into a screen-wide sheet.
+        public class DecalFollower : MonoBehaviour
+        {
+            Transform target;
+            Vector3 localPoint;
+            Quaternion targetStartRotation;
+            Quaternion startRotation;
+
+            public void Bind(Transform surface)
+            {
+                target = surface;
+                localPoint = surface.InverseTransformPoint(transform.position);
+                targetStartRotation = surface.rotation;
+                startRotation = transform.rotation;
+            }
+
+            void LateUpdate()
+            {
+                if (target == null) { Destroy(gameObject); return; }
+                transform.position = target.TransformPoint(localPoint);
+                transform.rotation = target.rotation * Quaternion.Inverse(targetStartRotation) * startRotation;
+            }
+        }
+
         // Hitting something that HURTS is not an impact worth celebrating with debris -
         // the hit's own feedback (knockback, energy loss, the hazard's colour) carries it.
         bool CrashSurfaceDealsDamage()
@@ -688,10 +715,11 @@ namespace KineticEnergy.Player
             if (!crashDecals || crashDecalMaterial == null) return;
             Collider surface = controller.LastCrashSurface;
             if (surface == null) return;
-            // World geometry only: a mark makes no sense on a body that walks off or dies.
-            if (surface.GetComponentInParent<Enemy>() != null) return;
-            if (surface.GetComponentInParent<FlyingEnemy>() != null) return;
-            if (surface.GetComponentInParent<TurretEnemy>() != null) return;
+            // Same rule as the debris and the thud: no mark on enemies OR damage surfaces.
+            // Deaths on the hazard floor were stamping the splat at the death spot - a
+            // permanent dark smudge on the dark red, sitting at whichever place the level
+            // kills most (reported as "always at the end of the level").
+            if (CrashSurfaceDealsDamage()) return;
 
             Vector3 normal = controller.StuckSurfaceNormal.sqrMagnitude > 0.0001f
                 ? controller.StuckSurfaceNormal.normalized
@@ -710,7 +738,12 @@ namespace KineticEnergy.Player
                 Quaternion.AngleAxis(Random.Range(0f, 360f), normal) * Quaternion.LookRotation(-normal));
             float size = Mathf.Lerp(decalMinSize, decalMaxSize, Mathf.Clamp01(controller.ArrivalEnergySpent));
             decal.transform.localScale = new Vector3(size, size, 1f);
-            decal.transform.SetParent(surface.transform, true);
+            // NEVER parented: SetParent under a non-uniformly scaled surface cannot
+            // preserve a rotated child's world size - on the huge stretched floor the
+            // 2-unit splat smeared into a giant black sheet. A follower component tracks
+            // moving surfaces by matrix instead, which distorts nothing.
+            DecalFollower follower = decal.AddComponent<DecalFollower>();
+            follower.Bind(surface.transform);
 
             Renderer decalRenderer = decal.GetComponent<Renderer>();
             decalRenderer.sharedMaterial = crashDecalMaterial;
