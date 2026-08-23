@@ -2359,10 +2359,25 @@ namespace KineticEnergy.Player
                             if (flyerBody != null)
                             {
                                 float halfHeight = boxCollider != null ? boxCollider.bounds.extents.y : 0.5f;
+                                // Where the spot WILL sit after the stun lean lands - the
+                                // current bounds describe the pre-slump pose, which is why
+                                // the perch used to end up off-centre on the first pound.
+                                Vector3 spotCentre;
+                                float spotHalf;
+                                if (weakSpotFlyer != null && weakSpotFlyer.weakSpot != null)
+                                {
+                                    spotCentre = weakSpotFlyer.StunnedWeakSpotCentre();
+                                    spotHalf = weakSpotFlyer.WeakSpotHalfExtent();
+                                }
+                                else
+                                {
+                                    spotCentre = flyerBody.bounds.center;
+                                    spotHalf = flyerBody.bounds.extents.y;
+                                }
                                 Vector3 perch = new Vector3(
-                                    flyerBody.bounds.center.x,
-                                    flyerBody.bounds.max.y + halfHeight + 0.05f,
-                                    flyerBody.bounds.center.z);
+                                    spotCentre.x,
+                                    spotCentre.y + spotHalf + halfHeight + 0.05f,
+                                    spotCentre.z);
                                 transform.position = perch;
                                 rb.position = perch;
                                 RigidbodyInterpolation interpolationMode = rb.interpolation;

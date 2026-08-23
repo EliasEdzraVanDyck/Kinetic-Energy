@@ -89,6 +89,9 @@ namespace KineticEnergy.Level
         // Read by WeakSpotFlyingEnemy, which only widens its kill hitbox while staggered.
         public bool IsStunned => stunRemaining > 0f;
         Quaternion stunRotation = Quaternion.identity;
+        // The pose the stagger is ABOUT to slump into - read by the perch teleport, which
+        // fires before the next physics tick has actually applied the lean.
+        public Quaternion StunPose => stunRotation;
         float pauseRemaining;
         FlyerState state = FlyerState.Patrol;
         float stateTimer;

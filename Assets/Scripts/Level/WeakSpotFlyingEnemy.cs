@@ -89,6 +89,25 @@ namespace KineticEnergy.Level
             if (spotRenderer != null) spotRenderer.material.color = tierColor;
         }
 
+        // Where the weak spot's centre WILL BE once the stun lean has applied. The perch
+        // teleport runs in the same frame as the hit, but the 80-degree slump only lands
+        // on the next physics tick - perching on the CURRENT bounds put the player a spot
+        // radius off centre once the body tipped (direct report: first pound often missed,
+        // the retry - computed against the already-leaned pose - always killed).
+        public Vector3 StunnedWeakSpotCentre()
+        {
+            if (weakSpot == null) return transform.position;
+            Vector3 offsetNow = weakSpot.bounds.center - transform.position;
+            return transform.position + StunPose * (Quaternion.Inverse(transform.rotation) * offsetNow);
+        }
+
+        public float WeakSpotHalfExtent()
+        {
+            if (weakSpot == null) return 0.5f;
+            Vector3 extents = weakSpot.bounds.extents;
+            return Mathf.Max(extents.x, Mathf.Max(extents.y, extents.z));
+        }
+
         public override bool LaunchKillAllowedFor(Collider hitCollider)
         {
             if (weakSpot == null || hitCollider == null) return false;
