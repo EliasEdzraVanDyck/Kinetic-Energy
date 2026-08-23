@@ -163,18 +163,66 @@ namespace KineticEnergy.Player
         [Tooltip("Contrast on the spend-to-sound curve, like the rumble's: higher pushes cheap crashes toward the light end so the heavy end stands apart.")]
         public float crashSoundContrast = 1.5f;
 
+        [Tooltip("Flight whoosh pitch at FULL spend - below 1, the deeper roar of a big launch.")]
+        public float launchFullPitch = 0.85f;
+        [Tooltip("Flight whoosh pitch at ZERO spend - a light, quick swish.")]
+        public float launchLightPitch = 1.1f;
+        [Tooltip("Whoosh volume at zero spend.")]
+        [Range(0f, 1f)] public float launchLightVolume = 0.45f;
+        [Tooltip("Whoosh volume at full spend.")]
+        [Range(0f, 1f)] public float launchFullVolume = 1f;
+        [Tooltip("The launch BOOM: the thud sample fired as a one-shot cannon shot under the whoosh. 0 disables it.")]
+        [Range(0f, 1f)] public float launchBoomVolume = 0.9f;
+        [Tooltip("Spend at which the boom starts fading in. High on purpose: it reuses the CRASH sample, and below ~85% it read as the crash SFX firing midair at launch (direct report at >50%). The boom belongs to the big-launch identity, not to every decent shot.")]
+        [Range(0f, 1f)] public float launchBoomStartSpend = 0.85f;
+        [Tooltip("The 100% EXTRA: at a genuinely full-tank launch, a second boom lands two octaves down on top of everything - the overcharge tell. 0 disables it.")]
+        [Range(0f, 1f)] public float launchOverchargeVolume = 1f;
+
         AudioSource crashSource;
         AudioSource crashSubSource; // the octave-down layer needs its own pitch, hence its own source
+        float airborneSeconds;      // continuous air time - the grounded-edge thud's genuineness gate
+        float loopSourcePitch = 1f;  // the source's authored pitch/volume, restored whenever
+        float loopSourceVolume = 1f; // a non-launch clip takes the source back
         bool audioWasGrounded;
         float nextCrashSoundTime;
 
         void OnLaunchFired()
         {
-            if (!flyingSoundEnabled || playerSounds == null || flyingSound == null) return;
-            playerSounds.Stop();
-            playerSounds.loop = true;
-            playerSounds.clip = flyingSound;
-            playerSounds.Play();
+            if (playerSounds == null) return;
+
+            // The launch is scored like the crash: the same spend, the same three effects.
+            // The whoosh's pitch slides from a light swish down to a deep roar, its volume
+            // climbs, a cannon-shot boom joins above half spend - and a GENUINELY full tank
+            // lands one more boom two octaves down, the overcharge tell. A 100% launch
+            // should sound like the biggest thing the game does.
+            float spend = Mathf.Clamp01(controller.LastLaunchEnergySpent);
+            float weight = Mathf.Pow(spend, Mathf.Max(crashSoundContrast, 0.01f));
+
+            if (flyingSoundEnabled && flyingSound != null)
+            {
+                playerSounds.Stop();
+                playerSounds.loop = true;
+                playerSounds.clip = flyingSound;
+                playerSounds.pitch = Mathf.Lerp(launchLightPitch, launchFullPitch, weight);
+                playerSounds.volume = Mathf.Lerp(launchLightVolume, launchFullVolume, weight);
+                playerSounds.Play();
+            }
+
+            if (crashSource != null && crashSound != null)
+            {
+                float boom = launchBoomVolume
+                    * Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(launchBoomStartSpend, 1f, spend));
+                if (boom > 0.02f)
+                {
+                    crashSource.pitch = Mathf.Lerp(1.1f, 0.8f, weight);
+                    crashSource.PlayOneShot(crashSound, boom);
+                }
+                if (spend >= 0.999f && launchOverchargeVolume > 0.02f && crashSubSource != null)
+                {
+                    crashSubSource.pitch = 0.45f;
+                    crashSubSource.PlayOneShot(crashSound, launchOverchargeVolume);
+                }
+            }
         }
 
         void PlayCrashSound()
@@ -221,9 +269,13 @@ namespace KineticEnergy.Player
             }
 
             // A landing that arrives without RegisterCrash (walking off a ledge onto
-            // ground) still thuds - the grounded EDGE is the impact.
+            // ground) still thuds - the grounded EDGE is the impact. But only after a
+            // GENUINE stretch of air: the ground probe flickers when skimming ledges and
+            // riding descending platforms, and every one of those edges was a phantom
+            // midair thud.
             bool grounded = controller.IsGrounded;
-            if (grounded && !audioWasGrounded) PlayCrashSound();
+            if (grounded && !audioWasGrounded && airborneSeconds > 0.25f) PlayCrashSound();
+            airborneSeconds = grounded ? 0f : airborneSeconds + Time.deltaTime;
             audioWasGrounded = grounded;
 
             if (controller.IsAimingOrCharging)
@@ -241,6 +293,10 @@ namespace KineticEnergy.Player
                 else if (chargingSoundEnabled && chargingSound != null)
                 {
                     playerSounds.Stop();
+                    // The charge sounds play at the source's own settings - the launch's
+                    // spend-warped pitch and volume belong to the whoosh alone.
+                    playerSounds.pitch = loopSourcePitch;
+                    playerSounds.volume = loopSourceVolume;
                     playerSounds.clip = chargingSound;
                     playerSounds.loop = false;
                     playerSounds.Play();
@@ -416,6 +472,11 @@ namespace KineticEnergy.Player
             ApplyTrailShape();
 
             // The crash's own source: heavy pitch on this one never touches the loops.
+            if (playerSounds != null)
+            {
+                loopSourcePitch = playerSounds.pitch;
+                loopSourceVolume = playerSounds.volume;
+            }
             crashSource = gameObject.AddComponent<AudioSource>();
             crashSource.playOnAwake = false;
             if (playerSounds != null) crashSource.spatialBlend = playerSounds.spatialBlend;
@@ -478,7 +539,10 @@ namespace KineticEnergy.Player
             }
 
             SpawnCrashDecal();
-            PlayCrashSound();
+            // No thud for crashes INTO damage-dealers: bouncing off an enemy midair was
+            // playing the landing sound in the middle of the air. The hit's own feedback
+            // (knockback, energy loss) carries those - same rule as the debris.
+            if (!CrashSurfaceDealsDamage()) PlayCrashSound();
 
             if (crashDebris && !CrashSurfaceDealsDamage())
             {
