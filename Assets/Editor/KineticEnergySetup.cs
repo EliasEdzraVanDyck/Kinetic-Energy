@@ -2829,6 +2829,227 @@ namespace KineticEnergy.EditorSetup
             Debug.Log("KineticEnergySetup: trail speed lines tuned OK");
         }
 
+        // The shells get their own OPAQUE material back: sharing the beams' material meant
+        // the beam exemption (transparent surface, no outline) silently applied to the
+        // shells too - and the shells looked right in the outlined, opaque style.
+        [MenuItem("Tools/Kinetic Energy/Give Shells Own Material")]
+        public static void GiveShellsOwnMaterial()
+        {
+            Material shellMaterial = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/DamageShellMaterial.mat");
+            if (shellMaterial == null)
+            {
+                Material fresh = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                fresh.color = new Color(0.95f, 0.08f, 0.05f); // the laser red the shells wore
+                fresh.SetFloat("_Smoothness", 0f);
+                shellMaterial = SaveMaterialAsset(fresh, "DamageShellMaterial");
+            }
+
+            foreach (string scenePath in new[]
+            {
+                "Assets/Scenes/LevelElementsTest3.unity",
+                "Assets/Scenes/LevelElementsTest2.unity",
+                "Assets/Scenes/SecondLevel.unity",
+            })
+            {
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null) continue;
+                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+                int assigned = 0;
+                foreach (Transform t in UnityEngine.Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (!t.name.StartsWith("DamageShell")) continue;
+                    Renderer shellRenderer = t.GetComponent<Renderer>();
+                    if (shellRenderer == null) continue;
+                    shellRenderer.sharedMaterial = shellMaterial;
+                    EditorUtility.SetDirty(t.gameObject);
+                    assigned++;
+                }
+                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                EditorSceneManager.SaveOpenScenes();
+                Debug.Log("KineticEnergySetup: " + scenePath + " - " + assigned + " shells on their own material");
+            }
+            AssetDatabase.SaveAssets();
+        }
+
+        // The definitive outline exemption: the aim visuals and the laser red become
+        // TRANSPARENT-surface materials (alpha stays 1 - they look identical). Transparent
+        // surfaces never write the depth or normals buffers the edge detect reads, so the
+        // exemption holds regardless of how URP sources its depth texture - the layer mask
+        // alone did not stop opaque depth-writers reaching it through the depth copy.
+        [MenuItem("Tools/Kinetic Energy/Exempt Visual Materials From Outline")]
+        public static void ExemptVisualMaterialsFromOutline()
+        {
+            foreach (string materialName in new[] { "PreviewSolidMaterial", "AimArrowMaterial", "LaserBeamMaterial" })
+            {
+                Material material = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/" + materialName + ".mat");
+                if (material == null) { Debug.LogWarning("KineticEnergySetup: " + materialName + " missing"); continue; }
+                material.SetFloat("_Surface", 1f);
+                material.SetFloat("_Blend", 0f);
+                material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                material.SetInt("_ZWrite", 0);
+                material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                material.SetOverrideTag("RenderType", "Transparent");
+                material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+                EditorUtility.SetDirty(material);
+                Debug.Log("KineticEnergySetup: " + materialName + " now transparent-surface (outline-exempt)");
+            }
+            AssetDatabase.SaveAssets();
+        }
+
+        // The NoOutline layer: objects on it are excluded from the depth/normals PREPASS
+        // (the renderer's prepass layer mask), which is the buffer the edge-detect pass
+        // reads - so they render normally but grow no black rim. Applied to the aim
+        // visuals, the debris, the laser BEAMS (columns stay outlined - they are landable
+        // geometry) and, in code, the enemy projectiles.
+        [MenuItem("Tools/Kinetic Energy/Setup NoOutline Layer")]
+        public static void SetupNoOutlineLayer()
+        {
+            // 1. The layer itself, in the first empty user slot.
+            var tagManager = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset")[0]);
+            SerializedProperty layers = tagManager.FindProperty("layers");
+            int layerIndex = -1;
+            for (int i = 8; i < layers.arraySize; i++)
+            {
+                string current = layers.GetArrayElementAtIndex(i).stringValue;
+                if (current == "NoOutline") { layerIndex = i; break; }
+                if (string.IsNullOrEmpty(current) && layerIndex < 0) layerIndex = i;
+            }
+            if (layerIndex < 0) throw new Exception("KineticEnergySetup: no free layer slot.");
+            layers.GetArrayElementAtIndex(layerIndex).stringValue = "NoOutline";
+            tagManager.ApplyModifiedPropertiesWithoutUndo();
+
+            // 2. Both renderers' prepass masks drop the layer.
+            foreach (string rendererPath in new[] { "Assets/Settings/PC_Renderer.asset", "Assets/Settings/Mobile_Renderer.asset" })
+            {
+                var data = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.ScriptableRendererData>(rendererPath);
+                if (data == null) continue;
+                var so = new SerializedObject(data);
+                SerializedProperty mask = so.FindProperty("m_PrepassLayerMask.m_Bits");
+                mask.longValue = unchecked((uint)~(1 << layerIndex));
+                so.ApplyModifiedPropertiesWithoutUndo();
+                EditorUtility.SetDirty(data);
+            }
+
+            // 3. The prefab subtrees.
+            void SetSubtree(Transform t)
+            {
+                foreach (Transform child in t.GetComponentsInChildren<Transform>(true)) child.gameObject.layer = layerIndex;
+            }
+            string playerPath = PrefabFolder + "/Player.prefab";
+            GameObject player = PrefabUtility.LoadPrefabContents(playerPath);
+            try
+            {
+                int marked = 0;
+                foreach (string name in new[] { "Trails", "Circle", "Crosshair", "AimArrow", "Debris", "Dust" })
+                {
+                    Transform t = FindDeep(player.transform, name);
+                    if (t != null) { SetSubtree(t); marked++; }
+                    else Debug.LogWarning("KineticEnergySetup: player child '" + name + "' not found for NoOutline.");
+                }
+                PrefabUtility.SaveAsPrefabAsset(player, playerPath);
+                Debug.Log("KineticEnergySetup: NoOutline on " + marked + " player subtrees");
+            }
+            finally { PrefabUtility.UnloadPrefabContents(player); }
+
+            string gatePath = PrefabFolder + "/LaserGate.prefab";
+            GameObject gate = PrefabUtility.LoadPrefabContents(gatePath);
+            try
+            {
+                Transform beams = FindDeep(gate.transform, "Beams");
+                if (beams != null) { SetSubtree(beams); PrefabUtility.SaveAsPrefabAsset(gate, gatePath); }
+                Debug.Log("KineticEnergySetup: NoOutline on laser beams=" + (beams != null));
+            }
+            finally { PrefabUtility.UnloadPrefabContents(gate); }
+
+            AssetDatabase.SaveAssets();
+            Debug.Log("KineticEnergySetup: NoOutline layer is index " + layerIndex);
+        }
+
+        // The black outline pass: a fullscreen depth+normals edge detect, added to both
+        // renderer assets as a FullScreenPass feature. Catches every object's silhouette
+        // AND interior creases, current and future alike, without touching a single
+        // material. Idempotent - re-running finds the existing feature and re-points it.
+        [MenuItem("Tools/Kinetic Energy/Add Edge Outline Feature")]
+        public static void AddEdgeOutlineFeature()
+        {
+            Shader shader = Shader.Find("Custom/URP/EdgeOutline");
+            if (shader == null) throw new Exception("KineticEnergySetup: EdgeOutline shader failed to compile or import.");
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(MaterialFolder + "/EdgeOutlineMaterial.mat");
+            if (material == null) material = SaveMaterialAsset(new Material(shader), "EdgeOutlineMaterial");
+
+            foreach (string rendererPath in new[] { "Assets/Settings/PC_Renderer.asset", "Assets/Settings/Mobile_Renderer.asset" })
+            {
+                var data = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.ScriptableRendererData>(rendererPath);
+                if (data == null) { Debug.LogWarning("KineticEnergySetup: " + rendererPath + " missing"); continue; }
+
+                UnityEngine.Rendering.Universal.FullScreenPassRendererFeature feature = null;
+                foreach (var existing in data.rendererFeatures)
+                {
+                    if (existing is UnityEngine.Rendering.Universal.FullScreenPassRendererFeature f
+                        && existing.name == "EdgeOutline") feature = f;
+                }
+                if (feature == null)
+                {
+                    feature = ScriptableObject.CreateInstance<UnityEngine.Rendering.Universal.FullScreenPassRendererFeature>();
+                    feature.name = "EdgeOutline";
+                    AssetDatabase.AddObjectToAsset(feature, data);
+                    data.rendererFeatures.Add(feature);
+                }
+                feature.passMaterial = material;
+                // BEFORE post-processing, so bloom and the vignette composite over clean
+                // lines instead of the lines cutting through them.
+                feature.injectionPoint = UnityEngine.Rendering.Universal.FullScreenPassRendererFeature.InjectionPoint.BeforeRenderingPostProcessing;
+                feature.requirements = UnityEngine.Rendering.Universal.ScriptableRenderPassInput.Depth
+                    | UnityEngine.Rendering.Universal.ScriptableRenderPassInput.Normal;
+                feature.fetchColorBuffer = true; // the shader reads the scene through _BlitTexture
+                EditorUtility.SetDirty(feature);
+                EditorUtility.SetDirty(data);
+                Debug.Log("KineticEnergySetup: edge outline wired into " + rendererPath);
+            }
+
+            // The map repair MUST follow any scripted feature add: URP validates
+            // m_RendererFeatures against m_RendererFeatureMap (each feature's local file
+            // id) and silently SKIPS unmapped features - the outline was wired, serialized
+            // and invisible. Editor validation rebuilds the map on inspection; batch mode
+            // never inspects, so it is rebuilt here by hand.
+            foreach (string rendererPath in new[] { "Assets/Settings/PC_Renderer.asset", "Assets/Settings/Mobile_Renderer.asset" })
+            {
+                var data = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.ScriptableRendererData>(rendererPath);
+                if (data == null) continue;
+                var so = new SerializedObject(data);
+                SerializedProperty features = so.FindProperty("m_RendererFeatures");
+                SerializedProperty map = so.FindProperty("m_RendererFeatureMap");
+                map.arraySize = features.arraySize;
+                for (int i = 0; i < features.arraySize; i++)
+                {
+                    UnityEngine.Object featureObject = features.GetArrayElementAtIndex(i).objectReferenceValue;
+                    long localId = 0;
+                    if (featureObject != null)
+                    {
+                        AssetDatabase.TryGetGUIDAndLocalFileIdentifier(featureObject, out _, out localId);
+                    }
+                    map.GetArrayElementAtIndex(i).longValue = localId;
+                }
+                so.ApplyModifiedPropertiesWithoutUndo();
+                EditorUtility.SetDirty(data);
+                Debug.Log("KineticEnergySetup: feature map repaired for " + rendererPath
+                    + " (" + features.arraySize + " features)");
+            }
+
+            // The pass samples the depth texture - both quality tiers must produce one.
+            foreach (string rpPath in new[] { "Assets/Settings/PC_RPAsset.asset", "Assets/Settings/Mobile_RPAsset.asset" })
+            {
+                var rp = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset>(rpPath);
+                if (rp != null && !rp.supportsCameraDepthTexture)
+                {
+                    rp.supportsCameraDepthTexture = true;
+                    EditorUtility.SetDirty(rp);
+                    Debug.Log("KineticEnergySetup: depth texture enabled on " + rpPath);
+                }
+            }
+            AssetDatabase.SaveAssets();
+        }
+
         // Normalizes the hurt clip: the source mp3 is mastered QUIET (its peak sits well
         // under full scale), and no volume slider can push a source past 1 - so the
         // loudness has to be baked into the asset. Peak-normalized to 0.98 and wired.

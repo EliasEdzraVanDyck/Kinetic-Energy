@@ -40,6 +40,10 @@ namespace KineticEnergy.Level
 
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             go.name = "EnemyProjectile";
+            // Kept out of the depth/normals prepass, so the edge-outline pass never draws
+            // on it - a fast small capsule under a black rim read as visual noise.
+            int noOutline = LayerMask.NameToLayer("NoOutline");
+            if (noOutline >= 0) go.layer = noOutline;
             go.transform.localScale = bodyScale;
             go.transform.position = origin;
             // The capsule primitive's long axis is local Y - point it along the flight.

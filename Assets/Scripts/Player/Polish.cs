@@ -87,6 +87,20 @@ namespace KineticEnergy.Player
         float blurWeight;
         bool isFlying; // computed once per frame by the blur gate, shared by the shakes
 
+        [Header("Outline Fade")]
+        [Tooltip("Outline strength WHILE FLYING (1 = full). With the camera trailing a launch the player shrinks to a handful of pixels, and even a thin outset ring dwarfs a ball that small - the whole outline dims for the flight and returns on arrival.")]
+        [Range(0f, 1f)] public float launchOutlineFade = 0.2f;
+        [Tooltip("How quickly the outline dims and returns (bigger = snappier).")]
+        public float outlineFadeEaseSpeed = 6f;
+        float outlineFade = 1f;
+
+        void UpdateOutlineFade()
+        {
+            outlineFade = Mathf.Lerp(outlineFade, isFlying ? launchOutlineFade : 1f,
+                1f - Mathf.Exp(-outlineFadeEaseSpeed * Time.unscaledDeltaTime));
+            Shader.SetGlobalFloat("_OutlineGlobalFade", outlineFade);
+        }
+
         [Header("Screen Shake")]
         [Tooltip("Kick the camera on every crash - both axes, camera-relative, decaying over the duration.")]
         public bool crashShake = true;
@@ -790,6 +804,7 @@ namespace KineticEnergy.Player
         {
             StopRumbleWhenDone();
             UpdateSpeedBlur();
+            UpdateOutlineFade();
             ApplyScreenShake();
             if (controller != null) UpdateScreenspaceTrail();
             if (controller != null) UpdateMotionTrail();
