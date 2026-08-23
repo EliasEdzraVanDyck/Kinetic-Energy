@@ -219,6 +219,11 @@ namespace KineticEnergy.Player
             if (turret != null) return projectedSpend >= turret.minKillEnergyFraction - 0.0001f;
             if (landing.GetComponentInParent<DamageWalls>() != null) return false;
             if (landing.GetComponentInParent<DeathWall>() != null) return false;
+            // Hazard faces judged BEFORE the sticky rule: the rotating walls' damage edges
+            // are children of a StickySurface wall, and the parent lookup painted them as
+            // safe green landings. A shove-and-drain face is a failed landing wherever it
+            // hangs.
+            if (landing.GetComponent<LaserHazard>() != null) return false;
             if (landing.GetComponentInParent<StickySurface>() != null) return true;
             // No sticky component: only the up-facing side is a landing - the one where
             // you end up grounded. Any true side face drops you.

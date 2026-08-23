@@ -44,7 +44,12 @@ namespace KineticEnergy.Level
             TryHit(other);
         }
 
-        void TryHit(Collider other)
+        // PUBLIC because the player dispatches hits here too: on a slab that is part of a
+        // COMPOUND rigidbody (the rotating walls' damage edges - the wall root carries the
+        // Rigidbody), Unity delivers collision messages to the root, so the handlers below
+        // never fire. The player's own OnCollisionEnter always fires, and calls in through
+        // this. retriggerDelay makes the double delivery on ordinary slabs harmless.
+        public void TryHit(Collider other)
         {
             if (Time.unscaledTime < nextHitTime) return;
             KineticCubeController player = other.GetComponent<KineticCubeController>();

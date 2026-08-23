@@ -2263,6 +2263,7 @@ namespace KineticEnergy.Player
 
         void OnCollisionEnter(Collision collision)
         {
+            DispatchHazardContact(collision);
             // RestartWall reloads the level on any touch - checked before every guard so a
             // grounded walk-in restarts as reliably as a mid-flight crash.
             if (collision.collider.GetComponentInParent<RestartWall>() != null)
@@ -2482,6 +2483,24 @@ namespace KineticEnergy.Player
             }
         }
 
+        // The player-side hazard dispatch: a LaserHazard slab inside a COMPOUND rigidbody
+        // (the rotating walls' edges) never receives its own collision messages - Unity
+        // sends them to the rigidbody root. The player's messages always arrive, so the
+        // hit is delivered from HERE; the hazard's own retrigger delay absorbs the double
+        // delivery on ordinary standalone slabs.
+        void DispatchHazardContact(Collision collision)
+        {
+            LaserHazard hazard = collision.collider.GetComponent<LaserHazard>();
+            if (hazard != null) hazard.TryHit(boxCollider);
+        }
+
+        // Grinding along a hazard edge produces only Stay contacts after the first frame -
+        // this keeps the re-hits coming at the hazard's own retrigger rhythm.
+        void OnCollisionStay(Collision collision)
+        {
+            DispatchHazardContact(collision);
+        }
+
         void RegisterCrash(Vector3 contactNormal, float crashSpeed, Collider surface)
         {
             // A NonStickSurface never registers as a crash at all - no freeze, no refund;
@@ -2540,7 +2559,13 @@ namespace KineticEnergy.Player
             else if (Vector3.Dot(contactNormal, Vector3.up) < flatGroundStickThreshold)
             {
                 StickySurface stickySurface = surface != null ? surface.GetComponentInParent<StickySurface>() : null;
-                if (stickySurface == null || !stickySurface.sticky)
+                // A HAZARD face never inherits its parent's stickiness: the rotating walls'
+                // damage edges are children of a StickySurface wall, and the parent lookup
+                // made the player crash-stick PERMANENTLY to the edge - the stuck pin then
+                // ate the hazard's knockback every tick, so the edges read as broken. The
+                // brief cling keeps them behaving exactly like the turret walls' shells.
+                bool hazardFace = surface != null && surface.GetComponent<LaserHazard>() != null;
+                if (hazardFace || stickySurface == null || !stickySurface.sticky)
                 {
                     nonStickyReleaseTimer = nonStickyWallStickDuration;
                 }
