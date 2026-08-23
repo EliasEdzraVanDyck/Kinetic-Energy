@@ -181,10 +181,16 @@ namespace KineticEnergy.Player
         [Range(0f, 1f)] public float chargeLoopStartVolume = 0.25f;
         [Tooltip("The loop's MAXIMUM volume, as a fraction of the audio source's own - the ceiling the swell rises to. 0.7 = 30% under the source's authored level.")]
         [Range(0f, 1f)] public float chargeLoopMaxVolume = 0.7f;
+        [Tooltip("The tick when the charge crosses a 20% band boundary - the audible counterpart of the meter's colour change.")]
+        public bool energyClickEnabled = true;
+        public AudioClip energyClickSound;
+        [Tooltip("The click's loudness relative to the charge loop's volume AT THAT MOMENT. 1.5 = half again as loud as the hum it interrupts.")]
+        public float energyClickVolumeScale = 1.5f;
 
         AudioSource crashSource;
         AudioSource crashSubSource; // the octave-down layer needs its own pitch, hence its own source
         float chargeLoopStartTime;  // the swell's clock
+        int lastChargeBand = -1;    // which 20% band the charge sat in last frame (-1 = not charging)
         float airborneSeconds;      // continuous air time - the grounded-edge thud's genuineness gate
         float loopSourcePitch = 1f;  // the source's authored pitch/volume, restored whenever
         float loopSourceVolume = 1f; // a non-launch clip takes the source back
@@ -307,10 +313,29 @@ namespace KineticEnergy.Player
                     / Mathf.Max(chargeLoopRampSeconds, 0.01f));
                 playerSounds.volume = loopSourceVolume * chargeLoopMaxVolume
                     * Mathf.Lerp(chargeLoopStartVolume, 1f, swell);
+
+                // The band tick: every 20% boundary the charge crosses - the moment the
+                // meter's gradient changes colour - clicks, 20% louder than the loop is
+                // humming RIGHT NOW, so it pokes above the swell wherever it happens.
+                // Both directions: dialling energy back down re-crosses the boundary and
+                // the colour changes again.
+                int band = Mathf.Clamp(Mathf.FloorToInt(controller.ProjectedLaunchSpend / 0.2f), 0, 5);
+                if (lastChargeBand >= 0 && band != lastChargeBand
+                    && energyClickEnabled && energyClickSound != null && crashSource != null)
+                {
+                    crashSource.pitch = 1f;
+                    crashSource.PlayOneShot(energyClickSound,
+                        Mathf.Clamp01(playerSounds.volume * energyClickVolumeScale));
+                }
+                lastChargeBand = band;
             }
-            else if (playerSounds.isPlaying && playerSounds.clip == chargingLoopSound)
+            else
             {
-                playerSounds.Stop(); // the aim closed - however it closed
+                lastChargeBand = -1; // a fresh aim never clicks for the band it OPENS in
+                if (playerSounds.isPlaying && playerSounds.clip == chargingLoopSound)
+                {
+                    playerSounds.Stop(); // the aim closed - however it closed
+                }
             }
         }
 

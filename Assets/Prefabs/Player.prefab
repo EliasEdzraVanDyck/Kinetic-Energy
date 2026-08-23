@@ -5008,8 +5008,6 @@ MonoBehaviour:
   playerSounds: {fileID: 2049351145183922922}
   flyingSoundEnabled: 1
   flyingSound: {fileID: 8300000, guid: 78cf081f30aae61439e996ff63afdcc1, type: 3}
-  chargingSoundEnabled: 1
-  chargingSound: {fileID: 8300000, guid: e62fccd53101e6b43bfb273535862e4b, type: 3}
   chargeLoopSoundEnabled: 1
   chargingLoopSound: {fileID: 8300000, guid: b2ebb0710cef9864ab65fd6ec80ed9aa, type: 3}
   crashSoundEnabled: 1
@@ -5027,6 +5025,12 @@ MonoBehaviour:
   launchBoomVolume: 0.9
   launchBoomStartSpend: 0.85
   launchOverchargeVolume: 1
+  chargeLoopRampSeconds: 2
+  chargeLoopStartVolume: 0.25
+  chargeLoopMaxVolume: 0.7
+  energyClickEnabled: 1
+  energyClickSound: {fileID: 8300000, guid: 5e119ef94116627438472397e9b16c9d, type: 3}
+  energyClickVolumeScale: 1.5
   motionTrail: {fileID: 7801135997219884100}
   trailStartWidth: 0.5
   trailSeconds: 0.3

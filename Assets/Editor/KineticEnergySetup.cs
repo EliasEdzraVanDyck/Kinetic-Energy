@@ -2884,8 +2884,11 @@ namespace KineticEnergy.EditorSetup
                 // clips its old fields referenced (mapped by guid before the fields went).
                 polish.playerSounds = root.GetComponentInChildren<AudioSource>(true);
                 polish.flyingSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Whoosh.mp3");
-                polish.chargingLoopSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/ChargeLoop.wav");
+                // The BAKED laser loop, not the old ChargeLoop.wav - this wiring ran again
+                // after the bake and silently reverted the clip once already.
+                polish.chargingLoopSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/LaserChargingLoop.wav");
                 polish.crashSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Thud.wav");
+                polish.energyClickSound = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/EnergyClick.wav");
 
                 // The world-space ribbon behind the player. TWO children are named
                 // "Trail", so the one actually CARRYING a TrailRenderer is the anchor -
